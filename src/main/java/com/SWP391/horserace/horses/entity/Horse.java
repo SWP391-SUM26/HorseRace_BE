@@ -1,0 +1,91 @@
+package com.SWP391.horserace.horses.entity;
+
+import com.SWP391.horserace.users.entity.User;
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.UUID;
+
+/** Maps the {@code horse} table. */
+@Entity
+@Table(name = "horse")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Horse {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(name = "horse_id", updatable = false, nullable = false)
+    private UUID horseId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_user_id")
+    private User owner;
+
+    @Column(name = "horse_code", nullable = false, unique = true, length = 50)
+    private String horseCode;
+
+    @Column(name = "name", nullable = false)
+    private String name;
+
+    @Column(name = "microchip_no", unique = true, length = 100)
+    private String microchipNo;
+
+    /** MALE | FEMALE | GELDING */
+    @Column(name = "gender", length = 30)
+    private String gender;
+
+    @Column(name = "breed", length = 100)
+    private String breed;
+
+    @Column(name = "color", length = 100)
+    private String color;
+
+    @Column(name = "date_of_birth")
+    private LocalDate dateOfBirth;
+
+    @Column(name = "weight", precision = 6, scale = 2)
+    private BigDecimal weight;
+
+    @Column(name = "origin_country", length = 100)
+    private String originCountry;
+
+    /** HEALTHY | INJURED | QUARANTINE | UNFIT */
+    @Column(name = "health_status", length = 50)
+    private String healthStatus;
+
+    @Column(name = "registration_status", length = 50)
+    private String registrationStatus;
+
+    /** ACTIVE | RETIRED | INACTIVE */
+    @Column(name = "status", nullable = false, length = 50)
+    @Builder.Default
+    private String status = "ACTIVE";
+
+    @CreationTimestamp
+    @Column(name = "created_at", updatable = false, nullable = false)
+    private OffsetDateTime createdAt;
+
+    @UpdateTimestamp
+    @Column(name = "updated_at", nullable = false)
+    private OffsetDateTime updatedAt;
+
+    @Column(name = "is_deleted", nullable = false)
+    @Builder.Default
+    private boolean deleted = false;
+
+    @Column(name = "deleted_at")
+    private OffsetDateTime deletedAt;
+}
