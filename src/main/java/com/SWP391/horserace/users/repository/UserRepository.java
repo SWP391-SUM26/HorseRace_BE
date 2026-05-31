@@ -20,5 +20,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     /** Handy for auth/registration later. */
     Optional<User> findByEmail(String email);
 
+    /** Login lookup — active accounts only. */
+    Optional<User> findByEmailAndDeletedFalse(String email);
+
     boolean existsByEmail(String email);
 }
