@@ -40,6 +40,11 @@ docker-compose up -d
 
 API base path: `/api/v1/...` (e.g. `GET /api/v1/users`, `GET /api/v1/users/{id}`).
 
+API docs (springdoc-openapi): **Swagger UI** at `http://localhost:8080/swagger-ui.html`,
+OpenAPI JSON at `/v3/api-docs`. A JWT bearer scheme is registered (`OpenApiConfig`) — use the
+**Authorize** button with an access token from `POST /api/v1/auth/login`. Swagger paths are
+permitted in `SecurityConfig`.
+
 ## Project Structure (package-by-feature)
 
 ```
@@ -109,7 +114,24 @@ The **users** module is the reference vertical slice, fully aligned to `app_user
 (`GET /api/v1/users`, `GET /api/v1/users/{id}`). A minimal **roles** module (`Role` entity +
 `RoleRepository`) backs the FK. **Copy this slice** when building new domains.
 
-Security/JWT dependencies are present but auth is **not yet wired up**. The other ~19 domain
-tables in `schema_v2.sql` (horse, tournament, race, registration, entry, assignments, result,
-prediction, wallet, payout, prize, …) have **no entities/repositories/services** yet — backlog
-to build one feature module at a time, following the `users/` pattern.
+**Authentication is implemented** (stateless JWT + DB-stored rotating refresh tokens):
+- Modules: `auth/` (controller/service/dto/entity/repository/config) and `security/`
+  (`SecurityConfig`, `JwtAuthenticationFilter`, `JwtAuthEntryPoint`, `RestAccessDeniedHandler`).
+- Endpoints (all public): `POST /api/v1/auth/login` (email+password), `POST /auth/google`
+  (Google ID token), `POST /auth/refresh` (rotates the refresh token), `POST /auth/logout`.
+- **Access token**: signed HS256 JWT (`JwtService`), 15-min TTL, carries `sub`(userId)/`email`/`role`.
+- **Refresh token**: opaque random, only its SHA-256 hash stored in the `refresh_token` table
+  (added to `schema_v2.sql`); rotated on every `/refresh`, with reuse-detection that revokes all
+  of a user's tokens (`RefreshTokenService`).
+- **Password**: `DelegatingPasswordEncoder` — verifies seeded `{noop}` passwords AND new `{bcrypt}` ones.
+- **Google sign-in**: `GoogleTokenVerifier` validates the ID token via Google's tokeninfo endpoint
+  (no extra dependency); first-time users are auto-provisioned with the `SPECTATOR` role.
+- **All non-`/auth/**` endpoints now require `Authorization: Bearer <accessToken>`.**
+- Config in `application.properties`: `app.jwt.*` (override secret via `APP_JWT_SECRET`) and
+  `app.google.client-id` (set `APP_GOOGLE_CLIENT_ID`). `@EnableMethodSecurity` is on, so
+  `@PreAuthorize("hasRole('ADMIN')")` works on controllers/services.
+
+The other ~19 domain tables in `schema_v2.sql` (horse, tournament, race, registration, entry,
+assignments, result, prediction, wallet, payout, prize, …) have entities only — **no
+repositories/services/controllers yet** — backlog to build one feature module at a time,
+following the `users/` pattern.
