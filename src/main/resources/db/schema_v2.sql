@@ -22,6 +22,7 @@
 -- CLEAN SLATE  (makes this script safe to re-run)
 -- CASCADE also removes dependent foreign keys and indexes.
 -- =========================================================
+DROP TABLE IF EXISTS refresh_token            CASCADE;
 DROP TABLE IF EXISTS notification             CASCADE;
 DROP TABLE IF EXISTS audit_log                CASCADE;
 DROP TABLE IF EXISTS attachment               CASCADE;
@@ -79,6 +80,22 @@ CREATE TABLE app_user (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_deleted    BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at    TIMESTAMPTZ
+);
+
+-- =========================================================
+-- REFRESH TOKEN  (DB-stored, rotated, revocable)
+-- Stores only a HASH of the opaque refresh token, never the raw value.
+-- =========================================================
+CREATE TABLE refresh_token (
+    token_id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id              UUID NOT NULL REFERENCES app_user(user_id),
+    token_hash           VARCHAR(255) NOT NULL UNIQUE,
+    expires_at           TIMESTAMPTZ NOT NULL,
+    revoked              BOOLEAN NOT NULL DEFAULT FALSE,
+    revoked_at           TIMESTAMPTZ,
+    replaced_by_token_id UUID,
+    user_agent           VARCHAR(255),
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
@@ -478,6 +495,7 @@ CREATE INDEX idx_payment_transaction_status   ON payment_transaction(payment_sta
 CREATE INDEX idx_audit_log_race_id            ON audit_log(race_id);
 CREATE INDEX idx_audit_log_entity             ON audit_log(entity_type, entity_id);
 CREATE INDEX idx_notification_recipient       ON notification(recipient_user_id);
+CREATE INDEX idx_refresh_token_user_id ON refresh_token(user_id);
 
 -- =========================================================
 -- END  --  V2 (schema-only)
