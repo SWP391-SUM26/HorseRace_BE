@@ -1,6 +1,8 @@
 package com.SWP391.horserace.auth.service.impl;
 
 import com.SWP391.horserace.auth.dto.AuthResponse;
+import com.SWP391.horserace.auth.dto.RegisterRequest;
+import com.SWP391.horserace.auth.dto.RegisterResponse;
 import com.SWP391.horserace.auth.service.AuthService;
 import com.SWP391.horserace.auth.service.GoogleTokenVerifier;
 import com.SWP391.horserace.auth.service.GoogleTokenVerifier.GooglePrincipal;
@@ -72,6 +74,38 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public void logout(String rawRefreshToken) {
         refreshTokenService.revoke(rawRefreshToken);
+    }
+
+    @Override
+    @Transactional
+    public RegisterResponse register(RegisterRequest request) {
+        if (userRepository.existsByEmail(request.email())) {
+            throw new AppException(ErrorCode.USER_EXISTED);
+        }
+
+        Role role = roleRepository.findByRoleCode("SPECTATOR")
+                .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
+
+        User user = User.builder()
+                .role(role)
+                .userCode("USR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                .fullName(request.fullName().trim())
+                .email(request.email().toLowerCase().trim())
+                .phone(request.phone())
+                .passwordHash(passwordEncoder.encode(request.password()))
+                .status(UserStatus.ACTIVE)
+                .kycStatus(KycStatus.PENDING)
+                .build();
+
+        userRepository.save(user);
+
+        return RegisterResponse.builder()
+                .userId(user.getUserId())
+                .userCode(user.getUserCode())
+                .fullName(user.getFullName())
+                .email(user.getEmail())
+                .role(role.getRoleCode())
+                .build();
     }
 
     // ---- helpers ----

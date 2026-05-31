@@ -7,6 +7,10 @@ import com.SWP391.horserace.auth.dto.LogoutRequest;
 import com.SWP391.horserace.auth.dto.RefreshRequest;
 import com.SWP391.horserace.auth.service.AuthService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
+import com.SWP391.horserace.auth.dto.RegisterRequest;
+import com.SWP391.horserace.auth.dto.RegisterResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +56,17 @@ public class AuthController {
     public ApiResponse<Void> logout(@Valid @RequestBody LogoutRequest request) {
         authService.logout(request.refreshToken());
         return ApiResponse.<Void>builder().success(true).message("Logged out").build();
+    }
+
+    @PostMapping("/register")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<RegisterResponse> register(@Valid @RequestBody RegisterRequest request) {
+        RegisterResponse data = authService.register(request);
+        return ApiResponse.<RegisterResponse>builder()
+                .success(true)
+                .message("Registration successful")
+                .data(data)
+                .build();
     }
 
     private String userAgent(HttpServletRequest request) {
