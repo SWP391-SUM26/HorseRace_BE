@@ -5,15 +5,20 @@ import com.SWP391.horserace.auth.dto.GoogleLoginRequest;
 import com.SWP391.horserace.auth.dto.LoginRequest;
 import com.SWP391.horserace.auth.dto.LogoutRequest;
 import com.SWP391.horserace.auth.dto.RefreshRequest;
+import com.SWP391.horserace.auth.dto.RegisterJockeyRequest;
+import com.SWP391.horserace.auth.dto.RegisterOwnerRequest;
+import com.SWP391.horserace.auth.dto.RegisterSpectatorRequest;
 import com.SWP391.horserace.auth.service.AuthService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -52,6 +57,61 @@ public class AuthController {
     public ApiResponse<Void> logout(@Valid @RequestBody LogoutRequest request) {
         authService.logout(request.refreshToken());
         return ApiResponse.<Void>builder().success(true).message("Logged out").build();
+    }
+
+    // =========================================================
+    // Registration endpoints
+    // =========================================================
+
+    /**
+     * POST /api/v1/auth/register/spectator
+     * <p>Creates a SPECTATOR account and immediately issues tokens.
+     * Required fields: fullName, email, password, confirmPassword.
+     */
+    @PostMapping("/register/spectator")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<AuthResponse> registerSpectator(@Valid @RequestBody RegisterSpectatorRequest request,
+                                                       HttpServletRequest httpRequest) {
+        AuthResponse data = authService.registerSpectator(request, userAgent(httpRequest));
+        return ApiResponse.<AuthResponse>builder()
+                .success(true)
+                .message("Spectator account created successfully")
+                .data(data)
+                .build();
+    }
+
+    /**
+     * POST /api/v1/auth/register/owner
+     * <p>Creates a HORSE_OWNER account and immediately issues tokens.
+     * Required fields: fullName, email, password, confirmPassword.
+     */
+    @PostMapping("/register/owner")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<AuthResponse> registerOwner(@Valid @RequestBody RegisterOwnerRequest request,
+                                                   HttpServletRequest httpRequest) {
+        AuthResponse data = authService.registerOwner(request, userAgent(httpRequest));
+        return ApiResponse.<AuthResponse>builder()
+                .success(true)
+                .message("Owner account created successfully")
+                .data(data)
+                .build();
+    }
+
+    /**
+     * POST /api/v1/auth/register/jockey
+     * <p>Creates a JOCKEY account and immediately issues tokens.
+     * Required fields: firstName, lastName, email, password, confirmPassword.
+     */
+    @PostMapping("/register/jockey")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<AuthResponse> registerJockey(@Valid @RequestBody RegisterJockeyRequest request,
+                                                    HttpServletRequest httpRequest) {
+        AuthResponse data = authService.registerJockey(request, userAgent(httpRequest));
+        return ApiResponse.<AuthResponse>builder()
+                .success(true)
+                .message("Jockey account created successfully")
+                .data(data)
+                .build();
     }
 
     private String userAgent(HttpServletRequest request) {
