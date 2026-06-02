@@ -19,7 +19,12 @@ public enum ErrorCode {
     REFRESH_TOKEN_INVALID(1009, "Invalid or expired refresh token", HttpStatus.UNAUTHORIZED),
     ACCOUNT_INACTIVE(1010, "Account is not active", HttpStatus.FORBIDDEN),
     GOOGLE_AUTH_FAILED(1011, "Google authentication failed", HttpStatus.UNAUTHORIZED),
-    ROLE_NOT_EXISTED(1012, "Default role not found", HttpStatus.INTERNAL_SERVER_ERROR);
+    ROLE_NOT_EXISTED(1012, "Default role not found", HttpStatus.INTERNAL_SERVER_ERROR),
+
+    // ---- email change (verified flow) ----
+    EMAIL_EXISTED(1013, "Email is already in use", HttpStatus.CONFLICT),
+    EMAIL_SAME_AS_CURRENT(1014, "New email must differ from your current email", HttpStatus.BAD_REQUEST),
+    EMAIL_VERIFICATION_INVALID(1015, "Invalid or expired verification code", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

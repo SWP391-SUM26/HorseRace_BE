@@ -22,6 +22,7 @@
 -- CLEAN SLATE  (makes this script safe to re-run)
 -- CASCADE also removes dependent foreign keys and indexes.
 -- =========================================================
+DROP TABLE IF EXISTS email_change_request     CASCADE;
 DROP TABLE IF EXISTS refresh_token            CASCADE;
 DROP TABLE IF EXISTS notification             CASCADE;
 DROP TABLE IF EXISTS audit_log                CASCADE;
@@ -96,6 +97,23 @@ CREATE TABLE refresh_token (
     replaced_by_token_id UUID,
     user_agent           VARCHAR(255),
     created_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================
+-- EMAIL CHANGE REQUEST  (verified email-change flow)
+-- A pending change is created when a user asks to change their email. Only a HASH of the
+-- one-time verification code is stored; the new email becomes effective on app_user only
+-- after the code is confirmed (consumed = TRUE). Rows are short-lived (expires_at).
+-- =========================================================
+CREATE TABLE email_change_request (
+    request_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      UUID NOT NULL REFERENCES app_user(user_id),
+    new_email    VARCHAR(255) NOT NULL,
+    code_hash    VARCHAR(255) NOT NULL,
+    expires_at   TIMESTAMPTZ NOT NULL,
+    consumed     BOOLEAN NOT NULL DEFAULT FALSE,
+    consumed_at  TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
