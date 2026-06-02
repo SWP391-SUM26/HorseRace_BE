@@ -1,11 +1,14 @@
 package com.SWP391.horserace.auth.service.impl;
 
 import com.SWP391.horserace.auth.dto.AuthResponse;
+import com.SWP391.horserace.auth.dto.RegisterRequest;
 import com.SWP391.horserace.auth.service.AuthService;
 import com.SWP391.horserace.auth.service.GoogleTokenVerifier;
 import com.SWP391.horserace.auth.service.GoogleTokenVerifier.GooglePrincipal;
 import com.SWP391.horserace.auth.service.JwtService;
 import com.SWP391.horserace.auth.service.RefreshTokenService;
+import com.SWP391.horserace.notifications.entity.Notification;
+import com.SWP391.horserace.notifications.repository.NotificationRepository;
 import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.roles.repository.RoleRepository;
 import com.SWP391.horserace.shared.exception.AppException;
@@ -34,6 +37,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtService jwtService;
     private final RefreshTokenService refreshTokenService;
     private final GoogleTokenVerifier googleTokenVerifier;
+    private final NotificationRepository notificationRepository;
 
     @Override
     @Transactional
@@ -115,5 +119,101 @@ public class AuthServiceImpl implements AuthService {
                 .kycStatus(KycStatus.PENDING)
                 .build();
         return userRepository.save(user);
+    }
+
+    @Override
+    @Transactional
+    public void register(RegisterRequest request) {
+        if (userRepository.existsByEmail(request.email())) {
+            throw new AppException(ErrorCode.USER_EXISTED);
+        }
+
+        Role role = roleRepository.findByRoleCode(DEFAULT_GOOGLE_ROLE)
+                .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
+
+        User user = User.builder()
+                .role(role)
+                .userCode("USR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                .fullName(request.fullName())
+                .email(request.email())
+                .phone(request.phone())
+                .passwordHash(passwordEncoder.encode(request.password()))
+                .status(UserStatus.INACTIVE)
+                .kycStatus(KycStatus.PENDING)
+                .build();
+
+        user = userRepository.save(user);
+
+        String token = jwtService.generateVerificationToken(user.getEmail());
+
+        String verificationUrl = "http://localhost:8080/api/v1/auth/verify-email?token=" + token;
+        Notification notification = Notification.builder()
+                .recipient(user)
+                .title("Verify your email address")
+                .message("Hello " + user.getFullName() + ",\n\nPlease verify your email by clicking the link or making a POST request with the token:\n" 
+                        + verificationUrl + "\n\nToken: " + token)
+                .channel("EMAIL")
+                .deliveryStatus("SENT")
+                .sentAt(java.time.OffsetDateTime.now())
+                .build();
+
+        notificationRepository.save(notification);
+    }
+
+    @Override
+    @Transactional
+    public void verifyEmail(String token) {
+        String email;
+        try {
+            email = jwtService.verifyEmailVerificationToken(token);
+        } catch (Exception e) {
+            throw new AppException(ErrorCode.EMAIL_VERIFICATION_FAILED);
+        }
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+
+        if (user.isDeleted()) {
+            throw new AppException(ErrorCode.USER_NOT_EXISTED);
+        }
+
+        if (user.getStatus() == UserStatus.INACTIVE) {
+            user.setStatus(UserStatus.ACTIVE);
+            userRepository.save(user);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void resendVerificationEmail(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+
+        if (user.isDeleted()) {
+            throw new AppException(ErrorCode.USER_NOT_EXISTED);
+        }
+
+        if (user.getStatus() == UserStatus.ACTIVE) {
+            throw new AppException(ErrorCode.ACCOUNT_ALREADY_ACTIVE);
+        }
+
+        if (user.getStatus() != UserStatus.INACTIVE) {
+            throw new AppException(ErrorCode.ACCOUNT_INACTIVE);
+        }
+
+        String token = jwtService.generateVerificationToken(user.getEmail());
+
+        String verificationUrl = "http://localhost:8080/api/v1/auth/verify-email?token=" + token;
+        Notification notification = Notification.builder()
+                .recipient(user)
+                .title("Verify your email address (Resend)")
+                .message("Hello " + user.getFullName() + ",\n\nPlease verify your email by clicking the link or making a POST request with the token:\n" 
+                        + verificationUrl + "\n\nToken: " + token)
+                .channel("EMAIL")
+                .deliveryStatus("SENT")
+                .sentAt(java.time.OffsetDateTime.now())
+                .build();
+
+        notificationRepository.save(notification);
     }
 }

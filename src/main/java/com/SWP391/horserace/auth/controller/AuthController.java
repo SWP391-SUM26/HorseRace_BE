@@ -5,6 +5,9 @@ import com.SWP391.horserace.auth.dto.GoogleLoginRequest;
 import com.SWP391.horserace.auth.dto.LoginRequest;
 import com.SWP391.horserace.auth.dto.LogoutRequest;
 import com.SWP391.horserace.auth.dto.RefreshRequest;
+import com.SWP391.horserace.auth.dto.RegisterRequest;
+import com.SWP391.horserace.auth.dto.VerifyEmailRequest;
+import com.SWP391.horserace.auth.dto.ResendVerificationRequest;
 import com.SWP391.horserace.auth.service.AuthService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -52,6 +55,27 @@ public class AuthController {
     public ApiResponse<Void> logout(@Valid @RequestBody LogoutRequest request) {
         authService.logout(request.refreshToken());
         return ApiResponse.<Void>builder().success(true).message("Logged out").build();
+    }
+
+    /** POST /api/v1/auth/register — register a new user in INACTIVE state. */
+    @PostMapping("/register")
+    public ApiResponse<Void> register(@Valid @RequestBody RegisterRequest request) {
+        authService.register(request);
+        return ApiResponse.<Void>builder().success(true).message("Registration successful. Please check your email to verify your account.").build();
+    }
+
+    /** POST /api/v1/auth/verify-email — verify user's email using token. */
+    @PostMapping("/verify-email")
+    public ApiResponse<Void> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        authService.verifyEmail(request.token());
+        return ApiResponse.<Void>builder().success(true).message("Email verified successfully. You can now login.").build();
+    }
+
+    /** POST /api/v1/auth/resend-verification — resend email verification token. */
+    @PostMapping("/resend-verification")
+    public ApiResponse<Void> resendVerification(@Valid @RequestBody ResendVerificationRequest request) {
+        authService.resendVerificationEmail(request.email());
+        return ApiResponse.<Void>builder().success(true).message("Verification email resent successfully. Please check your email.").build();
     }
 
     private String userAgent(HttpServletRequest request) {

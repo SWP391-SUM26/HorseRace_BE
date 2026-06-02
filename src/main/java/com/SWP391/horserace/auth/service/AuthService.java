@@ -1,6 +1,7 @@
 package com.SWP391.horserace.auth.service;
 
 import com.SWP391.horserace.auth.dto.AuthResponse;
+import com.SWP391.horserace.auth.dto.RegisterRequest;
 
 public interface AuthService {
 
@@ -11,4 +12,10 @@ public interface AuthService {
     AuthResponse refresh(String rawRefreshToken, String userAgent);
 
     void logout(String rawRefreshToken);
+
+    void register(RegisterRequest request);
+
+    void verifyEmail(String token);
+
+    void resendVerificationEmail(String email);
 }

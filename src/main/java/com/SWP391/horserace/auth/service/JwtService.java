@@ -63,4 +63,29 @@ public class JwtService {
     public long getAccessTokenTtlMs() {
         return props.getAccessTokenTtlMs();
     }
+
+    /** Build a signed verification token carrying the email as subject. Expiry: 24h */
+    public String generateVerificationToken(String email) {
+        Date now = new Date();
+        // 24 hours
+        Date expiry = new Date(now.getTime() + 86400000L);
+
+        return Jwts.builder()
+                .setIssuer(props.getIssuer())
+                .setSubject(email)
+                .claim("type", "email_verification")
+                .setIssuedAt(now)
+                .setExpiration(expiry)
+                .signWith(signingKey(), SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    /** Parse and verify an email verification token, returning the email. Throws exception if invalid/expired. */
+    public String verifyEmailVerificationToken(String token) {
+        Claims claims = parseClaims(token);
+        if (!"email_verification".equals(claims.get("type"))) {
+            throw new io.jsonwebtoken.JwtException("Invalid token type");
+        }
+        return claims.getSubject();
+    }
 }
