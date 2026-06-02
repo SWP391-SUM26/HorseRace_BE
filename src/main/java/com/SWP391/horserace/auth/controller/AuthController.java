@@ -1,14 +1,22 @@
 package com.SWP391.horserace.auth.controller;
 
 import com.SWP391.horserace.auth.dto.AuthResponse;
+import com.SWP391.horserace.auth.dto.ForgotPasswordRequest;
 import com.SWP391.horserace.auth.dto.GoogleLoginRequest;
 import com.SWP391.horserace.auth.dto.LoginRequest;
 import com.SWP391.horserace.auth.dto.LogoutRequest;
 import com.SWP391.horserace.auth.dto.RefreshRequest;
+<<<<<<< Updated upstream
 import com.SWP391.horserace.auth.dto.RegisterJockeyRequest;
 import com.SWP391.horserace.auth.dto.RegisterOwnerRequest;
 import com.SWP391.horserace.auth.dto.RegisterSpectatorRequest;
+=======
+import com.SWP391.horserace.auth.dto.ResendCodeRequest;
+import com.SWP391.horserace.auth.dto.ResetPasswordRequest;
+import com.SWP391.horserace.auth.dto.VerifyCodeRequest;
+>>>>>>> Stashed changes
 import com.SWP391.horserace.auth.service.AuthService;
+import com.SWP391.horserace.auth.service.PasswordResetService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -27,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final PasswordResetService passwordResetService;
 
     /** POST /api/v1/auth/login — email + password → access + refresh tokens. */
     @PostMapping("/login")
@@ -59,6 +68,7 @@ public class AuthController {
         return ApiResponse.<Void>builder().success(true).message("Logged out").build();
     }
 
+<<<<<<< Updated upstream
     // =========================================================
     // Registration endpoints
     // =========================================================
@@ -111,6 +121,46 @@ public class AuthController {
                 .success(true)
                 .message("Jockey account created successfully")
                 .data(data)
+=======
+    /** POST /api/v1/auth/forgot-password — send a 6-digit reset code to the registered email. */
+    @PostMapping("/forgot-password")
+    public ApiResponse<Void> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        passwordResetService.forgotPassword(request.email());
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("If that email is registered, a reset code has been sent")
+                .build();
+    }
+
+    /** POST /api/v1/auth/resend-code — invalidate old code and send a fresh 6-digit code. */
+    @PostMapping("/resend-code")
+    public ApiResponse<Void> resendCode(@Valid @RequestBody ResendCodeRequest request) {
+        passwordResetService.resendCode(request.email());
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("If that email is registered, a new reset code has been sent")
+                .build();
+    }
+
+    /** POST /api/v1/auth/verify-code — validate the 6-digit code (without consuming it). */
+    @PostMapping("/verify-code")
+    public ApiResponse<Void> verifyCode(@Valid @RequestBody VerifyCodeRequest request) {
+        passwordResetService.verifyCode(request.email(), request.code());
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("Verification code is valid")
+                .build();
+    }
+
+    /** POST /api/v1/auth/reset-password — verify code + set new password. */
+    @PostMapping("/reset-password")
+    public ApiResponse<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        passwordResetService.resetPassword(
+                request.email(), request.code(), request.newPassword(), request.confirmPassword());
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("Password has been reset successfully")
+>>>>>>> Stashed changes
                 .build();
     }
 
