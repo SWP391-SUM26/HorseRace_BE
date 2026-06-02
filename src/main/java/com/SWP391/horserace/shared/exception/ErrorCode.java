@@ -21,9 +21,19 @@ public enum ErrorCode {
     GOOGLE_AUTH_FAILED(1011, "Google authentication failed", HttpStatus.UNAUTHORIZED),
     ROLE_NOT_EXISTED(1012, "Default role not found", HttpStatus.INTERNAL_SERVER_ERROR),
 
+<<<<<<< Updated upstream
     // ---- registration ----
     EMAIL_ALREADY_EXISTS(1013, "Email is already registered", HttpStatus.CONFLICT),
     PASSWORD_MISMATCH(1014, "Password and confirm password do not match", HttpStatus.BAD_REQUEST);
+=======
+    // ---- password reset ----
+    RESET_CODE_INVALID(1013, "Invalid or expired reset code", HttpStatus.BAD_REQUEST),
+    RESET_CODE_USED(1014, "Reset code has already been used", HttpStatus.BAD_REQUEST),
+    RESET_CODE_COOLDOWN(1015, "Please wait before requesting a new code", HttpStatus.TOO_MANY_REQUESTS),
+    PASSWORD_MISMATCH(1016, "Passwords do not match", HttpStatus.BAD_REQUEST),
+    EMAIL_SEND_FAILED(1017, "Failed to send email", HttpStatus.INTERNAL_SERVER_ERROR),
+    PASSWORD_TOO_WEAK(1018, "Password must be at least 8 characters and contain 1 number and 1 symbol", HttpStatus.BAD_REQUEST);
+>>>>>>> Stashed changes
 
     private final int code;
     private final String message;
