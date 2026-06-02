@@ -24,7 +24,18 @@ public enum ErrorCode {
     // ---- email change (verified flow) ----
     EMAIL_EXISTED(1013, "Email is already in use", HttpStatus.CONFLICT),
     EMAIL_SAME_AS_CURRENT(1014, "New email must differ from your current email", HttpStatus.BAD_REQUEST),
-    EMAIL_VERIFICATION_INVALID(1015, "Invalid or expired verification code", HttpStatus.BAD_REQUEST);
+    EMAIL_VERIFICATION_INVALID(1015, "Invalid or expired verification code", HttpStatus.BAD_REQUEST),
+
+    // ---- registration ----
+    EMAIL_ALREADY_EXISTS(1016, "Email is already registered", HttpStatus.CONFLICT),
+    PASSWORD_MISMATCH(1017, "Passwords do not match", HttpStatus.BAD_REQUEST),
+
+    // ---- password reset ----
+    RESET_CODE_INVALID(1018, "Invalid or expired reset code", HttpStatus.BAD_REQUEST),
+    RESET_CODE_USED(1019, "Reset code has already been used", HttpStatus.BAD_REQUEST),
+    RESET_CODE_COOLDOWN(1020, "Please wait before requesting a new code", HttpStatus.TOO_MANY_REQUESTS),
+    EMAIL_SEND_FAILED(1021, "Failed to send email", HttpStatus.INTERNAL_SERVER_ERROR),
+    PASSWORD_TOO_WEAK(1022, "Password must be at least 8 characters and contain 1 number and 1 symbol", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

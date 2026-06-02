@@ -1,9 +1,8 @@
 package com.SWP391.horserace.auth.service;
 import com.SWP391.horserace.auth.dto.AuthResponse;
-import com.SWP391.horserace.auth.dto.RegisterRequest;
-import com.SWP391.horserace.auth.dto.RegisterResponse;
-
-
+import com.SWP391.horserace.auth.dto.RegisterJockeyRequest;
+import com.SWP391.horserace.auth.dto.RegisterOwnerRequest;
+import com.SWP391.horserace.auth.dto.RegisterSpectatorRequest;
 
 public interface AuthService {
 
@@ -15,5 +14,12 @@ public interface AuthService {
 
     void logout(String rawRefreshToken);
 
-    RegisterResponse register(RegisterRequest request);
+    /** Register a new spectator account. Auto-issues tokens (no separate login needed). */
+    AuthResponse registerSpectator(RegisterSpectatorRequest request, String userAgent);
+
+    /** Register a new horse-owner account. Auto-issues tokens (no separate login needed). */
+    AuthResponse registerOwner(RegisterOwnerRequest request, String userAgent);
+
+    /** Register a new jockey account. Auto-issues tokens (no separate login needed). */
+    AuthResponse registerJockey(RegisterJockeyRequest request, String userAgent);
 }

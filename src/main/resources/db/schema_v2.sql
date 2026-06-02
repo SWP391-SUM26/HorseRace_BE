@@ -23,6 +23,7 @@
 -- CASCADE also removes dependent foreign keys and indexes.
 -- =========================================================
 DROP TABLE IF EXISTS email_change_request     CASCADE;
+DROP TABLE IF EXISTS password_reset_token     CASCADE;
 DROP TABLE IF EXISTS refresh_token            CASCADE;
 DROP TABLE IF EXISTS notification             CASCADE;
 DROP TABLE IF EXISTS audit_log                CASCADE;
@@ -492,6 +493,20 @@ CREATE TABLE notification (
 );
 
 -- =========================================================
+-- PASSWORD RESET TOKEN (6-digit OTP for forgot-password flow)
+-- Stores only a HASH of the 6-digit code, never the raw value.
+-- =========================================================
+CREATE TABLE password_reset_token (
+    token_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES app_user(user_id),
+    code_hash   VARCHAR(255) NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used        BOOLEAN NOT NULL DEFAULT FALSE,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================
 -- INDEXES
 -- =========================================================
 CREATE INDEX idx_app_user_role_id             ON app_user(role_id);
@@ -514,6 +529,7 @@ CREATE INDEX idx_audit_log_race_id            ON audit_log(race_id);
 CREATE INDEX idx_audit_log_entity             ON audit_log(entity_type, entity_id);
 CREATE INDEX idx_notification_recipient       ON notification(recipient_user_id);
 CREATE INDEX idx_refresh_token_user_id ON refresh_token(user_id);
+CREATE INDEX idx_password_reset_token_user_id ON password_reset_token(user_id);
 
 -- =========================================================
 -- END  --  V2 (schema-only)
