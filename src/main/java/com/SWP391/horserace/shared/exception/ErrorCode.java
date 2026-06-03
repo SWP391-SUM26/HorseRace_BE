@@ -12,6 +12,8 @@ public enum ErrorCode {
     UNAUTHENTICATED(1004, "Unauthenticated", HttpStatus.UNAUTHORIZED),
     UNAUTHORIZED(1005, "You do not have permission", HttpStatus.FORBIDDEN),
     INVALID_PASSWORD(1006, "Password must be at least 8 characters", HttpStatus.BAD_REQUEST),
+    WEAK_PASSWORD(1015, "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character", HttpStatus.BAD_REQUEST),
+    INVALID_PHONE_FORMAT(1016, "Phone number must be a valid Vietnamese phone number", HttpStatus.BAD_REQUEST),
 
     // ---- authentication / tokens ----
     INVALID_CREDENTIALS(1007, "Invalid email or password", HttpStatus.UNAUTHORIZED),

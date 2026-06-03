@@ -4,6 +4,8 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
 
 /**
  * Payload for jockey self-registration.
@@ -18,14 +20,15 @@ import jakarta.validation.constraints.Size;
  */
 public record RegisterJockeyRequest(
 
-        // ---- Account credentials (not shown in Figma but required to log in) ----
+        // ---- Account credentials (required by backend logic for login) ----
 
         @NotBlank(message = "Email is required")
         @Email(message = "Email must be valid")
         String email,
 
         @NotBlank(message = "Password is required")
-        @Size(min = 8, message = "Password must be at least 8 characters")
+        @Size(min = 8, message = "INVALID_PASSWORD")
+        @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^a-zA-Z0-9]).*$", message = "WEAK_PASSWORD")
         String password,
 
         @NotBlank(message = "Confirm password is required")
@@ -44,14 +47,17 @@ public record RegisterJockeyRequest(
         Integer age,
 
         /** Optional — weight in lbs. */
+        @Positive(message = "Weight must be positive")
         Double weight,
 
         /** Optional — nationality / country code (e.g. "VN", "US"). */
+        @Size(max = 50, message = "Nationality must not exceed 50 characters")
         String nationality,
 
         // ---- Section 2: Experience ----
 
         /** Optional — number of professional years active. */
+        @Min(value = 0, message = "Years active cannot be negative")
         Integer yearsActive,
 
         /**
