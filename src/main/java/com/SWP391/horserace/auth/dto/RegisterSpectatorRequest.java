@@ -3,6 +3,8 @@ package com.SWP391.horserace.auth.dto;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.AssertTrue;
 
 /**
  * Payload for spectator self-registration.
@@ -25,6 +27,9 @@ public record RegisterSpectatorRequest(
         String password,
 
         @NotBlank(message = "Confirm password is required")
-        String confirmPassword
+        String confirmPassword,
+        @NotNull(message = "You must agree to the Terms of Service and Privacy Policy")
+        @AssertTrue(message = "You must agree to the Terms of Service and Privacy Policy")
+        Boolean agreedToTerms
 ) {
 }

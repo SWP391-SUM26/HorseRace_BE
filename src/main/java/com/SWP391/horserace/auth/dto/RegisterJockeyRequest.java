@@ -18,7 +18,7 @@ import jakarta.validation.constraints.Size;
  */
 public record RegisterJockeyRequest(
 
-        // ---- Account credentials (not shown in Figma but required to log in) ----
+        // ---- Account credentials (required by backend logic for login) ----
 
         @NotBlank(message = "Email is required")
         @Email(message = "Email must be valid")

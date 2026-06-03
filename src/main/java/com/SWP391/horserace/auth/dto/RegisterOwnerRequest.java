@@ -3,6 +3,8 @@ package com.SWP391.horserace.auth.dto;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.AssertTrue;
 
 /**
  * Payload for horse-owner self-registration.
@@ -40,6 +42,10 @@ public record RegisterOwnerRequest(
         String bio,
 
         /** Optional avatar / stable logo URL (file upload handled separately). */
-        String avatarUrl
+        String avatarUrl,
+        
+        @NotNull(message = "You must agree to the Terms of Service and confirm ownership credentials")
+        @AssertTrue(message = "You must agree to the Terms of Service and confirm ownership credentials")
+        Boolean agreedToTerms
 ) {
 }
