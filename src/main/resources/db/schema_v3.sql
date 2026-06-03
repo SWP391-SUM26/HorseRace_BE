@@ -1,26 +1,23 @@
 -- =========================================================
 -- HORSE RACING TOURNAMENT MANAGEMENT SYSTEM
--- PostgreSQL DDL Script  --  V2 (hardened, schema-only)
+-- PostgreSQL DDL Script  --  V3 (complete)
 -- =========================================================
--- Changes vs V1:
---   1. TIMESTAMP        -> TIMESTAMPTZ everywhere (timezone-safe)
---   2. Added CHECK constraints on status / enum columns
---   3. Added CHECK (... >= 0) on all money / quantity columns
---   4. Added UNIQUE business constraints (no duplicate entries/lanes/bets)
---   5. Consistent soft-delete columns where it makes sense
---   6. UUID defaults use built-in gen_random_uuid() (PostgreSQL 13+, no extension)
+-- Thay đổi chính so với V2:
+--   1. + tournament_round  : mô hình "vòng đua" (qualifier/heat/semi/final)
+--   2. + jockey_profile     : hồ sơ chuyên môn jockey (cân nặng, giấy phép, thành tích)
+--   3. + penalty            : ghi nhận & xử lý vi phạm có cấu trúc (gắn vào entry/report)
+--   4. + standing           : bảng xếp hạng tích điểm theo giải (tùy chọn)
+--   5. Siết NOT NULL cho các FK bắt buộc về mặt nghiệp vụ (chống dữ liệu rác)
+--   6. Bỏ UNIQUE(race_id, finish_position) -> cho phép về đích đồng hạng (dead-heat)
+--   7. + CHECK phạm vi prize, + index còn thiếu
+--   8. KHÔNG dùng trigger/function trong file này (schema-only). updated_at do app
+--      tự quản qua Hibernate @UpdateTimestamp (xem users/entity/User.java).
 --
--- NOTE: No functions / procedures / triggers in this file (schema-only).
---   `updated_at` is set to CURRENT_TIMESTAMP only on INSERT. Maintain it in
---   application code instead (e.g. JPA @UpdateTimestamp / @PreUpdate).
+-- UUID dùng gen_random_uuid() có sẵn (PostgreSQL 13+), không cần extension.
 -- =========================================================
 
--- UUID generation uses the built-in gen_random_uuid() (PostgreSQL 13+).
--- No extension required. (The old uuid-ossp / uuid_generate_v4() is not used.)
-
 -- =========================================================
--- CLEAN SLATE  (makes this script safe to re-run)
--- CASCADE also removes dependent foreign keys and indexes.
+-- CLEAN SLATE (an toàn khi chạy lại). CASCADE gỡ FK & index phụ thuộc.
 -- =========================================================
 DROP TABLE IF EXISTS email_change_request     CASCADE;
 DROP TABLE IF EXISTS password_reset_token     CASCADE;
@@ -34,6 +31,8 @@ DROP TABLE IF EXISTS prediction               CASCADE;
 DROP TABLE IF EXISTS wallet_transaction       CASCADE;
 DROP TABLE IF EXISTS payment_transaction      CASCADE;
 DROP TABLE IF EXISTS wallet                   CASCADE;
+DROP TABLE IF EXISTS standing                 CASCADE;
+DROP TABLE IF EXISTS penalty                  CASCADE;
 DROP TABLE IF EXISTS referee_report           CASCADE;
 DROP TABLE IF EXISTS race_result_version      CASCADE;
 DROP TABLE IF EXISTS race_result              CASCADE;
@@ -42,17 +41,19 @@ DROP TABLE IF EXISTS jockey_assignment        CASCADE;
 DROP TABLE IF EXISTS race_entry               CASCADE;
 DROP TABLE IF EXISTS tournament_registration  CASCADE;
 DROP TABLE IF EXISTS race                     CASCADE;
+DROP TABLE IF EXISTS tournament_round         CASCADE;
 DROP TABLE IF EXISTS tournament               CASCADE;
 DROP TABLE IF EXISTS horse                    CASCADE;
+DROP TABLE IF EXISTS jockey_profile           CASCADE;
 DROP TABLE IF EXISTS app_user                 CASCADE;
 DROP TABLE IF EXISTS role                     CASCADE;
 
 -- =========================================================
--- ROLE
+-- ROLE  (Horse Owner / Jockey / Race Referee / Spectator / Admin)
 -- =========================================================
 CREATE TABLE role (
     role_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    role_code   VARCHAR(50) UNIQUE NOT NULL,
+    role_code   VARCHAR(50) UNIQUE NOT NULL,        -- HORSE_OWNER, JOCKEY, REFEREE, SPECTATOR, ADMIN
     role_name   VARCHAR(100) NOT NULL,
     description TEXT,
     status      VARCHAR(30) NOT NULL DEFAULT 'ACTIVE'
@@ -66,7 +67,7 @@ CREATE TABLE role (
 -- =========================================================
 CREATE TABLE app_user (
     user_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    role_id       UUID REFERENCES role(role_id),
+    role_id       UUID NOT NULL REFERENCES role(role_id),     -- mỗi user phải có 1 role
     user_code     VARCHAR(50) UNIQUE NOT NULL,
     full_name     VARCHAR(255),
     email         VARCHAR(255) UNIQUE NOT NULL,
@@ -85,8 +86,23 @@ CREATE TABLE app_user (
 );
 
 -- =========================================================
--- REFRESH TOKEN  (DB-stored, rotated, revocable)
--- Stores only a HASH of the opaque refresh token, never the raw value.
+-- JOCKEY PROFILE  (NEW) -- thông tin chuyên môn của jockey
+-- 1 jockey (app_user role=JOCKEY) <-> 1 hồ sơ. App layer đảm bảo đúng role.
+-- =========================================================
+CREATE TABLE jockey_profile (
+    jockey_user_id UUID PRIMARY KEY REFERENCES app_user(user_id),
+    license_no     VARCHAR(100) UNIQUE,
+    body_weight    NUMERIC(5,2) CHECK (body_weight IS NULL OR body_weight > 0),  -- kg, dùng cho handicap
+    height_cm      NUMERIC(5,2) CHECK (height_cm IS NULL OR height_cm > 0),
+    experience_yrs INT CHECK (experience_yrs IS NULL OR experience_yrs >= 0),
+    win_count      INT NOT NULL DEFAULT 0 CHECK (win_count >= 0),  -- cache thành tích, cập nhật khi chốt kết quả
+    bio            TEXT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================
+-- REFRESH TOKEN  (lưu HASH, có thể xoay & thu hồi)
 -- =========================================================
 CREATE TABLE refresh_token (
     token_id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -101,10 +117,7 @@ CREATE TABLE refresh_token (
 );
 
 -- =========================================================
--- EMAIL CHANGE REQUEST  (verified email-change flow)
--- A pending change is created when a user asks to change their email. Only a HASH of the
--- one-time verification code is stored; the new email becomes effective on app_user only
--- after the code is confirmed (consumed = TRUE). Rows are short-lived (expires_at).
+-- EMAIL CHANGE REQUEST  (đổi email có xác thực OTP, lưu HASH)
 -- =========================================================
 CREATE TABLE email_change_request (
     request_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -118,11 +131,24 @@ CREATE TABLE email_change_request (
 );
 
 -- =========================================================
+-- PASSWORD RESET TOKEN  (OTP 6 số quên mật khẩu, lưu HASH)
+-- =========================================================
+CREATE TABLE password_reset_token (
+    token_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES app_user(user_id),
+    code_hash   VARCHAR(255) NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used        BOOLEAN NOT NULL DEFAULT FALSE,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================
 -- HORSE
 -- =========================================================
 CREATE TABLE horse (
     horse_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_user_id       UUID REFERENCES app_user(user_id),
+    owner_user_id       UUID NOT NULL REFERENCES app_user(user_id),  -- ngựa phải có chủ
     horse_code          VARCHAR(50) UNIQUE NOT NULL,
     name                VARCHAR(255) NOT NULL,
     microchip_no        VARCHAR(100) UNIQUE,
@@ -164,18 +190,36 @@ CREATE TABLE tournament (
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_deleted            BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at            TIMESTAMPTZ,
-    -- date sanity
     CHECK (end_date IS NULL OR start_date IS NULL OR end_date >= start_date),
     CHECK (registration_close_at IS NULL OR registration_open_at IS NULL
            OR registration_close_at >= registration_open_at)
 );
 
 -- =========================================================
--- RACE
+-- TOURNAMENT ROUND  (NEW) -- "vòng đua": vòng loại / bán kết / chung kết...
+-- =========================================================
+CREATE TABLE tournament_round (
+    round_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tournament_id UUID NOT NULL REFERENCES tournament(tournament_id),
+    round_no      INT  NOT NULL CHECK (round_no > 0),
+    name          VARCHAR(100),                 -- "Vòng loại 1", "Chung kết"
+    stage         VARCHAR(30)
+                  CHECK (stage IN ('QUALIFIER', 'HEAT', 'SEMI', 'FINAL')),
+    scheduled_at  TIMESTAMPTZ,
+    status        VARCHAR(30) NOT NULL DEFAULT 'PLANNED'
+                  CHECK (status IN ('PLANNED', 'ONGOING', 'COMPLETED', 'CANCELLED')),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tournament_id, round_no)
+);
+
+-- =========================================================
+-- RACE  (cuộc đua, có thể thuộc 1 vòng đua)
 -- =========================================================
 CREATE TABLE race (
     race_id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tournament_id        UUID REFERENCES tournament(tournament_id),
+    tournament_id        UUID NOT NULL REFERENCES tournament(tournament_id),
+    round_id             UUID REFERENCES tournament_round(round_id),  -- nullable: giải có thể không chia vòng
     race_code            VARCHAR(50) UNIQUE NOT NULL,
     name                 VARCHAR(255),
     race_type            VARCHAR(50),
@@ -196,13 +240,13 @@ CREATE TABLE race (
 );
 
 -- =========================================================
--- TOURNAMENT REGISTRATION
+-- TOURNAMENT REGISTRATION  (chủ ngựa đăng ký ngựa dự giải -> admin duyệt)
 -- =========================================================
 CREATE TABLE tournament_registration (
     registration_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_user_id       UUID REFERENCES app_user(user_id),
-    tournament_id       UUID REFERENCES tournament(tournament_id),
-    horse_id            UUID REFERENCES horse(horse_id),
+    owner_user_id       UUID NOT NULL REFERENCES app_user(user_id),
+    tournament_id       UUID NOT NULL REFERENCES tournament(tournament_id),
+    horse_id            UUID NOT NULL REFERENCES horse(horse_id),
     registration_code   VARCHAR(50) UNIQUE NOT NULL,
     status              VARCHAR(50) NOT NULL DEFAULT 'SUBMITTED'
                         CHECK (status IN ('DRAFT', 'SUBMITTED', 'UNDER_REVIEW',
@@ -214,17 +258,16 @@ CREATE TABLE tournament_registration (
     legal_basis_ref     VARCHAR(255),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- a horse can be registered to a given tournament only once
-    UNIQUE (tournament_id, horse_id)
+    UNIQUE (tournament_id, horse_id)   -- 1 ngựa đăng ký 1 giải chỉ 1 lần
 );
 
 -- =========================================================
--- RACE ENTRY
+-- RACE ENTRY  (suất ngựa vào 1 cuộc đua cụ thể)
 -- =========================================================
 CREATE TABLE race_entry (
     entry_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    registration_id UUID REFERENCES tournament_registration(registration_id),
-    race_id         UUID REFERENCES race(race_id),
+    registration_id UUID NOT NULL REFERENCES tournament_registration(registration_id),
+    race_id         UUID NOT NULL REFERENCES race(race_id),
     entry_code      VARCHAR(50) UNIQUE NOT NULL,
     entry_no        INT CHECK (entry_no IS NULL OR entry_no > 0),
     lane_no         INT CHECK (lane_no IS NULL OR lane_no > 0),
@@ -233,19 +276,18 @@ CREATE TABLE race_entry (
     checked_in_at   TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- no duplicate registration in the same race; no shared lane/number
-    UNIQUE (race_id, registration_id),
-    UNIQUE (race_id, lane_no),
-    UNIQUE (race_id, entry_no)
+    UNIQUE (race_id, registration_id),  -- 1 đăng ký vào 1 cuộc đua chỉ 1 lần
+    UNIQUE (race_id, lane_no),          -- không trùng làn
+    UNIQUE (race_id, entry_no)          -- không trùng số áo
 );
 
 -- =========================================================
--- JOCKEY ASSIGNMENT
+-- JOCKEY ASSIGNMENT  (mời/chọn jockey -> jockey accept/decline)
 -- =========================================================
 CREATE TABLE jockey_assignment (
     assignment_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    entry_id            UUID UNIQUE REFERENCES race_entry(entry_id),
-    jockey_user_id      UUID REFERENCES app_user(user_id),
+    entry_id            UUID NOT NULL UNIQUE REFERENCES race_entry(entry_id),  -- 1 entry 1 jockey
+    jockey_user_id      UUID NOT NULL REFERENCES app_user(user_id),
     status              VARCHAR(50) NOT NULL DEFAULT 'INVITED'
                         CHECK (status IN ('INVITED', 'ACCEPTED', 'DECLINED', 'CANCELLED')),
     invited_at          TIMESTAMPTZ,
@@ -256,12 +298,12 @@ CREATE TABLE jockey_assignment (
 );
 
 -- =========================================================
--- REFEREE ASSIGNMENT
+-- REFEREE ASSIGNMENT  (admin phân công trọng tài cho cuộc đua)
 -- =========================================================
 CREATE TABLE referee_assignment (
     ref_assignment_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    race_id            UUID REFERENCES race(race_id),
-    referee_user_id    UUID REFERENCES app_user(user_id),
+    race_id            UUID NOT NULL REFERENCES race(race_id),
+    referee_user_id    UUID NOT NULL REFERENCES app_user(user_id),
     panel_role         VARCHAR(50)
                        CHECK (panel_role IN ('CHIEF', 'JUDGE', 'STEWARD', 'TIMEKEEPER', 'OBSERVER')),
     status             VARCHAR(50) NOT NULL DEFAULT 'ASSIGNED'
@@ -269,37 +311,35 @@ CREATE TABLE referee_assignment (
     assigned_at        TIMESTAMPTZ,
     created_by_user_id UUID REFERENCES app_user(user_id),
     created_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- a referee is assigned to a race at most once
-    UNIQUE (race_id, referee_user_id)
+    UNIQUE (race_id, referee_user_id)  -- 1 trọng tài / cuộc đua tối đa 1 lần
 );
 
 -- =========================================================
--- RACE RESULT
+-- RACE RESULT  (kết quả hiện hành của mỗi entry)
+-- Cho phép đồng hạng (dead-heat): KHÔNG unique trên finish_position.
 -- =========================================================
 CREATE TABLE race_result (
     result_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    race_id             UUID REFERENCES race(race_id),
-    entry_id            UUID UNIQUE REFERENCES race_entry(entry_id),
+    race_id             UUID NOT NULL REFERENCES race(race_id),
+    entry_id            UUID NOT NULL UNIQUE REFERENCES race_entry(entry_id),  -- 1 kết quả / entry
     finish_position     INT CHECK (finish_position IS NULL OR finish_position > 0),
     finish_time_ms      BIGINT CHECK (finish_time_ms IS NULL OR finish_time_ms >= 0),
     score               NUMERIC(10,2),
-    current_version_no  INT NOT NULL DEFAULT 1,
+    current_version_no  INT NOT NULL DEFAULT 1 CHECK (current_version_no > 0),
     officiality_status  VARCHAR(50) NOT NULL DEFAULT 'PROVISIONAL'
                         CHECK (officiality_status IN ('PROVISIONAL', 'UNDER_REVIEW', 'OFFICIAL', 'AMENDED')),
     approved_by_user_id UUID REFERENCES app_user(user_id),
     published_at        TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- one finishing position per race
-    UNIQUE (race_id, finish_position)
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
--- RACE RESULT VERSION
+-- RACE RESULT VERSION  (lịch sử chỉnh sửa kết quả - audit)
 -- =========================================================
 CREATE TABLE race_result_version (
     result_version_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    result_id           UUID REFERENCES race_result(result_id),
+    result_id           UUID NOT NULL REFERENCES race_result(result_id),
     version_no          INT NOT NULL CHECK (version_no > 0),
     finish_position     INT CHECK (finish_position IS NULL OR finish_position > 0),
     finish_time_ms      BIGINT CHECK (finish_time_ms IS NULL OR finish_time_ms >= 0),
@@ -312,11 +352,11 @@ CREATE TABLE race_result_version (
 );
 
 -- =========================================================
--- REFEREE REPORT
+-- REFEREE REPORT  (biên bản thi đấu)
 -- =========================================================
 CREATE TABLE referee_report (
     report_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    race_id        UUID REFERENCES race(race_id),
+    race_id        UUID NOT NULL REFERENCES race(race_id),
     author_user_id UUID REFERENCES app_user(user_id),
     report_type    VARCHAR(50)
                    CHECK (report_type IN ('INCIDENT', 'VIOLATION', 'OBJECTION', 'GENERAL')),
@@ -332,11 +372,49 @@ CREATE TABLE referee_report (
 );
 
 -- =========================================================
+-- PENALTY  (NEW) -- hình phạt cụ thể gắn với 1 entry, có thể trỏ tới biên bản
+-- =========================================================
+CREATE TABLE penalty (
+    penalty_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    race_id        UUID NOT NULL REFERENCES race(race_id),
+    entry_id       UUID REFERENCES race_entry(entry_id),       -- ngựa/đối tượng bị phạt
+    report_id      UUID REFERENCES referee_report(report_id),  -- biên bản liên quan
+    penalty_type   VARCHAR(50) NOT NULL
+                   CHECK (penalty_type IN ('WARNING', 'TIME_PENALTY', 'FINE',
+                                           'DISQUALIFICATION', 'SUSPENSION')),
+    time_penalty_ms BIGINT CHECK (time_penalty_ms IS NULL OR time_penalty_ms >= 0),
+    fine_amount    NUMERIC(18,2) CHECK (fine_amount IS NULL OR fine_amount >= 0),
+    reason         TEXT,
+    issued_by_user_id UUID REFERENCES app_user(user_id),
+    status         VARCHAR(50) NOT NULL DEFAULT 'ISSUED'
+                   CHECK (status IN ('ISSUED', 'UPHELD', 'OVERTURNED', 'CANCELLED')),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================
+-- STANDING  (NEW, tùy chọn) -- bảng xếp hạng tích điểm theo giải
+-- Có thể xếp hạng theo ngựa hoặc theo jockey -> dùng subject_type/id.
+-- =========================================================
+CREATE TABLE standing (
+    standing_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tournament_id UUID NOT NULL REFERENCES tournament(tournament_id),
+    subject_type  VARCHAR(20) NOT NULL CHECK (subject_type IN ('HORSE', 'JOCKEY')),
+    subject_id    UUID NOT NULL,            -- horse_id hoặc app_user(user_id) tùy subject_type
+    total_points  NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (total_points >= 0),
+    races_count   INT NOT NULL DEFAULT 0 CHECK (races_count >= 0),
+    wins_count    INT NOT NULL DEFAULT 0 CHECK (wins_count >= 0),
+    rank_position INT CHECK (rank_position IS NULL OR rank_position > 0),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tournament_id, subject_type, subject_id)
+);
+
+-- =========================================================
 -- WALLET
 -- =========================================================
 CREATE TABLE wallet (
     wallet_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id        UUID UNIQUE REFERENCES app_user(user_id),
+    user_id        UUID NOT NULL UNIQUE REFERENCES app_user(user_id),
     balance        NUMERIC(18,2) NOT NULL DEFAULT 0 CHECK (balance >= 0),
     locked_balance NUMERIC(18,2) NOT NULL DEFAULT 0 CHECK (locked_balance >= 0),
     currency_code  VARCHAR(10) NOT NULL DEFAULT 'VND',
@@ -347,12 +425,12 @@ CREATE TABLE wallet (
 );
 
 -- =========================================================
--- PAYMENT TRANSACTION  (external / gateway)
+-- PAYMENT TRANSACTION  (giao dịch cổng thanh toán ngoài)
 -- =========================================================
 CREATE TABLE payment_transaction (
     payment_txn_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_entity_type VARCHAR(50),
-    business_entity_id   UUID,          -- polymorphic: no FK by design
+    business_entity_id   UUID,          -- polymorphic: không FK theo thiết kế
     transaction_type     VARCHAR(50)
                          CHECK (transaction_type IN ('DEPOSIT', 'WITHDRAWAL', 'PAYOUT', 'REFUND')),
     amount               NUMERIC(18,2) NOT NULL CHECK (amount >= 0),
@@ -367,11 +445,11 @@ CREATE TABLE payment_transaction (
 );
 
 -- =========================================================
--- WALLET TRANSACTION  (internal ledger)
+-- WALLET TRANSACTION  (sổ cái nội bộ)
 -- =========================================================
 CREATE TABLE wallet_transaction (
     wallet_txn_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    wallet_id           UUID REFERENCES wallet(wallet_id),
+    wallet_id           UUID NOT NULL REFERENCES wallet(wallet_id),
     entry_type          VARCHAR(20) NOT NULL CHECK (entry_type IN ('DEBIT', 'CREDIT')),
     txn_category        VARCHAR(50)
                         CHECK (txn_category IN ('DEPOSIT', 'WITHDRAWAL', 'BET_STAKE',
@@ -379,19 +457,19 @@ CREATE TABLE wallet_transaction (
     amount              NUMERIC(18,2) NOT NULL CHECK (amount >= 0),
     balance_after       NUMERIC(18,2) NOT NULL CHECK (balance_after >= 0),
     related_entity_type VARCHAR(50),
-    related_entity_id   UUID,          -- polymorphic: no FK by design
+    related_entity_id   UUID,          -- polymorphic: không FK theo thiết kế
     payment_txn_id      UUID REFERENCES payment_transaction(payment_txn_id),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
--- PREDICTION
+-- PREDICTION  (Bet - dự đoán kết quả của khán giả)
 -- =========================================================
 CREATE TABLE prediction (
     prediction_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    race_id             UUID REFERENCES race(race_id),
-    spectator_user_id   UUID REFERENCES app_user(user_id),
-    predicted_entry_id  UUID REFERENCES race_entry(entry_id),
+    race_id             UUID NOT NULL REFERENCES race(race_id),
+    spectator_user_id   UUID NOT NULL REFERENCES app_user(user_id),
+    predicted_entry_id  UUID REFERENCES race_entry(entry_id),  -- nullable cho cược tổ hợp (EXACTA...)
     prediction_type     VARCHAR(50)
                         CHECK (prediction_type IN ('WIN', 'PLACE', 'SHOW', 'EXACTA', 'QUINELLA')),
     locked_odds         NUMERIC(10,2) CHECK (locked_odds IS NULL OR locked_odds >= 0),
@@ -403,16 +481,15 @@ CREATE TABLE prediction (
     settled_at          TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- one bet of a given type per spectator per race
-    UNIQUE (race_id, spectator_user_id, prediction_type)
+    UNIQUE (race_id, spectator_user_id, prediction_type)  -- 1 loại cược / khán giả / cuộc đua
 );
 
 -- =========================================================
--- PAYOUT
+-- PAYOUT  (chi thưởng cho dự đoán thắng)
 -- =========================================================
 CREATE TABLE payout (
     payout_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    prediction_id      UUID UNIQUE REFERENCES prediction(prediction_id),
+    prediction_id      UUID NOT NULL UNIQUE REFERENCES prediction(prediction_id),
     payout_amount      NUMERIC(18,2) NOT NULL CHECK (payout_amount >= 0),
     wallet_txn_id      UUID REFERENCES wallet_transaction(wallet_txn_id),
     status             VARCHAR(50) NOT NULL DEFAULT 'PENDING'
@@ -423,7 +500,7 @@ CREATE TABLE payout (
 );
 
 -- =========================================================
--- PRIZE
+-- PRIZE  (tiền thưởng cho chủ ngựa/jockey/ngựa theo thứ hạng)
 -- =========================================================
 CREATE TABLE prize (
     prize_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -438,16 +515,18 @@ CREATE TABLE prize (
     status            VARCHAR(50) NOT NULL DEFAULT 'DRAFT'
                       CHECK (status IN ('DRAFT', 'ANNOUNCED', 'AWARDED', 'PAID', 'CANCELLED')),
     created_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- prize phải gắn với giải HOẶC cuộc đua (không treo lơ lửng)
+    CHECK (tournament_id IS NOT NULL OR race_id IS NOT NULL)
 );
 
 -- =========================================================
--- ATTACHMENT
+-- ATTACHMENT  (tài liệu: hồ sơ ngựa, ảnh, biên bản...)
 -- =========================================================
 CREATE TABLE attachment (
     attachment_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_entity_type   VARCHAR(50),
-    owner_entity_id     UUID,          -- polymorphic: no FK by design
+    owner_entity_id     UUID,          -- polymorphic: không FK theo thiết kế
     object_key          TEXT,
     file_name           VARCHAR(255),
     mime_type           VARCHAR(100),
@@ -466,7 +545,7 @@ CREATE TABLE audit_log (
     actor_user_id  UUID REFERENCES app_user(user_id),
     race_id        UUID REFERENCES race(race_id),
     entity_type    VARCHAR(50),
-    entity_id      UUID,             -- polymorphic: no FK by design
+    entity_id      UUID,             -- polymorphic: không FK theo thiết kế
     action_type    VARCHAR(100),
     old_value_json JSONB,
     new_value_json JSONB,
@@ -476,11 +555,11 @@ CREATE TABLE audit_log (
 );
 
 -- =========================================================
--- NOTIFICATION
+-- NOTIFICATION  (thông báo: thưởng dự đoán, mời jockey, kết quả...)
 -- =========================================================
 CREATE TABLE notification (
     notification_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    recipient_user_id UUID REFERENCES app_user(user_id),
+    recipient_user_id UUID NOT NULL REFERENCES app_user(user_id),
     title             VARCHAR(255),
     message           TEXT,
     channel           VARCHAR(50)
@@ -493,44 +572,50 @@ CREATE TABLE notification (
 );
 
 -- =========================================================
--- PASSWORD RESET TOKEN (6-digit OTP for forgot-password flow)
--- Stores only a HASH of the 6-digit code, never the raw value.
--- =========================================================
-CREATE TABLE password_reset_token (
-    token_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID NOT NULL REFERENCES app_user(user_id),
-    code_hash   VARCHAR(255) NOT NULL,
-    expires_at  TIMESTAMPTZ NOT NULL,
-    used        BOOLEAN NOT NULL DEFAULT FALSE,
-    used_at     TIMESTAMPTZ,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- =========================================================
 -- INDEXES
 -- =========================================================
 CREATE INDEX idx_app_user_role_id             ON app_user(role_id);
 CREATE INDEX idx_horse_owner_user_id          ON horse(owner_user_id);
+CREATE INDEX idx_round_tournament_id          ON tournament_round(tournament_id);
 CREATE INDEX idx_race_tournament_id           ON race(tournament_id);
+CREATE INDEX idx_race_round_id                ON race(round_id);
 CREATE INDEX idx_race_status                  ON race(status);
 CREATE INDEX idx_race_schedule                ON race(scheduled_start_at);
 CREATE INDEX idx_registration_tournament_id   ON tournament_registration(tournament_id);
 CREATE INDEX idx_registration_horse_id        ON tournament_registration(horse_id);
+CREATE INDEX idx_registration_owner_id        ON tournament_registration(owner_user_id);
 CREATE INDEX idx_race_entry_race_id           ON race_entry(race_id);
 CREATE INDEX idx_race_entry_registration_id   ON race_entry(registration_id);
 CREATE INDEX idx_jockey_assignment_jockey     ON jockey_assignment(jockey_user_id);
 CREATE INDEX idx_referee_assignment_race_id   ON referee_assignment(race_id);
+CREATE INDEX idx_referee_assignment_referee   ON referee_assignment(referee_user_id);
 CREATE INDEX idx_race_result_race_id          ON race_result(race_id);
+CREATE INDEX idx_race_result_position         ON race_result(race_id, finish_position);
+CREATE INDEX idx_result_version_result_id     ON race_result_version(result_id);
+CREATE INDEX idx_referee_report_race_id       ON referee_report(race_id);
+CREATE INDEX idx_penalty_race_id              ON penalty(race_id);
+CREATE INDEX idx_penalty_entry_id             ON penalty(entry_id);
+CREATE INDEX idx_standing_tournament_id       ON standing(tournament_id);
 CREATE INDEX idx_prediction_race_id           ON prediction(race_id);
 CREATE INDEX idx_prediction_user_id           ON prediction(spectator_user_id);
+CREATE INDEX idx_payout_prediction_id         ON payout(prediction_id);
+CREATE INDEX idx_prize_tournament_id          ON prize(tournament_id);
+CREATE INDEX idx_prize_race_id                ON prize(race_id);
 CREATE INDEX idx_wallet_transaction_wallet_id ON wallet_transaction(wallet_id);
 CREATE INDEX idx_payment_transaction_status   ON payment_transaction(payment_status);
 CREATE INDEX idx_audit_log_race_id            ON audit_log(race_id);
 CREATE INDEX idx_audit_log_entity             ON audit_log(entity_type, entity_id);
 CREATE INDEX idx_notification_recipient       ON notification(recipient_user_id);
-CREATE INDEX idx_refresh_token_user_id ON refresh_token(user_id);
+CREATE INDEX idx_refresh_token_user_id        ON refresh_token(user_id);
 CREATE INDEX idx_password_reset_token_user_id ON password_reset_token(user_id);
 
 -- =========================================================
--- END  --  V2 (schema-only)
+-- GHI CHÚ: updated_at do tầng ứng dụng quản lý qua Hibernate @UpdateTimestamp
+-- (xem users/entity/User.java). File này là schema-only, KHÔNG dùng
+-- trigger/function ở tầng DB (tránh xung đột với app và tránh lỗi tách câu
+-- lệnh dollar-quote $$ của spring.sql.init lúc khởi động).
+-- =========================================================
+
+-- =========================================================
+-- END  --  V3 (complete)
 -- =========================================================

@@ -3,6 +3,7 @@ package com.SWP391.horserace.users.service.impl;
 import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
+import com.SWP391.horserace.users.dto.UpdateProfileRequest;
 import com.SWP391.horserace.users.dto.UserResponse;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.repository.UserRepository;
@@ -24,9 +25,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(readOnly = true)
     public UserResponse getUserById(UUID id) {
-        User user = userRepository.findByUserIdAndDeletedFalse(id)
-                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
-        return mapToResponse(user);
+        return mapToResponse(loadActiveUser(id));
     }
 
     @Override
@@ -35,6 +34,37 @@ public class UserServiceImpl implements UserService {
         return userRepository.findAllByDeletedFalse().stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public UserResponse getMyProfile(UUID userId) {
+        return mapToResponse(loadActiveUser(userId));
+    }
+
+    @Override
+    @Transactional
+    public UserResponse updateMyProfile(UUID userId, UpdateProfileRequest request) {
+        User user = loadActiveUser(userId);
+
+        // Partial update: only apply the fields the client actually sent (non-null).
+        if (request.fullName() != null) {
+            user.setFullName(request.fullName().trim());
+        }
+        if (request.phone() != null) {
+            user.setPhone(request.phone().trim());
+        }
+        if (request.avatarUrl() != null) {
+            user.setAvatarUrl(request.avatarUrl().trim());
+        }
+
+        // updated_at is maintained by Hibernate @UpdateTimestamp on flush.
+        return mapToResponse(userRepository.save(user));
+    }
+
+    private User loadActiveUser(UUID userId) {
+        return userRepository.findByUserIdAndDeletedFalse(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
     }
 
     private UserResponse mapToResponse(User user) {

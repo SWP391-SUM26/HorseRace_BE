@@ -1,6 +1,9 @@
 package com.SWP391.horserace.auth.service.impl;
 
 import com.SWP391.horserace.auth.dto.AuthResponse;
+import com.SWP391.horserace.auth.dto.RegisterJockeyRequest;
+import com.SWP391.horserace.auth.dto.RegisterOwnerRequest;
+import com.SWP391.horserace.auth.dto.RegisterSpectatorRequest;
 import com.SWP391.horserace.auth.service.AuthService;
 import com.SWP391.horserace.auth.service.GoogleTokenVerifier;
 import com.SWP391.horserace.auth.service.GoogleTokenVerifier.GooglePrincipal;
@@ -35,10 +38,15 @@ public class AuthServiceImpl implements AuthService {
     private final RefreshTokenService refreshTokenService;
     private final GoogleTokenVerifier googleTokenVerifier;
 
+    // =========================================================
+    // Login / token management
+    // =========================================================
+
     @Override
     @Transactional
     public AuthResponse login(String email, String rawPassword, String userAgent) {
-        User user = userRepository.findByEmailAndDeletedFalse(email)
+        String normalizedEmail = email != null ? email.trim().toLowerCase() : null;
+        User user = userRepository.findByEmailAndDeletedFalse(normalizedEmail)
                 .orElseThrow(() -> new AppException(ErrorCode.INVALID_CREDENTIALS));
 
         if (!passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
@@ -74,7 +82,116 @@ public class AuthServiceImpl implements AuthService {
         refreshTokenService.revoke(rawRefreshToken);
     }
 
-    // ---- helpers ----
+    // =========================================================
+    // Registration — Spectator
+    // =========================================================
+
+    /**
+     * Registers a new SPECTATOR account.
+     *
+     * <p>Validates email uniqueness and password match, then saves the user and
+     * immediately issues access + refresh tokens (no separate login step needed).
+     */
+    @Override
+    @Transactional
+    public AuthResponse registerSpectator(RegisterSpectatorRequest request, String userAgent) {
+        String normalizedEmail = request.email().trim().toLowerCase();
+        validateEmailAvailable(normalizedEmail);
+        validatePasswordMatch(request.password(), request.confirmPassword());
+
+        Role role = lookupRole("SPECTATOR");
+
+        User user = User.builder()
+                .role(role)
+                .userCode(generateUserCode())
+                .fullName(request.fullName().trim())
+                .email(normalizedEmail)
+                .phone(request.phone())
+                .passwordHash(passwordEncoder.encode(request.password()))
+                .status(UserStatus.ACTIVE)
+                .kycStatus(KycStatus.PENDING)
+                .build();
+
+        userRepository.save(user);
+        return issueTokens(user, userAgent);
+    }
+
+    // =========================================================
+    // Registration — Horse Owner
+    // =========================================================
+
+    /**
+     * Registers a new HORSE_OWNER account.
+     *
+     * <p>Stores fullName, email, contactNumber, and avatarUrl in {@code app_user}.
+     * Extended profile fields (stableName, bio, primaryRegion) will be persisted in a
+     * dedicated {@code owner_profile} table when that module is built.
+     */
+    @Override
+    @Transactional
+    public AuthResponse registerOwner(RegisterOwnerRequest request, String userAgent) {
+        String normalizedEmail = request.email().trim().toLowerCase();
+        validateEmailAvailable(normalizedEmail);
+        validatePasswordMatch(request.password(), request.confirmPassword());
+
+        Role role = lookupRole("HORSE_OWNER");
+
+        User user = User.builder()
+                .role(role)
+                .userCode(generateUserCode())
+                .fullName(request.fullName().trim())
+                .email(normalizedEmail)
+                .phone(request.contactNumber())
+                .avatarUrl(request.avatarUrl())
+                .passwordHash(passwordEncoder.encode(request.password()))
+                .status(UserStatus.ACTIVE)
+                .kycStatus(KycStatus.PENDING)
+                .build();
+
+        userRepository.save(user);
+        return issueTokens(user, userAgent);
+    }
+
+    // =========================================================
+    // Registration — Jockey
+    // =========================================================
+
+    /**
+     * Registers a new JOCKEY account.
+     *
+     * <p>firstName + lastName are combined into {@code fullName}.
+     * Extended profile fields (age, weight, nationality, yearsActive, ridingStyle,
+     * jockeyLicenseUrl, fitnessCertificateUrl) will be persisted in a dedicated
+     * {@code jockey_profile} table when that module is built.
+     */
+    @Override
+    @Transactional
+    public AuthResponse registerJockey(RegisterJockeyRequest request, String userAgent) {
+        String normalizedEmail = request.email().trim().toLowerCase();
+        validateEmailAvailable(normalizedEmail);
+        validatePasswordMatch(request.password(), request.confirmPassword());
+
+        Role role = lookupRole("JOCKEY");
+
+        String fullName = (request.firstName() + " " + request.lastName()).trim();
+
+        User user = User.builder()
+                .role(role)
+                .userCode(generateUserCode())
+                .fullName(fullName)
+                .email(normalizedEmail)
+                .passwordHash(passwordEncoder.encode(request.password()))
+                .status(UserStatus.ACTIVE)
+                .kycStatus(KycStatus.PENDING)
+                .build();
+
+        userRepository.save(user);
+        return issueTokens(user, userAgent);
+    }
+
+    // =========================================================
+    // Private helpers
+    // =========================================================
 
     private AuthResponse issueTokens(User user, String userAgent) {
         String accessToken = jwtService.generateAccessToken(user);
@@ -100,13 +217,37 @@ public class AuthServiceImpl implements AuthService {
         }
     }
 
-    private User provisionGoogleUser(GooglePrincipal principal) {
-        Role role = roleRepository.findByRoleCode(DEFAULT_GOOGLE_ROLE)
+    /** Throws {@link ErrorCode#EMAIL_ALREADY_EXISTS} if the email is already taken. */
+    private void validateEmailAvailable(String email) {
+        if (userRepository.existsByEmail(email)) {
+            throw new AppException(ErrorCode.EMAIL_ALREADY_EXISTS);
+        }
+    }
+
+    /** Throws {@link ErrorCode#PASSWORD_MISMATCH} if the two password strings differ. */
+    private void validatePasswordMatch(String password, String confirmPassword) {
+        if (!password.equals(confirmPassword)) {
+            throw new AppException(ErrorCode.PASSWORD_MISMATCH);
+        }
+    }
+
+    /** Looks up a {@link Role} by code; throws {@link ErrorCode#ROLE_NOT_EXISTED} if missing. */
+    private Role lookupRole(String roleCode) {
+        return roleRepository.findByRoleCode(roleCode)
                 .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
+    }
+
+    /** Generates a short, human-readable user code: {@code USR-XXXXXXXX}. */
+    private String generateUserCode() {
+        return "USR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+    }
+
+    private User provisionGoogleUser(GooglePrincipal principal) {
+        Role role = lookupRole(DEFAULT_GOOGLE_ROLE);
 
         User user = User.builder()
                 .role(role)
-                .userCode("USR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                .userCode(generateUserCode())
                 .fullName(principal.name())
                 .email(principal.email())
                 // Random un-guessable hash: Google users authenticate via Google, not this password.
