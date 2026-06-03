@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Pattern;
 
 /**
  * Payload for spectator self-registration.
@@ -20,10 +21,12 @@ public record RegisterSpectatorRequest(
         String email,
 
         /** Optional — user may omit phone number. */
+        @Pattern(regexp = "^$|^(0|\\+84|84)[35789][0-9]{8}$", message = "INVALID_PHONE_FORMAT")
         String phone,
 
         @NotBlank(message = "Password is required")
-        @Size(min = 8, message = "Password must be at least 8 characters")
+        @Size(min = 8, message = "INVALID_PASSWORD")
+        @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^a-zA-Z0-9]).*$", message = "WEAK_PASSWORD")
         String password,
 
         @NotBlank(message = "Confirm password is required")
