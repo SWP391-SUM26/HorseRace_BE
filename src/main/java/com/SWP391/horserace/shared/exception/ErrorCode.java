@@ -37,7 +37,10 @@ public enum ErrorCode {
     RESET_CODE_USED(1019, "Reset code has already been used", HttpStatus.BAD_REQUEST),
     RESET_CODE_COOLDOWN(1020, "Please wait before requesting a new code", HttpStatus.TOO_MANY_REQUESTS),
     EMAIL_SEND_FAILED(1021, "Failed to send email", HttpStatus.INTERNAL_SERVER_ERROR),
-    PASSWORD_TOO_WEAK(1022, "Password must be at least 8 characters and contain 1 number and 1 symbol", HttpStatus.BAD_REQUEST);
+    PASSWORD_TOO_WEAK(1022, "Password must be at least 8 characters and contain 1 number and 1 symbol", HttpStatus.BAD_REQUEST),
+
+    // ---- jockey ----
+    JOCKEY_NOT_FOUND(2001, "Jockey profile not found", HttpStatus.NOT_FOUND);
 
     private final int code;
     private final String message;
