@@ -45,7 +45,8 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse login(String email, String rawPassword, String userAgent) {
-        User user = userRepository.findByEmailAndDeletedFalse(email)
+        String normalizedEmail = email != null ? email.trim().toLowerCase() : null;
+        User user = userRepository.findByEmailAndDeletedFalse(normalizedEmail)
                 .orElseThrow(() -> new AppException(ErrorCode.INVALID_CREDENTIALS));
 
         if (!passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
@@ -94,7 +95,8 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse registerSpectator(RegisterSpectatorRequest request, String userAgent) {
-        validateEmailAvailable(request.email());
+        String normalizedEmail = request.email().trim().toLowerCase();
+        validateEmailAvailable(normalizedEmail);
         validatePasswordMatch(request.password(), request.confirmPassword());
 
         Role role = lookupRole("SPECTATOR");
@@ -102,8 +104,8 @@ public class AuthServiceImpl implements AuthService {
         User user = User.builder()
                 .role(role)
                 .userCode(generateUserCode())
-                .fullName(request.fullName())
-                .email(request.email())
+                .fullName(request.fullName().trim())
+                .email(normalizedEmail)
                 .phone(request.phone())
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .status(UserStatus.ACTIVE)
@@ -128,7 +130,8 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse registerOwner(RegisterOwnerRequest request, String userAgent) {
-        validateEmailAvailable(request.email());
+        String normalizedEmail = request.email().trim().toLowerCase();
+        validateEmailAvailable(normalizedEmail);
         validatePasswordMatch(request.password(), request.confirmPassword());
 
         Role role = lookupRole("HORSE_OWNER");
@@ -136,8 +139,8 @@ public class AuthServiceImpl implements AuthService {
         User user = User.builder()
                 .role(role)
                 .userCode(generateUserCode())
-                .fullName(request.fullName())
-                .email(request.email())
+                .fullName(request.fullName().trim())
+                .email(normalizedEmail)
                 .phone(request.contactNumber())
                 .avatarUrl(request.avatarUrl())
                 .passwordHash(passwordEncoder.encode(request.password()))
@@ -164,7 +167,8 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse registerJockey(RegisterJockeyRequest request, String userAgent) {
-        validateEmailAvailable(request.email());
+        String normalizedEmail = request.email().trim().toLowerCase();
+        validateEmailAvailable(normalizedEmail);
         validatePasswordMatch(request.password(), request.confirmPassword());
 
         Role role = lookupRole("JOCKEY");
@@ -175,7 +179,7 @@ public class AuthServiceImpl implements AuthService {
                 .role(role)
                 .userCode(generateUserCode())
                 .fullName(fullName)
-                .email(request.email())
+                .email(normalizedEmail)
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .status(UserStatus.ACTIVE)
                 .kycStatus(KycStatus.PENDING)
