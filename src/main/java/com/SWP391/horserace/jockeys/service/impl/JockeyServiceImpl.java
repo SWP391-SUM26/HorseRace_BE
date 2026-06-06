@@ -1,8 +1,10 @@
 package com.SWP391.horserace.jockeys.service.impl;
 
+import com.SWP391.horserace.jockeys.dto.JockeyFilterRequest;
 import com.SWP391.horserace.jockeys.dto.JockeyResponse;
 import com.SWP391.horserace.jockeys.entity.JockeyProfile;
 import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
+import com.SWP391.horserace.jockeys.repository.JockeyProfileSpecification;
 import com.SWP391.horserace.jockeys.service.JockeyService;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
@@ -37,6 +39,30 @@ public class JockeyServiceImpl implements JockeyService {
         return mapToResponse(profile);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<JockeyResponse> searchJockeys(String keyword) {
+        List<JockeyProfile> profiles;
+        if (keyword == null || keyword.isBlank()) {
+            profiles = jockeyProfileRepository.findAllActiveJockeys();
+        } else {
+            profiles = jockeyProfileRepository.searchByKeyword(keyword.trim());
+        }
+        return profiles.stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<JockeyResponse> filterJockeys(JockeyFilterRequest filter) {
+        return jockeyProfileRepository
+                .findAll(JockeyProfileSpecification.withFilters(filter))
+                .stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
     private JockeyResponse mapToResponse(JockeyProfile profile) {
         User user = profile.getJockeyUser();
         return JockeyResponse.builder()
@@ -57,3 +83,4 @@ public class JockeyServiceImpl implements JockeyService {
                 .build();
     }
 }
+

@@ -1,5 +1,6 @@
 package com.SWP391.horserace.jockeys.service;
 
+import com.SWP391.horserace.jockeys.dto.JockeyFilterRequest;
 import com.SWP391.horserace.jockeys.dto.JockeyResponse;
 
 import java.util.List;
@@ -12,4 +13,11 @@ public interface JockeyService {
 
     /** Get a single jockey profile by the jockey's user id. */
     JockeyResponse getJockeyById(UUID jockeyUserId);
+
+    /** Search jockeys by keyword (name, email, license, userCode). */
+    List<JockeyResponse> searchJockeys(String keyword);
+
+    /** Filter jockeys by multiple optional criteria (experience, weight, height, wins, etc.). */
+    List<JockeyResponse> filterJockeys(JockeyFilterRequest filter);
 }
+
