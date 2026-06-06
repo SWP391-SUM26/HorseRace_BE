@@ -5,6 +5,7 @@ import com.SWP391.horserace.jockeys.dto.JockeyResponse;
 import com.SWP391.horserace.jockeys.service.JockeyService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -66,6 +67,30 @@ public class JockeyController {
                 .success(true)
                 .message("Search results")
                 .data(jockeyService.searchJockeys(keyword))
+                .build();
+    }
+
+    /**
+     * GET /api/v1/jockeys/page — paginated listing of jockeys with sorting.
+     *
+     * <p>Query parameters:
+     * <ul>
+     *   <li>{@code page}    — page number (0-indexed, default 0)</li>
+     *   <li>{@code size}    — page size (default 10)</li>
+     *   <li>{@code sortBy}  — winCount (default), experienceYrs, bodyWeight, heightCm, fullName</li>
+     *   <li>{@code sortDir} — asc / desc (default: desc)</li>
+     * </ul>
+     */
+    @GetMapping("/page")
+    public ApiResponse<Page<JockeyResponse>> getJockeysPaginated(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "winCount") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir) {
+        return ApiResponse.<Page<JockeyResponse>>builder()
+                .success(true)
+                .message("Paginated jockeys")
+                .data(jockeyService.getJockeysPaginated(page, size, sortBy, sortDir))
                 .build();
     }
 

@@ -2,6 +2,7 @@ package com.SWP391.horserace.jockeys.service;
 
 import com.SWP391.horserace.jockeys.dto.JockeyFilterRequest;
 import com.SWP391.horserace.jockeys.dto.JockeyResponse;
+import org.springframework.data.domain.Page;
 
 import java.util.List;
 import java.util.UUID;
@@ -19,5 +20,8 @@ public interface JockeyService {
 
     /** Filter jockeys by multiple optional criteria (experience, weight, height, wins, etc.). */
     List<JockeyResponse> filterJockeys(JockeyFilterRequest filter);
+
+    /** Paginated listing of jockeys with configurable sorting. */
+    Page<JockeyResponse> getJockeysPaginated(int page, int size, String sortBy, String sortDir);
 }
 

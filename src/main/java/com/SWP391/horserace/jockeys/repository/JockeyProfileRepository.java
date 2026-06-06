@@ -1,6 +1,8 @@
 package com.SWP391.horserace.jockeys.repository;
 
 import com.SWP391.horserace.jockeys.entity.JockeyProfile;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -55,4 +57,21 @@ public interface JockeyProfileRepository extends JpaRepository<JockeyProfile, UU
        ORDER BY jp.winCount DESC
       """)
   List<JockeyProfile> searchByKeyword(String keyword);
+
+  /**
+   * Paginated listing of active jockey profiles with eager-fetched User and Role.
+   * Sorting is driven by the Pageable parameter.
+   */
+  @Query(value = """
+      SELECT jp FROM JockeyProfile jp
+        JOIN FETCH jp.jockeyUser u
+        JOIN FETCH u.role
+       WHERE u.deleted = false
+      """,
+      countQuery = """
+      SELECT COUNT(jp) FROM JockeyProfile jp
+        JOIN jp.jockeyUser u
+       WHERE u.deleted = false
+      """)
+  Page<JockeyProfile> findAllActiveJockeysPaged(Pageable pageable);
 }

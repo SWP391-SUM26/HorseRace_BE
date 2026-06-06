@@ -10,6 +10,10 @@ import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.users.entity.User;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -61,6 +65,27 @@ public class JockeyServiceImpl implements JockeyService {
                 .stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<JockeyResponse> getJockeysPaginated(int page, int size, String sortBy, String sortDir) {
+        String field = switch (sortBy != null ? sortBy : "winCount") {
+            case "experienceYrs" -> "experienceYrs";
+            case "bodyWeight" -> "bodyWeight";
+            case "heightCm" -> "heightCm";
+            case "fullName" -> "jockeyUser.fullName";
+            default -> "winCount";
+        };
+
+        Sort.Direction direction = "asc".equalsIgnoreCase(sortDir)
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, field));
+
+        return jockeyProfileRepository.findAllActiveJockeysPaged(pageable)
+                .map(this::mapToResponse);
     }
 
     private JockeyResponse mapToResponse(JockeyProfile profile) {
