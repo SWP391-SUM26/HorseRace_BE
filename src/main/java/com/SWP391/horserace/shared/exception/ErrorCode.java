@@ -37,7 +37,21 @@ public enum ErrorCode {
     RESET_CODE_USED(1019, "Reset code has already been used", HttpStatus.BAD_REQUEST),
     RESET_CODE_COOLDOWN(1020, "Please wait before requesting a new code", HttpStatus.TOO_MANY_REQUESTS),
     EMAIL_SEND_FAILED(1021, "Failed to send email", HttpStatus.INTERNAL_SERVER_ERROR),
-    PASSWORD_TOO_WEAK(1022, "Password must be at least 8 characters and contain 1 number and 1 symbol", HttpStatus.BAD_REQUEST);
+    PASSWORD_TOO_WEAK(1022, "Password must be at least 8 characters and contain 1 number and 1 symbol", HttpStatus.BAD_REQUEST),
+
+    // ---- jockey ----
+    JOCKEY_NOT_FOUND(2001, "Jockey profile not found", HttpStatus.NOT_FOUND),
+
+    // ---- jockey assignment / invitation ----
+    ASSIGNMENT_NOT_FOUND(2002, "Jockey assignment not found", HttpStatus.NOT_FOUND),
+    ENTRY_NOT_FOUND(2003, "Race entry not found", HttpStatus.NOT_FOUND),
+    ENTRY_ALREADY_ASSIGNED(2004, "This race entry already has a jockey assigned", HttpStatus.CONFLICT),
+    JOCKEY_ALREADY_INVITED(2005, "This jockey already has a pending invitation for this entry", HttpStatus.CONFLICT),
+    INVITATION_NOT_PENDING(2006, "Invitation is not in INVITED status", HttpStatus.BAD_REQUEST),
+    INVITATION_CANNOT_CANCEL(2007, "Only INVITED status invitations can be cancelled", HttpStatus.BAD_REQUEST),
+    NOT_INVITATION_OWNER(2008, "You are not the owner who sent this invitation", HttpStatus.FORBIDDEN),
+    NOT_INVITED_JOCKEY(2009, "You are not the jockey invited for this assignment", HttpStatus.FORBIDDEN),
+    OWNER_NOT_MATCH(2010, "You are not the owner of this horse entry", HttpStatus.FORBIDDEN);
 
     private final int code;
     private final String message;

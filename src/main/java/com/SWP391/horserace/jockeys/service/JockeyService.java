@@ -1,0 +1,27 @@
+package com.SWP391.horserace.jockeys.service;
+
+import com.SWP391.horserace.jockeys.dto.JockeyFilterRequest;
+import com.SWP391.horserace.jockeys.dto.JockeyResponse;
+import org.springframework.data.domain.Page;
+
+import java.util.List;
+import java.util.UUID;
+
+public interface JockeyService {
+
+    /** List all active jockey profiles (ordered by win count descending). */
+    List<JockeyResponse> getAllJockeys();
+
+    /** Get a single jockey profile by the jockey's user id. */
+    JockeyResponse getJockeyById(UUID jockeyUserId);
+
+    /** Search jockeys by keyword (name, email, license, userCode). */
+    List<JockeyResponse> searchJockeys(String keyword);
+
+    /** Filter jockeys by multiple optional criteria (experience, weight, height, wins, etc.). */
+    List<JockeyResponse> filterJockeys(JockeyFilterRequest filter);
+
+    /** Paginated listing of jockeys with configurable sorting. */
+    Page<JockeyResponse> getJockeysPaginated(int page, int size, String sortBy, String sortDir);
+}
+
