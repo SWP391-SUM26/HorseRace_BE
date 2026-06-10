@@ -153,3 +153,23 @@ INSERT INTO jockey_assignment (assignment_id, entry_id, jockey_user_id, status, 
         '11111111-1111-1111-1111-111111111111',
         'INVITED', CURRENT_TIMESTAMP, NULL,
         (SELECT user_id FROM app_user WHERE email = 'owner@horserace.local'));
+
+-- =========================================================
+-- SEED DATA FOR STAFFING MANAGEMENT MODULE
+-- (referee users + referee assignments)
+-- =========================================================
+
+-- Seed Referee Users
+INSERT INTO app_user (user_id, role_id, user_code, full_name, email, phone, password_hash, status, kyc_status) VALUES
+    ('33333333-3333-3333-3333-333333333333', (SELECT role_id FROM role WHERE role_code = 'RACE_REFEREE'),
+        'USR0007', 'John Smith', 'john.smith@horserace.local', '0900000007',
+        'referee123', 'ACTIVE', 'VERIFIED'),
+    ('44444444-4444-4444-4444-444444444444', (SELECT role_id FROM role WHERE role_code = 'RACE_REFEREE'),
+        'USR0008', 'Michael Brown', 'michael.brown@horserace.local', '0900000008',
+        'referee123', 'ACTIVE', 'VERIFIED');
+
+-- Seed Referee Assignments
+INSERT INTO referee_assignment (race_id, referee_user_id, panel_role, status, assigned_at, created_by_user_id) VALUES
+    ('cccc1111-cccc-1111-cccc-111111111111', '33333333-3333-3333-3333-333333333333',
+        'CHIEF', 'ASSIGNED', CURRENT_TIMESTAMP,
+        (SELECT user_id FROM app_user WHERE email = 'admin@horserace.local'));

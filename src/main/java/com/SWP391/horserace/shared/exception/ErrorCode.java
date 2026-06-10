@@ -51,7 +51,16 @@ public enum ErrorCode {
     INVITATION_CANNOT_CANCEL(2007, "Only INVITED status invitations can be cancelled", HttpStatus.BAD_REQUEST),
     NOT_INVITATION_OWNER(2008, "You are not the owner who sent this invitation", HttpStatus.FORBIDDEN),
     NOT_INVITED_JOCKEY(2009, "You are not the jockey invited for this assignment", HttpStatus.FORBIDDEN),
-    OWNER_NOT_MATCH(2010, "You are not the owner of this horse entry", HttpStatus.FORBIDDEN);
+    OWNER_NOT_MATCH(2010, "You are not the owner of this horse entry", HttpStatus.FORBIDDEN),
+
+    // ---- staffing / referee assignment ----
+    STAFF_NOT_FOUND(3001, "Staff member not found", HttpStatus.NOT_FOUND),
+    STAFF_NOT_REFEREE(3002, "User is not a referee", HttpStatus.BAD_REQUEST),
+    RACE_NOT_FOUND(3003, "Race not found", HttpStatus.NOT_FOUND),
+    REFEREE_ALREADY_ASSIGNED(3004, "Referee is already assigned to this race", HttpStatus.CONFLICT),
+    REFEREE_ASSIGNMENT_NOT_FOUND(3005, "Referee assignment not found", HttpStatus.NOT_FOUND),
+    ASSIGNMENT_ALREADY_REVOKED(3006, "Assignment has already been revoked", HttpStatus.BAD_REQUEST),
+    STAFF_EMAIL_EXISTED(3007, "Email is already registered", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;
