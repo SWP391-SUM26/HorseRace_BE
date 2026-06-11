@@ -51,7 +51,12 @@ public enum ErrorCode {
     INVITATION_CANNOT_CANCEL(2007, "Only INVITED status invitations can be cancelled", HttpStatus.BAD_REQUEST),
     NOT_INVITATION_OWNER(2008, "You are not the owner who sent this invitation", HttpStatus.FORBIDDEN),
     NOT_INVITED_JOCKEY(2009, "You are not the jockey invited for this assignment", HttpStatus.FORBIDDEN),
-    OWNER_NOT_MATCH(2010, "You are not the owner of this horse entry", HttpStatus.FORBIDDEN);
+    OWNER_NOT_MATCH(2010, "You are not the owner of this horse entry", HttpStatus.FORBIDDEN),
+
+    // ---- tournament ----
+    TOURNAMENT_NOT_FOUND(3001, "Tournament not found", HttpStatus.NOT_FOUND),
+    TOURNAMENT_CODE_EXISTED(3002, "Tournament code already existed", HttpStatus.CONFLICT),
+    TOURNAMENT_INVALID_STATUS(3003, "Invalid status transition for tournament", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;
