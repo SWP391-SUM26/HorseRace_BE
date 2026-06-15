@@ -8,7 +8,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -57,6 +59,25 @@ public class PaymentTransaction {
 
     @Column(name = "external_txn_ref")
     private String externalTxnRef;
+
+    /** Makes deposit/withdraw idempotent against retries. */
+    @Column(name = "idempotency_key", length = 255, unique = true)
+    private String idempotencyKey;
+
+    /** Payment gateway used; 'MOCK' for the simulated gateway. */
+    @Column(name = "gateway_provider", length = 50)
+    @Builder.Default
+    private String gatewayProvider = "MOCK";
+
+    /** Raw callback body from the (mock) gateway — JSONB column stored as raw JSON text. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "raw_payload")
+    private String rawPayload;
+
+    /** Wallet this transaction funds/draws from (nullable). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "wallet_id")
+    private Wallet wallet;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by_user_id")

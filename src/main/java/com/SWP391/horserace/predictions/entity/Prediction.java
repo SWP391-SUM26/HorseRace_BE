@@ -67,6 +67,10 @@ public class Prediction {
     @Column(name = "settled_at")
     private OffsetDateTime settledAt;
 
+    /** Client-supplied key to make bet submission idempotent (avoid double-submit). */
+    @Column(name = "idempotency_key", length = 255, unique = true)
+    private String idempotencyKey;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private OffsetDateTime createdAt;
