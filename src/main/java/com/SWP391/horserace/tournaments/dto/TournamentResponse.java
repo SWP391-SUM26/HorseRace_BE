@@ -6,12 +6,14 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class TournamentRequest {
+public class TournamentResponse {
+    private UUID tournamentId;
     private String tournamentCode;
     private String name;
     private String description;
@@ -21,4 +23,6 @@ public class TournamentRequest {
     private OffsetDateTime registrationCloseAt;
     private String location;
     private String status;
+    private OffsetDateTime createdAt;
+    private OffsetDateTime updatedAt;
 }
