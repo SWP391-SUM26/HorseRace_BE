@@ -1,0 +1,23 @@
+# =========================================================
+# LOCAL DEV SECRETS — TEMPLATE
+# =========================================================
+# Copy this file to "application-local.properties" (which is gitignored) and fill in values.
+# application.properties imports it via: spring.config.import=optional:classpath:application-local.properties
+# NEVER commit real secrets. In CI/prod, set these as environment variables instead.
+#
+#   cp application-local.properties.example application-local.properties
+#
+# Generate a JWT secret (Base64, decodes to >=256 bits / 32 bytes):
+#   openssl rand -base64 32
+# =========================================================
+
+# JWT signing secret (Base64). Required for the app to start (HS256 needs >=256 bits).
+app.jwt.secret=REPLACE_WITH_openssl_rand_base64_32
+
+# Gmail SMTP for password-reset emails (optional; leave blank to disable email locally).
+# Use a Google App Password (Google Account > Security > App passwords), NOT your login password.
+spring.mail.username=
+spring.mail.password=
+
+# Postgres password override (defaults to 12345 for the docker-compose dev DB).
+#spring.datasource.password=12345
