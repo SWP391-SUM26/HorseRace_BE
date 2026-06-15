@@ -46,9 +46,10 @@ public class TournamentRegistration {
     private String registrationCode;
 
     /** DRAFT | SUBMITTED | UNDER_REVIEW | APPROVED | REJECTED | WITHDRAWN */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "SUBMITTED";
+    private RegistrationStatus status = RegistrationStatus.SUBMITTED;
 
     @Column(name = "submitted_at")
     private OffsetDateTime submittedAt;

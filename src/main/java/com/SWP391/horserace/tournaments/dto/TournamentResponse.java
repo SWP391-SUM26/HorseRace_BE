@@ -1,5 +1,6 @@
 package com.SWP391.horserace.tournaments.dto;
 
+import com.SWP391.horserace.tournaments.entity.TournamentStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -22,7 +23,7 @@ public class TournamentResponse {
     private OffsetDateTime registrationOpenAt;
     private OffsetDateTime registrationCloseAt;
     private String location;
-    private String status;
+    private TournamentStatus status;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

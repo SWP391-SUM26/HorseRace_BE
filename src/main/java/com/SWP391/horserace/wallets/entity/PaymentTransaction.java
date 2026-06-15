@@ -39,8 +39,9 @@ public class PaymentTransaction {
     private UUID businessEntityId;
 
     /** DEPOSIT | WITHDRAWAL | PAYOUT | REFUND */
+    @Enumerated(EnumType.STRING)
     @Column(name = "transaction_type", length = 50)
-    private String transactionType;
+    private PaymentTransactionType transactionType;
 
     @Column(name = "amount", nullable = false, precision = 18, scale = 2)
     private BigDecimal amount;
@@ -53,9 +54,10 @@ public class PaymentTransaction {
     private String paymentMethod;
 
     /** PENDING | SUCCESS | FAILED | CANCELLED | REFUNDED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "payment_status", nullable = false, length = 50)
     @Builder.Default
-    private String paymentStatus = "PENDING";
+    private PaymentStatus paymentStatus = PaymentStatus.PENDING;
 
     @Column(name = "external_txn_ref")
     private String externalTxnRef;

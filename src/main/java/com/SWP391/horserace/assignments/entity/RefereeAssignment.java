@@ -37,13 +37,15 @@ public class RefereeAssignment {
     private User referee;
 
     /** CHIEF | JUDGE | STEWARD | TIMEKEEPER | OBSERVER */
+    @Enumerated(EnumType.STRING)
     @Column(name = "panel_role", length = 50)
-    private String panelRole;
+    private PanelRole panelRole;
 
     /** ASSIGNED | CONFIRMED | REVOKED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "ASSIGNED";
+    private RefereeAssignmentStatus status = RefereeAssignmentStatus.ASSIGNED;
 
     @Column(name = "assigned_at")
     private OffsetDateTime assignedAt;

@@ -40,8 +40,10 @@ public class Role {
     @Column(name = "description", columnDefinition = "text")
     private String description;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 30)
-    private String status;
+    @Builder.Default
+    private RoleStatus status = RoleStatus.ACTIVE;
 
     /** Fine-grained permissions granted to this role (via role_permission join table). */
     @ManyToMany(fetch = FetchType.LAZY)

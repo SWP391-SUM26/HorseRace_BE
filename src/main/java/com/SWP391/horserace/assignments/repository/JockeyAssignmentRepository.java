@@ -1,6 +1,7 @@
 package com.SWP391.horserace.assignments.repository;
 
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
+import com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -19,8 +20,8 @@ public interface JockeyAssignmentRepository extends JpaRepository<JockeyAssignme
     @Query("""
         SELECT COUNT(ja) > 0 FROM JockeyAssignment ja
          WHERE ja.entry.entryId = :entryId
-           AND ja.status <> 'CANCELLED'
-           AND ja.status <> 'DECLINED'
+           AND ja.status <> com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus.CANCELLED
+           AND ja.status <> com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus.DECLINED
         """)
     boolean existsActiveByEntryId(@Param("entryId") UUID entryId);
 
@@ -76,7 +77,7 @@ public interface JockeyAssignmentRepository extends JpaRepository<JockeyAssignme
         """)
     Page<JockeyAssignment> findByJockeyUserIdAndStatus(
             @Param("jockeyUserId") UUID jockeyUserId,
-            @Param("status") String status,
+            @Param("status") JockeyAssignmentStatus status,
             Pageable pageable);
 
     /** List all assignments sent by a specific owner, paginated. */
@@ -121,7 +122,7 @@ public interface JockeyAssignmentRepository extends JpaRepository<JockeyAssignme
         """)
     Page<JockeyAssignment> findByOwnerUserIdAndStatus(
             @Param("ownerUserId") UUID ownerUserId,
-            @Param("status") String status,
+            @Param("status") JockeyAssignmentStatus status,
             Pageable pageable);
 
     /** List all assignments filtered by status only, paginated. */
@@ -140,7 +141,7 @@ public interface JockeyAssignmentRepository extends JpaRepository<JockeyAssignme
         SELECT COUNT(ja) FROM JockeyAssignment ja
          WHERE ja.status = :status
         """)
-    Page<JockeyAssignment> findByStatus(@Param("status") String status, Pageable pageable);
+    Page<JockeyAssignment> findByStatus(@Param("status") JockeyAssignmentStatus status, Pageable pageable);
 
     /** List all assignments, paginated with full fetch. */
     @Query(value = """

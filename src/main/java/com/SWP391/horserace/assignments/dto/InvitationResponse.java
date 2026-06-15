@@ -1,5 +1,6 @@
 package com.SWP391.horserace.assignments.dto;
 
+import com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus;
 import lombok.Builder;
 import lombok.Data;
 
@@ -18,7 +19,7 @@ public class InvitationResponse {
 
     // -- assignment info --
     private UUID assignmentId;
-    private String status;              // INVITED, ACCEPTED, DECLINED, CANCELLED
+    private JockeyAssignmentStatus status;   // INVITED, ACCEPTED, DECLINED, CANCELLED
     private OffsetDateTime invitedAt;
     private OffsetDateTime respondedAt;
     private OffsetDateTime createdAt;

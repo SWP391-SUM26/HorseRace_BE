@@ -6,6 +6,7 @@ import com.SWP391.horserace.tournaments.dto.TournamentFilterRequest;
 import com.SWP391.horserace.tournaments.dto.TournamentRequest;
 import com.SWP391.horserace.tournaments.dto.TournamentResponse;
 import com.SWP391.horserace.tournaments.entity.Tournament;
+import com.SWP391.horserace.tournaments.entity.TournamentStatus;
 import com.SWP391.horserace.tournaments.repository.TournamentRepository;
 import com.SWP391.horserace.tournaments.service.TournamentService;
 import com.SWP391.horserace.users.entity.User;
@@ -51,7 +52,7 @@ public class TournamentServiceImpl implements TournamentService {
                 .registrationOpenAt(request.getRegistrationOpenAt())
                 .registrationCloseAt(request.getRegistrationCloseAt())
                 .location(request.getLocation())
-                .status(request.getStatus() != null ? request.getStatus() : "DRAFT")
+                .status(request.getStatus() != null ? request.getStatus() : TournamentStatus.DRAFT)
                 .createdBy(user)
                 .build();
 
@@ -86,8 +87,8 @@ public class TournamentServiceImpl implements TournamentService {
                 predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("location")), 
                         "%" + filter.getLocation().toLowerCase() + "%"));
             }
-            if (filter.getStatus() != null && !filter.getStatus().isBlank()) {
-                predicates.add(criteriaBuilder.equal(root.get("status"), filter.getStatus().toUpperCase()));
+            if (filter.getStatus() != null) {
+                predicates.add(criteriaBuilder.equal(root.get("status"), filter.getStatus()));
             }
 
             return criteriaBuilder.and(predicates.toArray(new Predicate[0]));
@@ -161,11 +162,11 @@ public class TournamentServiceImpl implements TournamentService {
             throw new AppException(ErrorCode.TOURNAMENT_NOT_FOUND);
         }
 
-        if (!"DRAFT".equals(tournament.getStatus())) {
+        if (tournament.getStatus() != TournamentStatus.DRAFT) {
             throw new AppException(ErrorCode.TOURNAMENT_INVALID_STATUS, "Only DRAFT tournaments can be published");
         }
 
-        tournament.setStatus("PUBLISHED");
+        tournament.setStatus(TournamentStatus.PUBLISHED);
         tournament = tournamentRepository.save(tournament);
         
         return mapToResponse(tournament);
@@ -181,11 +182,12 @@ public class TournamentServiceImpl implements TournamentService {
             throw new AppException(ErrorCode.TOURNAMENT_NOT_FOUND);
         }
 
-        if (!"REGISTRATION_OPEN".equals(tournament.getStatus()) && !"PUBLISHED".equals(tournament.getStatus())) {
+        if (tournament.getStatus() != TournamentStatus.REGISTRATION_OPEN
+                && tournament.getStatus() != TournamentStatus.PUBLISHED) {
             throw new AppException(ErrorCode.TOURNAMENT_INVALID_STATUS, "Tournament is not open for registration");
         }
 
-        tournament.setStatus("REGISTRATION_CLOSED");
+        tournament.setStatus(TournamentStatus.REGISTRATION_CLOSED);
         tournament = tournamentRepository.save(tournament);
         
         return mapToResponse(tournament);
