@@ -41,10 +41,15 @@ public class Notification {
     @Column(name = "channel", length = 50)
     private String channel;
 
-    /** PENDING | SENT | FAILED | READ */
+    /** PENDING | SENT | FAILED  (read-state moved to isRead in V4) */
     @Column(name = "delivery_status", nullable = false, length = 50)
     @Builder.Default
     private String deliveryStatus = "PENDING";
+
+    /** Whether the recipient has read this notification (separate from delivery). */
+    @Column(name = "is_read", nullable = false)
+    @Builder.Default
+    private Boolean isRead = false;
 
     @Column(name = "sent_at")
     private OffsetDateTime sentAt;
