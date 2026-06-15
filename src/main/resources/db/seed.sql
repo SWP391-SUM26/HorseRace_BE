@@ -19,6 +19,58 @@ INSERT INTO role (role_code, role_name, description, status) VALUES
     ('RACE_REFEREE', 'Race Referee',   'Officiates races',        'ACTIVE'),
     ('SPECTATOR',    'Spectator',      'Watches and predicts',    'ACTIVE');
 
+-- =========================================================
+-- PERMISSIONS (V4) + role -> permission mapping ("phân quyền cho các role")
+-- =========================================================
+INSERT INTO permission (code, description) VALUES
+    ('USER_MANAGE',          'Manage user accounts'),
+    ('ROLE_MANAGE',          'Assign roles to users'),
+    ('PERMISSION_MANAGE',    'Manage role permissions'),
+    ('TOURNAMENT_MANAGE',    'Create/update tournaments and rounds'),
+    ('RACE_MANAGE',          'Schedule and arrange races'),
+    ('REGISTRATION_APPROVE', 'Approve/reject tournament registrations'),
+    ('REFEREE_ASSIGN',       'Assign referees to races'),
+    ('RESULT_PUBLISH',       'Publish official race results'),
+    ('PREDICTION_OVERSEE',   'Oversee predictions and payouts'),
+    ('AUDIT_VIEW',           'View audit logs'),
+    ('HORSE_MANAGE_OWN',     'Manage own horses'),
+    ('HORSE_REGISTER',       'Register horse into a tournament'),
+    ('JOCKEY_HIRE',          'Hire/invite jockeys'),
+    ('RACE_ENTRY_CONFIRM',   'Confirm horse participation in a race'),
+    ('INVITATION_RESPOND',   'Accept/decline jockey invitations'),
+    ('RACE_INSPECT',         'Inspect horses before a race'),
+    ('RACE_MONITOR',         'Monitor live races'),
+    ('RESULT_RECORD',        'Record race results'),
+    ('VIOLATION_RECORD',     'Record and handle violations'),
+    ('REPORT_FILE',          'File referee race reports'),
+    ('PREDICTION_PLACE',     'Place predictions/bets'),
+    ('WALLET_USE',           'Use wallet (deposit/withdraw)'),
+    ('NOTIFICATION_VIEW',    'View notifications'),
+    ('PROFILE_MANAGE',       'Manage own profile');
+
+INSERT INTO role_permission (role_id, permission_id)
+SELECT r.role_id, p.permission_id
+FROM role r JOIN permission p ON TRUE
+WHERE (r.role_code, p.code) IN (
+    -- ADMIN: full management
+    ('ADMIN','USER_MANAGE'),('ADMIN','ROLE_MANAGE'),('ADMIN','PERMISSION_MANAGE'),
+    ('ADMIN','TOURNAMENT_MANAGE'),('ADMIN','RACE_MANAGE'),('ADMIN','REGISTRATION_APPROVE'),
+    ('ADMIN','REFEREE_ASSIGN'),('ADMIN','RESULT_PUBLISH'),('ADMIN','PREDICTION_OVERSEE'),
+    ('ADMIN','AUDIT_VIEW'),('ADMIN','NOTIFICATION_VIEW'),('ADMIN','PROFILE_MANAGE'),
+    -- HORSE_OWNER
+    ('HORSE_OWNER','HORSE_MANAGE_OWN'),('HORSE_OWNER','HORSE_REGISTER'),('HORSE_OWNER','JOCKEY_HIRE'),
+    ('HORSE_OWNER','RACE_ENTRY_CONFIRM'),('HORSE_OWNER','NOTIFICATION_VIEW'),('HORSE_OWNER','PROFILE_MANAGE'),
+    -- JOCKEY
+    ('JOCKEY','INVITATION_RESPOND'),('JOCKEY','NOTIFICATION_VIEW'),('JOCKEY','PROFILE_MANAGE'),
+    -- RACE_REFEREE
+    ('RACE_REFEREE','RACE_INSPECT'),('RACE_REFEREE','RACE_MONITOR'),('RACE_REFEREE','RESULT_RECORD'),
+    ('RACE_REFEREE','VIOLATION_RECORD'),('RACE_REFEREE','REPORT_FILE'),('RACE_REFEREE','NOTIFICATION_VIEW'),
+    ('RACE_REFEREE','PROFILE_MANAGE'),
+    -- SPECTATOR
+    ('SPECTATOR','PREDICTION_PLACE'),('SPECTATOR','WALLET_USE'),('SPECTATOR','NOTIFICATION_VIEW'),
+    ('SPECTATOR','PROFILE_MANAGE')
+);
+
 INSERT INTO app_user (role_id, user_code, full_name, email, phone, password_hash, status, kyc_status) VALUES
     ((SELECT role_id FROM role WHERE role_code = 'ADMIN'),
         'USR0001', 'System Admin', 'admin@horserace.local', '0900000001',
@@ -153,23 +205,3 @@ INSERT INTO jockey_assignment (assignment_id, entry_id, jockey_user_id, status, 
         '11111111-1111-1111-1111-111111111111',
         'INVITED', CURRENT_TIMESTAMP, NULL,
         (SELECT user_id FROM app_user WHERE email = 'owner@horserace.local'));
-
--- =========================================================
--- SEED DATA FOR STAFFING MANAGEMENT MODULE
--- (referee users + referee assignments)
--- =========================================================
-
--- Seed Referee Users
-INSERT INTO app_user (user_id, role_id, user_code, full_name, email, phone, password_hash, status, kyc_status) VALUES
-    ('33333333-3333-3333-3333-333333333333', (SELECT role_id FROM role WHERE role_code = 'RACE_REFEREE'),
-        'USR0007', 'John Smith', 'john.smith@horserace.local', '0900000007',
-        'referee123', 'ACTIVE', 'VERIFIED'),
-    ('44444444-4444-4444-4444-444444444444', (SELECT role_id FROM role WHERE role_code = 'RACE_REFEREE'),
-        'USR0008', 'Michael Brown', 'michael.brown@horserace.local', '0900000008',
-        'referee123', 'ACTIVE', 'VERIFIED');
-
--- Seed Referee Assignments
-INSERT INTO referee_assignment (race_id, referee_user_id, panel_role, status, assigned_at, created_by_user_id) VALUES
-    ('cccc1111-cccc-1111-cccc-111111111111', '33333333-3333-3333-3333-333333333333',
-        'CHIEF', 'ASSIGNED', CURRENT_TIMESTAMP,
-        (SELECT user_id FROM app_user WHERE email = 'admin@horserace.local'));
