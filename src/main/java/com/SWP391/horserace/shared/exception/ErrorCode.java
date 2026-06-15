@@ -56,7 +56,16 @@ public enum ErrorCode {
     // ---- tournament ----
     TOURNAMENT_NOT_FOUND(3001, "Tournament not found", HttpStatus.NOT_FOUND),
     TOURNAMENT_CODE_EXISTED(3002, "Tournament code already existed", HttpStatus.CONFLICT),
-    TOURNAMENT_INVALID_STATUS(3003, "Invalid status transition for tournament", HttpStatus.BAD_REQUEST);
+    TOURNAMENT_INVALID_STATUS(3003, "Invalid status transition for tournament", HttpStatus.BAD_REQUEST),
+
+    // ---- staffing / referee assignment ----
+    STAFF_NOT_FOUND(4001, "Staff member not found", HttpStatus.NOT_FOUND),
+    STAFF_NOT_REFEREE(4002, "User is not a referee", HttpStatus.BAD_REQUEST),
+    RACE_NOT_FOUND(4003, "Race not found", HttpStatus.NOT_FOUND),
+    REFEREE_ALREADY_ASSIGNED(4004, "Referee is already assigned to this race", HttpStatus.CONFLICT),
+    REFEREE_ASSIGNMENT_NOT_FOUND(4005, "Referee assignment not found", HttpStatus.NOT_FOUND),
+    ASSIGNMENT_ALREADY_REVOKED(4006, "Assignment has already been revoked", HttpStatus.BAD_REQUEST),
+    STAFF_EMAIL_EXISTED(4007, "Email is already registered", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;
