@@ -32,12 +32,14 @@ public class WalletTransaction {
     private Wallet wallet;
 
     /** DEBIT | CREDIT */
+    @Enumerated(EnumType.STRING)
     @Column(name = "entry_type", nullable = false, length = 20)
-    private String entryType;
+    private EntryType entryType;
 
     /** DEPOSIT | WITHDRAWAL | BET_STAKE | BET_PAYOUT | PRIZE | REFUND | ADJUSTMENT */
+    @Enumerated(EnumType.STRING)
     @Column(name = "txn_category", length = 50)
-    private String txnCategory;
+    private TxnCategory txnCategory;
 
     @Column(name = "amount", nullable = false, precision = 18, scale = 2)
     private BigDecimal amount;

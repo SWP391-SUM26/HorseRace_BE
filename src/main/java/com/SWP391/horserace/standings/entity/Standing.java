@@ -37,8 +37,9 @@ public class Standing {
     private Tournament tournament;
 
     /** HORSE | JOCKEY */
+    @Enumerated(EnumType.STRING)
     @Column(name = "subject_type", nullable = false, length = 20)
-    private String subjectType;
+    private SubjectType subjectType;
 
     /** Polymorphic: horse_id or app_user(user_id) depending on subjectType (no FK by design). */
     @Column(name = "subject_id", nullable = false)

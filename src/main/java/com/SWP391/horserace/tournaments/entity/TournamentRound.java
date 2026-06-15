@@ -38,16 +38,18 @@ public class TournamentRound {
     private String name;
 
     /** QUALIFIER | HEAT | SEMI | FINAL */
+    @Enumerated(EnumType.STRING)
     @Column(name = "stage", length = 30)
-    private String stage;
+    private RoundStage stage;
 
     @Column(name = "scheduled_at")
     private OffsetDateTime scheduledAt;
 
     /** PLANNED | ONGOING | COMPLETED | CANCELLED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     @Builder.Default
-    private String status = "PLANNED";
+    private RoundStatus status = RoundStatus.PLANNED;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)

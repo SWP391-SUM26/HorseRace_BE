@@ -44,8 +44,9 @@ public class Prediction {
     private RaceEntry predictedEntry;
 
     /** WIN | PLACE | SHOW | EXACTA | QUINELLA */
+    @Enumerated(EnumType.STRING)
     @Column(name = "prediction_type", length = 50)
-    private String predictionType;
+    private PredictionType predictionType;
 
     @Column(name = "locked_odds", precision = 10, scale = 2)
     private BigDecimal lockedOdds;
@@ -57,15 +58,20 @@ public class Prediction {
     private BigDecimal potentialPayout;
 
     /** PENDING | CONFIRMED | WON | LOST | VOID | REFUNDED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "PENDING";
+    private PredictionStatus status = PredictionStatus.PENDING;
 
     @Column(name = "submitted_at")
     private OffsetDateTime submittedAt;
 
     @Column(name = "settled_at")
     private OffsetDateTime settledAt;
+
+    /** Client-supplied key to make bet submission idempotent (avoid double-submit). */
+    @Column(name = "idempotency_key", length = 255, unique = true)
+    private String idempotencyKey;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)

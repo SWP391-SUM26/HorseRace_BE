@@ -66,9 +66,10 @@ public class Race {
     private Integer maxParticipants;
 
     /** SCHEDULED | OPEN | CLOSED | RUNNING | FINISHED | OFFICIAL | CANCELLED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "SCHEDULED";
+    private RaceStatus status = RaceStatus.SCHEDULED;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)

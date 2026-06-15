@@ -47,8 +47,9 @@ public class Penalty {
     private RefereeReport report;
 
     /** WARNING | TIME_PENALTY | FINE | DISQUALIFICATION | SUSPENSION */
+    @Enumerated(EnumType.STRING)
     @Column(name = "penalty_type", nullable = false, length = 50)
-    private String penaltyType;
+    private PenaltyType penaltyType;
 
     @Column(name = "time_penalty_ms")
     private Long timePenaltyMs;
@@ -64,9 +65,10 @@ public class Penalty {
     private User issuedBy;
 
     /** ISSUED | UPHELD | OVERTURNED | CANCELLED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "ISSUED";
+    private PenaltyStatus status = PenaltyStatus.ISSUED;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)

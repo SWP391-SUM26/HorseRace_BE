@@ -38,8 +38,9 @@ public class RefereeReport {
     private User author;
 
     /** INCIDENT | VIOLATION | OBJECTION | GENERAL */
+    @Enumerated(EnumType.STRING)
     @Column(name = "report_type", length = 50)
-    private String reportType;
+    private ReportType reportType;
 
     @Column(name = "summary", columnDefinition = "text")
     private String summary;
@@ -48,13 +49,15 @@ public class RefereeReport {
     private String decision;
 
     /** LOW | MEDIUM | HIGH | CRITICAL */
+    @Enumerated(EnumType.STRING)
     @Column(name = "severity_level", length = 50)
-    private String severityLevel;
+    private SeverityLevel severityLevel;
 
     /** DRAFT | SUBMITTED | REVIEWED | CLOSED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "report_status", nullable = false, length = 50)
     @Builder.Default
-    private String reportStatus = "DRAFT";
+    private ReportStatus reportStatus = ReportStatus.DRAFT;
 
     @Column(name = "submitted_at")
     private OffsetDateTime submittedAt;

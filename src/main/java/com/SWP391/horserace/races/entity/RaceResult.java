@@ -52,9 +52,10 @@ public class RaceResult {
     private Integer currentVersionNo = 1;
 
     /** PROVISIONAL | UNDER_REVIEW | OFFICIAL | AMENDED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "officiality_status", nullable = false, length = 50)
     @Builder.Default
-    private String officialityStatus = "PROVISIONAL";
+    private OfficialityStatus officialityStatus = OfficialityStatus.PROVISIONAL;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "approved_by_user_id")

@@ -47,8 +47,9 @@ public class Attachment {
     private Long fileSize;
 
     /** PUBLIC | INTERNAL | CONFIDENTIAL | RESTRICTED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "sensitivity_level", length = 50)
-    private String sensitivityLevel;
+    private SensitivityLevel sensitivityLevel;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "uploaded_by_user_id")
