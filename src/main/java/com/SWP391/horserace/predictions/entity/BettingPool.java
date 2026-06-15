@@ -38,8 +38,9 @@ public class BettingPool {
     private Race race;
 
     /** WIN | PLACE | SHOW | EXACTA | QUINELLA */
+    @Enumerated(EnumType.STRING)
     @Column(name = "prediction_type", nullable = false, length = 50)
-    private String predictionType;
+    private PredictionType predictionType;
 
     @Column(name = "total_stake", nullable = false, precision = 18, scale = 2)
     @Builder.Default
@@ -50,9 +51,10 @@ public class BettingPool {
     private BigDecimal rakePercent = BigDecimal.ZERO;
 
     /** OPEN | CLOSED | SETTLED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     @Builder.Default
-    private String status = "OPEN";
+    private BettingPoolStatus status = BettingPoolStatus.OPEN;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)

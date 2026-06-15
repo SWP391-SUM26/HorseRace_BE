@@ -42,9 +42,10 @@ public class Payout {
     private WalletTransaction walletTransaction;
 
     /** PENDING | PAID | FAILED | CANCELLED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "PENDING";
+    private PayoutStatus status = PayoutStatus.PENDING;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "settled_by_user_id")

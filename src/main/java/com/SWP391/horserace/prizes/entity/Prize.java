@@ -42,8 +42,9 @@ public class Prize {
     private String prizeCode;
 
     /** OWNER | JOCKEY | HORSE | TEAM */
+    @Enumerated(EnumType.STRING)
     @Column(name = "beneficiary_type", length = 50)
-    private String beneficiaryType;
+    private BeneficiaryType beneficiaryType;
 
     @Column(name = "rank_position")
     private Integer rankPosition;
@@ -56,9 +57,10 @@ public class Prize {
     private String currencyCode = "VND";
 
     /** DRAFT | ANNOUNCED | AWARDED | PAID | CANCELLED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "DRAFT";
+    private PrizeStatus status = PrizeStatus.DRAFT;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)

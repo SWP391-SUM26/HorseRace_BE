@@ -47,9 +47,10 @@ public class Wallet {
     private String currencyCode = "VND";
 
     /** ACTIVE | FROZEN | CLOSED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "ACTIVE";
+    private WalletStatus status = WalletStatus.ACTIVE;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)

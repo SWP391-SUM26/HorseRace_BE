@@ -1,5 +1,6 @@
 package com.SWP391.horserace.tournaments.dto;
 
+import com.SWP391.horserace.tournaments.entity.TournamentStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -13,7 +14,7 @@ public class TournamentFilterRequest {
     private String name;
     private String tournamentCode;
     private String location;
-    private String status;
+    private TournamentStatus status;
 
     private String sortBy; // name, startDate, endDate, registrationOpenAt
     private String sortDir; // asc / desc
