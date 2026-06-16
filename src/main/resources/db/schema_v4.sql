@@ -261,6 +261,8 @@ CREATE TABLE race (
                                            'FINISHED', 'OFFICIAL', 'CANCELLED')),
     created_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_deleted           BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at           TIMESTAMPTZ,
     CHECK (actual_end_at IS NULL OR actual_start_at IS NULL OR actual_end_at >= actual_start_at)
 );
 

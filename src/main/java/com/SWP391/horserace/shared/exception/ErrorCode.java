@@ -85,7 +85,15 @@ public enum ErrorCode {
     REGISTRATION_ALREADY_EXISTS(7002, "This horse is already registered for this tournament", HttpStatus.CONFLICT),
     REGISTRATION_INVALID_STATUS(7003, "Invalid status transition for this registration", HttpStatus.BAD_REQUEST),
     NOT_REGISTRATION_OWNER(7004, "You are not the owner of this registration", HttpStatus.FORBIDDEN),
-    TOURNAMENT_NOT_ACCEPTING_REGISTRATION(7005, "Tournament is not open for registration", HttpStatus.BAD_REQUEST);
+    TOURNAMENT_NOT_ACCEPTING_REGISTRATION(7005, "Tournament is not open for registration", HttpStatus.BAD_REQUEST),
+
+    // ---- race management ----
+    RACE_CODE_EXISTED(8001, "Race code already exists", HttpStatus.CONFLICT),
+    RACE_INVALID_STATUS(8002, "Invalid status transition for this race", HttpStatus.BAD_REQUEST),
+    RACE_NOT_OPEN_FOR_ENTRY(8003, "Race is not open for participant entry", HttpStatus.BAD_REQUEST),
+    RACE_TOURNAMENT_MISMATCH(8004, "Registration and race belong to different tournaments", HttpStatus.BAD_REQUEST),
+    RACE_FULL(8005, "Race has reached its maximum number of participants", HttpStatus.BAD_REQUEST),
+    REGISTRATION_NOT_APPROVED(8006, "Registration is not approved", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;
