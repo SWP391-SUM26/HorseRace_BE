@@ -1,6 +1,8 @@
 package com.SWP391.horserace.staffing.service.impl;
 
+import com.SWP391.horserace.assignments.entity.PanelRole;
 import com.SWP391.horserace.assignments.entity.RefereeAssignment;
+import com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.repository.RaceRepository;
 import com.SWP391.horserace.roles.entity.Role;
@@ -35,8 +37,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignmentService {
 
-    private static final String REVOKED = "REVOKED";
-    private static final String ASSIGNED = "ASSIGNED";
+    private static final RefereeAssignmentStatus REVOKED = RefereeAssignmentStatus.REVOKED;
+    private static final RefereeAssignmentStatus ASSIGNED = RefereeAssignmentStatus.ASSIGNED;
     private static final String REFEREE_ROLE_CODE = "RACE_REFEREE";
 
     private final RefereeAssignmentRepository refereeAssignmentRepository;
@@ -49,16 +51,10 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
     @Override
     @Transactional(readOnly = true)
     public StaffingDashboardResponse getDashboard() {
-        // Total scheduled races (all statuses that are not CANCELLED or FINISHED).
         long totalScheduledRaces = raceRepository.count();
-
-        // Races with at least one active assignment.
         long assignedRaces = refereeAssignmentRepository.countDistinctAssignedRaces();
-
-        // Unassigned = total - assigned.
         long unassignedRaces = Math.max(0, totalScheduledRaces - assignedRaces);
 
-        // Active referees.
         long availableReferees = userRepository.findAll(
                 (root, query, cb) -> {
                     var roleJoin = root.join("role");
@@ -91,30 +87,23 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
         );
         Pageable pageable = PageRequest.of(filter.getPage(), filter.getSize(), sort);
 
-        // Get all races with pagination.
         Page<Race> racePage = raceRepository.findAll(pageable);
 
-        // Collect raceIds from current page.
         List<UUID> raceIds = racePage.getContent().stream()
                 .map(Race::getRaceId)
                 .toList();
 
-        // Load all active assignments for these races.
         Map<UUID, RefereeAssignment> activeAssignments = raceIds.stream()
                 .flatMap(raceId -> refereeAssignmentRepository
                         .findByRace_RaceIdAndStatusNot(raceId, REVOKED).stream())
                 .collect(Collectors.toMap(
                         ra -> ra.getRace().getRaceId(),
                         ra -> ra,
-                        (a, b) -> a  // if multiple assignments, take first
+                        (a, b) -> a
                 ));
 
-        // Build response list.
         List<RaceAssignmentResponse> responses = racePage.getContent().stream()
-                .map(race -> {
-                    RefereeAssignment assignment = activeAssignments.get(race.getRaceId());
-                    return buildRaceAssignmentResponse(race, assignment);
-                })
+                .map(race -> buildRaceAssignmentResponse(race, activeAssignments.get(race.getRaceId())))
                 .filter(response -> matchesFilters(response, filter))
                 .toList();
 
@@ -122,25 +111,21 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
     }
 
     // =========================================================================
-    // ASSIGN REFEREE  (task 148)
+    // ASSIGN REFEREE
     // =========================================================================
     @Override
     @Transactional
     public RefereeAssignmentResponse assignReferee(AssignRefereeRequest request, UUID currentUserId) {
-        // Validate race exists.
         Race race = raceRepository.findById(request.getRaceId())
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
 
-        // Validate referee exists and has RACE_REFEREE role.
         User referee = loadReferee(request.getRefereeUserId());
 
-        // Validate no duplicate assignment.
         if (refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusNot(
                 request.getRaceId(), request.getRefereeUserId(), REVOKED)) {
             throw new AppException(ErrorCode.REFEREE_ALREADY_ASSIGNED);
         }
 
-        // Resolve the creating user (nullable in DEV mode).
         User createdBy = currentUserId != null
                 ? userRepository.findByUserIdAndDeletedFalse(currentUserId).orElse(null)
                 : null;
@@ -148,64 +133,60 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
         RefereeAssignment assignment = RefereeAssignment.builder()
                 .race(race)
                 .referee(referee)
-                .panelRole(request.getPanelRole())
+                .panelRole(toPanelRole(request.getPanelRole()))
                 .status(ASSIGNED)
                 .assignedAt(OffsetDateTime.now())
                 .createdBy(createdBy)
                 .build();
 
-        RefereeAssignment saved = refereeAssignmentRepository.save(assignment);
-        return mapToAssignmentResponse(saved);
+        return mapToAssignmentResponse(refereeAssignmentRepository.save(assignment));
     }
 
     // =========================================================================
-    // REASSIGN REFEREE  (task 150)
+    // REASSIGN REFEREE
     // =========================================================================
     @Override
     @Transactional
     public RefereeAssignmentResponse reassignReferee(UUID refAssignmentId,
                                                       ReassignRefereeRequest request,
                                                       UUID currentUserId) {
-        // Find the existing active assignment.
         RefereeAssignment existing = refereeAssignmentRepository
                 .findByRefAssignmentIdAndStatusNot(refAssignmentId, REVOKED)
                 .orElseThrow(() -> new AppException(ErrorCode.REFEREE_ASSIGNMENT_NOT_FOUND));
 
-        // Validate new referee exists and has RACE_REFEREE role.
         User newReferee = loadReferee(request.getNewRefereeUserId());
 
-        // Check no duplicate assignment for the new referee on the same race.
         UUID raceId = existing.getRace().getRaceId();
         if (refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusNot(
                 raceId, request.getNewRefereeUserId(), REVOKED)) {
             throw new AppException(ErrorCode.REFEREE_ALREADY_ASSIGNED);
         }
 
-        // Revoke the old assignment.
         existing.setStatus(REVOKED);
         refereeAssignmentRepository.save(existing);
 
-        // Resolve the creating user (nullable in DEV mode).
         User createdBy = currentUserId != null
                 ? userRepository.findByUserIdAndDeletedFalse(currentUserId).orElse(null)
                 : null;
 
-        // Create a new assignment with the new referee.
+        PanelRole panelRole = request.getPanelRole() != null
+                ? toPanelRole(request.getPanelRole())
+                : existing.getPanelRole();
+
         RefereeAssignment newAssignment = RefereeAssignment.builder()
                 .race(existing.getRace())
                 .referee(newReferee)
-                .panelRole(request.getPanelRole() != null ? request.getPanelRole() : existing.getPanelRole())
+                .panelRole(panelRole)
                 .status(ASSIGNED)
                 .assignedAt(OffsetDateTime.now())
                 .createdBy(createdBy)
                 .build();
 
-        RefereeAssignment saved = refereeAssignmentRepository.save(newAssignment);
-        return mapToAssignmentResponse(saved);
+        return mapToAssignmentResponse(refereeAssignmentRepository.save(newAssignment));
     }
 
     // =========================================================================
-    // REMOVE ASSIGNMENT  (task 152)
+    // REMOVE ASSIGNMENT
     // =========================================================================
     @Override
     @Transactional
@@ -213,7 +194,7 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
         RefereeAssignment assignment = refereeAssignmentRepository.findById(refAssignmentId)
                 .orElseThrow(() -> new AppException(ErrorCode.REFEREE_ASSIGNMENT_NOT_FOUND));
 
-        if (REVOKED.equals(assignment.getStatus())) {
+        if (REVOKED == assignment.getStatus()) {
             throw new AppException(ErrorCode.ASSIGNMENT_ALREADY_REVOKED);
         }
 
@@ -236,6 +217,11 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
         return user;
     }
 
+    /** Convert a client-supplied panel-role string to the enum (null/blank → null). */
+    private PanelRole toPanelRole(String raw) {
+        return (raw == null || raw.isBlank()) ? null : PanelRole.valueOf(raw.trim().toUpperCase());
+    }
+
     private RefereeAssignmentResponse mapToAssignmentResponse(RefereeAssignment ra) {
         Race race = ra.getRace();
         User referee = ra.getReferee();
@@ -250,8 +236,8 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 .refereeUserId(referee != null ? referee.getUserId() : null)
                 .refereeName(referee != null ? referee.getFullName() : null)
                 .refereeAvatarUrl(referee != null ? referee.getAvatarUrl() : null)
-                .panelRole(ra.getPanelRole())
-                .status(ra.getStatus())
+                .panelRole(ra.getPanelRole() != null ? ra.getPanelRole().name() : null)
+                .status(ra.getStatus() != null ? ra.getStatus().name() : null)
                 .assignedAt(ra.getAssignedAt())
                 .createdAt(ra.getCreatedAt())
                 .createdByUserId(createdBy != null ? createdBy.getUserId() : null)
@@ -264,7 +250,7 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 .raceId(race.getRaceId())
                 .raceName(race.getName())
                 .raceCode(race.getRaceCode())
-                .raceStatus(race.getStatus())
+                .raceStatus(race.getStatus() != null ? race.getStatus().name() : null)
                 .scheduledStartAt(race.getScheduledStartAt());
 
         if (assignment != null) {
@@ -273,8 +259,8 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                     .refereeUserId(referee != null ? referee.getUserId() : null)
                     .refereeName(referee != null ? referee.getFullName() : null)
                     .refereeAvatarUrl(referee != null ? referee.getAvatarUrl() : null)
-                    .panelRole(assignment.getPanelRole())
-                    .assignmentStatus(assignment.getStatus());
+                    .panelRole(assignment.getPanelRole() != null ? assignment.getPanelRole().name() : null)
+                    .assignmentStatus(assignment.getStatus() != null ? assignment.getStatus().name() : null);
         } else {
             builder.assignmentStatus("UNASSIGNED");
         }
@@ -283,7 +269,6 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
     }
 
     private boolean matchesFilters(RaceAssignmentResponse response, RaceAssignmentFilterRequest filter) {
-        // Search filter.
         if (filter.getSearch() != null && !filter.getSearch().isBlank()) {
             String search = filter.getSearch().toLowerCase();
             boolean matches = false;
@@ -299,14 +284,12 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
             if (!matches) return false;
         }
 
-        // Race status filter.
         if (filter.getRaceStatus() != null && !filter.getRaceStatus().isBlank()) {
             if (!filter.getRaceStatus().equalsIgnoreCase(response.getRaceStatus())) {
                 return false;
             }
         }
 
-        // Assignment status filter.
         if (filter.getAssignmentStatus() != null && !filter.getAssignmentStatus().isBlank()) {
             if (!filter.getAssignmentStatus().equalsIgnoreCase(response.getAssignmentStatus())) {
                 return false;
