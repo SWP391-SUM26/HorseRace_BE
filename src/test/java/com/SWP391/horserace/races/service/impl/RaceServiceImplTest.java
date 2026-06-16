@@ -61,7 +61,7 @@ class RaceServiceImplTest {
 
     private RaceRequest createReq() {
         return new RaceRequest(tournamentId, "Race 1", "FLAT", 1200, "GOOD", "SUNNY",
-                null, null, 8, null);
+                null, null, 8);
     }
 
     // ── create ──
@@ -137,6 +137,25 @@ class RaceServiceImplTest {
         assertThat(res.getStatus()).isEqualTo(RaceStatus.OPEN);
         assertThat(res.getScheduledStartAt()).isEqualTo(start);
         assertThat(res.getPredictionCutoffAt()).isEqualTo(cutoff);
+    }
+
+    @Test
+    void schedule_nullCutoff_keepsExistingCutoff() {
+        UUID id = UUID.randomUUID();
+        OffsetDateTime existingCutoff = OffsetDateTime.now().plusDays(2);
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.SCHEDULED)
+                .predictionCutoffAt(existingCutoff).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+
+        OffsetDateTime start = OffsetDateTime.now().plusDays(3);
+        RaceResponse res = service.scheduleRace(currentUserId, id, new ScheduleRaceRequest(start, null));
+
+        assertThat(res.getStatus()).isEqualTo(RaceStatus.OPEN);
+        assertThat(res.getScheduledStartAt()).isEqualTo(start);
+        // omitted cutoff must not wipe the one set at create time
+        assertThat(res.getPredictionCutoffAt()).isEqualTo(existingCutoff);
     }
 
     @Test

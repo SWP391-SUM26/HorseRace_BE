@@ -93,6 +93,9 @@ public class RaceServiceImpl implements RaceService {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
 
+        if (request.tournamentId() == null) {
+            throw new AppException(ErrorCode.TOURNAMENT_NOT_FOUND);
+        }
         Tournament tournament = tournamentRepository.findById(request.tournamentId())
                 .orElseThrow(() -> new AppException(ErrorCode.TOURNAMENT_NOT_FOUND));
         if (tournament.isDeleted()) {
@@ -110,7 +113,9 @@ public class RaceServiceImpl implements RaceService {
                 .scheduledStartAt(request.scheduledStartAt())
                 .predictionCutoffAt(request.predictionCutoffAt())
                 .maxParticipants(request.maxParticipants())
-                .status(request.status() != null ? request.status() : RaceStatus.SCHEDULED)
+                // Status is always SCHEDULED on create; lifecycle changes go through
+                // schedule()/cancel(), never a client-supplied status.
+                .status(RaceStatus.SCHEDULED)
                 .build();
 
         return mapToResponse(raceRepository.save(race));
@@ -139,7 +144,7 @@ public class RaceServiceImpl implements RaceService {
         if (request.scheduledStartAt() != null) race.setScheduledStartAt(request.scheduledStartAt());
         if (request.predictionCutoffAt() != null) race.setPredictionCutoffAt(request.predictionCutoffAt());
         if (request.maxParticipants() != null) race.setMaxParticipants(request.maxParticipants());
-        if (request.status() != null) race.setStatus(request.status());
+        // Status is intentionally NOT updatable here — transitions go through schedule()/cancel().
 
         return mapToResponse(raceRepository.save(race));
     }
@@ -169,7 +174,11 @@ public class RaceServiceImpl implements RaceService {
         }
 
         race.setScheduledStartAt(request.scheduledStartAt());
-        race.setPredictionCutoffAt(request.predictionCutoffAt());
+        // predictionCutoffAt is optional — only overwrite when supplied so an omitted
+        // value doesn't wipe a cutoff already set at create time.
+        if (request.predictionCutoffAt() != null) {
+            race.setPredictionCutoffAt(request.predictionCutoffAt());
+        }
         race.setStatus(RaceStatus.OPEN);
 
         return mapToResponse(raceRepository.save(race));
