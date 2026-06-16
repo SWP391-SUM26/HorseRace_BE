@@ -63,7 +63,14 @@ public enum ErrorCode {
     INVALID_FILE_TYPE(4002, "Unsupported file type. Allowed: PNG, JPEG, WEBP, GIF", HttpStatus.BAD_REQUEST),
     FILE_TOO_LARGE(4003, "File exceeds the maximum allowed size (5MB)", HttpStatus.PAYLOAD_TOO_LARGE),
     FILE_STORAGE_FAILED(4004, "Failed to store the uploaded file", HttpStatus.INTERNAL_SERVER_ERROR),
-    FILE_NOT_FOUND(4005, "File not found", HttpStatus.NOT_FOUND);
+    FILE_NOT_FOUND(4005, "File not found", HttpStatus.NOT_FOUND),
+
+    // ---- horse management ----
+    HORSE_NOT_FOUND(5001, "Horse not found", HttpStatus.NOT_FOUND),
+    HORSE_NAME_REQUIRED(5002, "Horse name is required", HttpStatus.BAD_REQUEST),
+    HORSE_CODE_EXISTED(5003, "Horse code already exists", HttpStatus.CONFLICT),
+    MICROCHIP_EXISTED(5004, "Microchip number already exists", HttpStatus.CONFLICT),
+    NOT_HORSE_OWNER(5005, "You are not the owner of this horse", HttpStatus.FORBIDDEN);
 
     private final int code;
     private final String message;

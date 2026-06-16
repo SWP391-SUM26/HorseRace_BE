@@ -74,6 +74,10 @@ public class Horse {
     @Builder.Default
     private String status = "ACTIVE";
 
+    /** Public URL of the horse photo, served via GET /api/v1/files/{key}. */
+    @Column(name = "image_url", columnDefinition = "text")
+    private String imageUrl;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private OffsetDateTime createdAt;
