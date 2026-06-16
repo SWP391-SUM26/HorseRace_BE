@@ -3,11 +3,16 @@ package com.SWP391.horserace.shared.exception;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 @RestControllerAdvice
@@ -65,6 +70,34 @@ public class GlobalExceptionHandler {
                 .message(ErrorCode.FILE_TOO_LARGE.getMessage())
                 .build();
         return ResponseEntity.status(ErrorCode.FILE_TOO_LARGE.getStatusCode()).body(apiResponse);
+    }
+
+    /**
+     * Malformed request body (e.g. an invalid enum value in JSON) or an unconvertible query/path
+     * param (e.g. a bad enum/UUID bound via @ModelAttribute/@RequestParam) → 400, not a 500.
+     */
+    /**
+     * A DB constraint slipped past the service-level checks (e.g. reusing the microchip of a
+     * soft-deleted horse, or a rare generated-code race) → 409 Conflict, not a generic 500.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handlingDataIntegrity(DataIntegrityViolationException exception) {
+        log.warn("Data integrity violation: {}", exception.getMostSpecificCause().getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.<Void>builder()
+                .success(false)
+                .message("The request conflicts with existing data (duplicate or constraint violation)")
+                .build());
+    }
+
+    @ExceptionHandler({HttpMessageNotReadableException.class,
+            MethodArgumentTypeMismatchException.class,
+            BindException.class})
+    public ResponseEntity<ApiResponse<Void>> handlingBadInput(Exception exception) {
+        log.warn("Bad request: {}", exception.getMessage());
+        return ResponseEntity.badRequest().body(ApiResponse.<Void>builder()
+                .success(false)
+                .message("Invalid or malformed request")
+                .build());
     }
 
     @ExceptionHandler(value = MethodArgumentNotValidException.class)

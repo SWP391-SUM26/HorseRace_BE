@@ -14,5 +14,6 @@ public interface HorseRepository
 
     boolean existsByHorseCode(String horseCode);
 
-    boolean existsByMicrochipNoAndDeletedFalse(String microchipNo);
+    /** Table-wide check — matches the DB UNIQUE(microchip_no), which also covers soft-deleted rows. */
+    boolean existsByMicrochipNo(String microchipNo);
 }

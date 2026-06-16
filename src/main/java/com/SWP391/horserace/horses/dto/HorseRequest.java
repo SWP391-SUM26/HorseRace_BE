@@ -3,6 +3,7 @@ package com.SWP391.horserace.horses.dto;
 import com.SWP391.horserace.horses.entity.HorseGender;
 import com.SWP391.horserace.horses.entity.HorseHealthStatus;
 import com.SWP391.horserace.horses.entity.HorseStatus;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
@@ -33,6 +34,7 @@ public record HorseRequest(
         LocalDate dateOfBirth,
 
         @Positive(message = "Weight must be positive")
+        @Digits(integer = 4, fraction = 2, message = "Weight must have at most 4 digits and 2 decimals")
         BigDecimal weight,
 
         @Size(max = 100, message = "Origin country must not exceed 100 characters")

@@ -70,7 +70,6 @@ public enum ErrorCode {
     // ---- horse management ----
     HORSE_NOT_FOUND(5001, "Horse not found", HttpStatus.NOT_FOUND),
     HORSE_NAME_REQUIRED(5002, "Horse name is required", HttpStatus.BAD_REQUEST),
-    HORSE_CODE_EXISTED(5003, "Horse code already exists", HttpStatus.CONFLICT),
     MICROCHIP_EXISTED(5004, "Microchip number already exists", HttpStatus.CONFLICT),
     NOT_HORSE_OWNER(5005, "You are not the owner of this horse", HttpStatus.FORBIDDEN),
 

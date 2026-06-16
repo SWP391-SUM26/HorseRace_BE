@@ -10,7 +10,7 @@ import com.SWP391.horserace.horses.repository.HorseSpecification;
 import com.SWP391.horserace.horses.service.HorseService;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
-import com.SWP391.horserace.shared.storage.FileStorageService;
+import com.SWP391.horserace.shared.storage.ImageUploadService;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,20 +23,18 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.OffsetDateTime;
-import java.util.Set;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class HorseServiceImpl implements HorseService {
 
-    private static final Set<String> ALLOWED_IMAGE_TYPES =
-            Set.of("image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif");
-    private static final long MAX_IMAGE_BYTES = 5L * 1024 * 1024; // 5MB
+    private static final String ADMIN_ROLE_CODE = "ADMIN";
+    private static final int MAX_PAGE_SIZE = 100;
 
     private final HorseRepository horseRepository;
     private final UserRepository userRepository;
-    private final FileStorageService fileStorageService;
+    private final ImageUploadService imageUploadService;
 
     @Override
     @Transactional(readOnly = true)
@@ -55,6 +53,9 @@ public class HorseServiceImpl implements HorseService {
     @Override
     @Transactional
     public HorseResponse createHorse(UUID ownerUserId, HorseRequest request) {
+        if (ownerUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
         if (request.name() == null || request.name().isBlank()) {
             throw new AppException(ErrorCode.HORSE_NAME_REQUIRED);
         }
@@ -62,7 +63,8 @@ public class HorseServiceImpl implements HorseService {
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
 
         String microchip = trimToNull(request.microchipNo());
-        if (microchip != null && horseRepository.existsByMicrochipNoAndDeletedFalse(microchip)) {
+        // Check against the WHOLE table — the DB UNIQUE(microchip_no) also covers soft-deleted rows.
+        if (microchip != null && horseRepository.existsByMicrochipNo(microchip)) {
             throw new AppException(ErrorCode.MICROCHIP_EXISTED);
         }
 
@@ -96,7 +98,7 @@ public class HorseServiceImpl implements HorseService {
         if (request.microchipNo() != null) {
             String mc = trimToNull(request.microchipNo());
             if (mc != null && !mc.equals(horse.getMicrochipNo())
-                    && horseRepository.existsByMicrochipNoAndDeletedFalse(mc)) {
+                    && horseRepository.existsByMicrochipNo(mc)) {
                 throw new AppException(ErrorCode.MICROCHIP_EXISTED);
             }
             horse.setMicrochipNo(mc);
@@ -128,20 +130,11 @@ public class HorseServiceImpl implements HorseService {
     public HorseResponse updateHorseImage(UUID currentUserId, UUID horseId, MultipartFile file) {
         Horse horse = loadOwnedHorse(currentUserId, horseId);
 
-        if (file == null || file.isEmpty()) {
-            throw new AppException(ErrorCode.FILE_EMPTY);
-        }
-        if (file.getSize() > MAX_IMAGE_BYTES) {
-            throw new AppException(ErrorCode.FILE_TOO_LARGE);
-        }
-        String contentType = file.getContentType();
-        if (contentType == null || !ALLOWED_IMAGE_TYPES.contains(contentType.toLowerCase())) {
-            throw new AppException(ErrorCode.INVALID_FILE_TYPE);
-        }
-
-        String key = fileStorageService.store(file, "horses");
-        horse.setImageUrl("/api/v1/files/" + key);
-        return mapToResponse(horseRepository.save(horse));
+        String oldImageUrl = horse.getImageUrl();
+        horse.setImageUrl(imageUploadService.storeImageAsUrl(file, "horses"));
+        HorseResponse response = mapToResponse(horseRepository.save(horse));
+        imageUploadService.deleteByUrl(oldImageUrl); // best-effort cleanup of the replaced file
+        return response;
     }
 
     // ── helpers ──
@@ -151,15 +144,24 @@ public class HorseServiceImpl implements HorseService {
                 .orElseThrow(() -> new AppException(ErrorCode.HORSE_NOT_FOUND));
     }
 
+    /** Load a horse the caller may mutate: the owner, or any ADMIN. */
     private Horse loadOwnedHorse(UUID currentUserId, UUID horseId) {
-        Horse horse = loadHorse(horseId);
-        if (horse.getOwner() == null || !horse.getOwner().getUserId().equals(currentUserId)) {
-            throw new AppException(ErrorCode.NOT_HORSE_OWNER);
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
-        return horse;
+        Horse horse = loadHorse(horseId);
+        if (horse.getOwner() != null && horse.getOwner().getUserId().equals(currentUserId)) {
+            return horse;
+        }
+        User current = userRepository.findByUserIdAndDeletedFalse(currentUserId)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+        if (current.getRole() != null && ADMIN_ROLE_CODE.equals(current.getRole().getRoleCode())) {
+            return horse;
+        }
+        throw new AppException(ErrorCode.NOT_HORSE_OWNER);
     }
 
-    /** Sequential code HRSnnnn, skipping any already taken. */
+    /** Sequential code HRSnnnn, skipping any already taken (the DB UNIQUE is the final guard). */
     private String generateHorseCode() {
         long n = horseRepository.count() + 1;
         String code;
@@ -171,7 +173,7 @@ public class HorseServiceImpl implements HorseService {
 
     private Pageable buildPageable(HorseFilterRequest f) {
         int page = (f.getPage() != null && f.getPage() >= 0) ? f.getPage() : 0;
-        int size = (f.getSize() != null && f.getSize() > 0) ? f.getSize() : 10;
+        int size = (f.getSize() != null && f.getSize() > 0) ? Math.min(f.getSize(), MAX_PAGE_SIZE) : 10;
         String field = switch (f.getSortBy() != null ? f.getSortBy().trim().toLowerCase() : "createdat") {
             case "name" -> "name";
             case "horsecode", "code" -> "horseCode";
