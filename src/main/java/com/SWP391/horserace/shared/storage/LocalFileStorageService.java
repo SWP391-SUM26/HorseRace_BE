@@ -16,16 +16,25 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.Map;
 import java.util.UUID;
 
 /**
  * Local-disk implementation of {@link FileStorageService}. Files are written under
- * {@code app.storage.location} (default {@code ./uploads}). Keys are {@code folder/uuid.ext}
- * and never derived from client-supplied paths, so the original filename can't drive the
- * destination. Both store and load are guarded against path traversal.
+ * {@code app.storage.location} (default {@code ./uploads}). Keys are {@code folder/uuid.ext}.
+ * Both store and load are guarded against path traversal, and the stored extension is derived
+ * from the MIME type (not the client filename) to prevent stored-XSS via e.g. {@code evil.svg}.
  */
 @Service
 public class LocalFileStorageService implements FileStorageService {
+
+    /** Safe extension per (validated) MIME type — never trust the client-supplied filename. */
+    private static final Map<String, String> CONTENT_TYPE_EXTENSION = Map.of(
+            "image/png", "png",
+            "image/jpeg", "jpg",
+            "image/jpg", "jpg",
+            "image/webp", "webp",
+            "image/gif", "gif");
 
     private final Path root;
 
@@ -72,17 +81,28 @@ public class LocalFileStorageService implements FileStorageService {
         }
     }
 
-    /** Derive a safe lowercase extension from the original filename, falling back to the MIME subtype. */
+    /**
+     * Derive a safe extension from the MIME type (the caller validates content type against an
+     * allow-list). Falls back to a sanitised filename extension only as defence-in-depth; the raw
+     * client filename is never used verbatim, so an attacker cannot upload {@code evil.svg} /
+     * {@code evil.html} under an image content type and have it served as script (stored XSS).
+     */
     private String extension(MultipartFile file) {
+        String contentType = file.getContentType();
+        if (contentType != null) {
+            String mapped = CONTENT_TYPE_EXTENSION.get(contentType.toLowerCase());
+            if (mapped != null) {
+                return mapped;
+            }
+        }
         String name = StringUtils.cleanPath(file.getOriginalFilename() == null ? "" : file.getOriginalFilename());
         int dot = name.lastIndexOf('.');
         if (dot >= 0 && dot < name.length() - 1) {
-            return name.substring(dot + 1).toLowerCase();
+            String ext = name.substring(dot + 1).toLowerCase().replaceAll("[^a-z0-9]", "");
+            if (!ext.isEmpty() && ext.length() <= 5) {
+                return ext;
+            }
         }
-        String contentType = file.getContentType();
-        if (contentType != null && contentType.contains("/")) {
-            return contentType.substring(contentType.indexOf('/') + 1).toLowerCase();
-        }
-        return "";
+        return "bin";
     }
 }

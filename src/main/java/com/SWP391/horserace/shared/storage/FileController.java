@@ -2,6 +2,7 @@ package com.SWP391.horserace.shared.storage;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +26,12 @@ public class FileController {
     public ResponseEntity<Resource> serve(@PathVariable String folder, @PathVariable String filename) {
         Resource resource = fileStorageService.load(folder + "/" + filename);
         MediaType mediaType = MediaTypeFactory.getMediaType(resource).orElse(MediaType.APPLICATION_OCTET_STREAM);
-        return ResponseEntity.ok().contentType(mediaType).body(resource);
+        // Defence-in-depth against stored-XSS: stop MIME sniffing and serve with an explicit
+        // disposition so a stored blob cannot execute as script in the app origin.
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .header("X-Content-Type-Options", "nosniff")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+                .body(resource);
     }
 }

@@ -55,6 +55,13 @@ class HorseServiceImplTest {
     }
 
     @Test
+    void create_nullPrincipal_unauthenticated() {
+        assertThatThrownBy(() -> service.createHorse(null, req("Midnight", null)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNAUTHENTICATED);
+    }
+
+    @Test
     void create_setsOwnerGeneratesCodeAndDefaultStatus() {
         when(userRepository.findByUserIdAndDeletedFalse(ownerId)).thenReturn(Optional.of(owner));
         when(horseRepository.count()).thenReturn(4L);

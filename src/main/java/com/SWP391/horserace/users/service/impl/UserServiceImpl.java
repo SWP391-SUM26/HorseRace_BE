@@ -73,6 +73,9 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserResponse updateAvatar(UUID userId, MultipartFile file) {
+        if (userId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
         User user = loadActiveUser(userId);
 
         if (file == null || file.isEmpty()) {

@@ -55,6 +55,9 @@ public class HorseServiceImpl implements HorseService {
     @Override
     @Transactional
     public HorseResponse createHorse(UUID ownerUserId, HorseRequest request) {
+        if (ownerUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
         if (request.name() == null || request.name().isBlank()) {
             throw new AppException(ErrorCode.HORSE_NAME_REQUIRED);
         }
@@ -152,6 +155,9 @@ public class HorseServiceImpl implements HorseService {
     }
 
     private Horse loadOwnedHorse(UUID currentUserId, UUID horseId) {
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
         Horse horse = loadHorse(horseId);
         if (horse.getOwner() == null || !horse.getOwner().getUserId().equals(currentUserId)) {
             throw new AppException(ErrorCode.NOT_HORSE_OWNER);

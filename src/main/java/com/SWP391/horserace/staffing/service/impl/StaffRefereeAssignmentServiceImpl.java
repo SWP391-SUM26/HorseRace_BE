@@ -133,7 +133,7 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
         RefereeAssignment assignment = RefereeAssignment.builder()
                 .race(race)
                 .referee(referee)
-                .panelRole(toPanelRole(request.getPanelRole()))
+                .panelRole(request.getPanelRole())
                 .status(ASSIGNED)
                 .assignedAt(OffsetDateTime.now())
                 .createdBy(createdBy)
@@ -170,7 +170,7 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 : null;
 
         PanelRole panelRole = request.getPanelRole() != null
-                ? toPanelRole(request.getPanelRole())
+                ? request.getPanelRole()
                 : existing.getPanelRole();
 
         RefereeAssignment newAssignment = RefereeAssignment.builder()
@@ -215,11 +215,6 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
             throw new AppException(ErrorCode.STAFF_NOT_REFEREE);
         }
         return user;
-    }
-
-    /** Convert a client-supplied panel-role string to the enum (null/blank → null). */
-    private PanelRole toPanelRole(String raw) {
-        return (raw == null || raw.isBlank()) ? null : PanelRole.valueOf(raw.trim().toUpperCase());
     }
 
     private RefereeAssignmentResponse mapToAssignmentResponse(RefereeAssignment ra) {
