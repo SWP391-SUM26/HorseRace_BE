@@ -3,7 +3,7 @@ package com.SWP391.horserace.users.service.impl;
 import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
-import com.SWP391.horserace.shared.storage.FileStorageService;
+import com.SWP391.horserace.shared.storage.ImageUploadService;
 import com.SWP391.horserace.users.dto.UpdateProfileRequest;
 import com.SWP391.horserace.users.dto.UserResponse;
 import com.SWP391.horserace.users.entity.User;
@@ -15,7 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -23,12 +22,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
 
-    private static final Set<String> ALLOWED_AVATAR_TYPES =
-            Set.of("image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif");
-    private static final long MAX_AVATAR_BYTES = 5L * 1024 * 1024; // 5MB
-
     private final UserRepository userRepository;
-    private final FileStorageService fileStorageService;
+    private final ImageUploadService imageUploadService;
 
     @Override
     @Transactional(readOnly = true)
@@ -78,20 +73,11 @@ public class UserServiceImpl implements UserService {
         }
         User user = loadActiveUser(userId);
 
-        if (file == null || file.isEmpty()) {
-            throw new AppException(ErrorCode.FILE_EMPTY);
-        }
-        if (file.getSize() > MAX_AVATAR_BYTES) {
-            throw new AppException(ErrorCode.FILE_TOO_LARGE);
-        }
-        String contentType = file.getContentType();
-        if (contentType == null || !ALLOWED_AVATAR_TYPES.contains(contentType.toLowerCase())) {
-            throw new AppException(ErrorCode.INVALID_FILE_TYPE);
-        }
-
-        String key = fileStorageService.store(file, "avatars");
-        user.setAvatarUrl("/api/v1/files/" + key);
-        return mapToResponse(userRepository.save(user));
+        String oldAvatarUrl = user.getAvatarUrl();
+        user.setAvatarUrl(imageUploadService.storeImageAsUrl(file, "avatars"));
+        UserResponse response = mapToResponse(userRepository.save(user));
+        imageUploadService.deleteByUrl(oldAvatarUrl); // best-effort cleanup of the replaced file
+        return response;
     }
 
     private User loadActiveUser(UUID userId) {

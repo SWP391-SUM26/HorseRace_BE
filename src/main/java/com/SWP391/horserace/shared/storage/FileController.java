@@ -12,8 +12,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Serves stored files (e.g. avatars) via the storage abstraction, so the URL stays the same
- * when storage moves from local disk to S3. Path: {@code GET /api/v1/files/{folder}/{filename}}.
+ * Serves stored files (e.g. avatars, horse photos) via the storage abstraction, so the URL stays
+ * the same when storage moves from local disk to S3. Path: {@code GET /api/v1/files/{folder}/{filename}}.
+ *
+ * <p>Intentionally public (no auth): avatars/horse images are non-sensitive and the keys are
+ * unguessable UUIDs. If any private file type is added later, gate it behind auth/ownership here.
  */
 @RestController
 @RequestMapping("/api/v1/files")

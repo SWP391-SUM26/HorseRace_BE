@@ -18,4 +18,7 @@ public interface FileStorageService {
 
     /** Load a previously stored file by its key. */
     Resource load(String key);
+
+    /** Best-effort delete of a stored file by its key; no-op if it does not exist. */
+    void delete(String key);
 }

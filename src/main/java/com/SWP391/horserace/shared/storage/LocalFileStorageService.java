@@ -81,6 +81,22 @@ public class LocalFileStorageService implements FileStorageService {
         }
     }
 
+    @Override
+    public void delete(String key) {
+        if (key == null || key.isBlank()) {
+            return;
+        }
+        Path file = root.resolve(key).normalize();
+        if (!file.startsWith(root)) { // path-traversal guard
+            return;
+        }
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException ignored) {
+            // best-effort: an orphaned file is preferable to failing the request
+        }
+    }
+
     /**
      * Derive a safe extension from the MIME type (the caller validates content type against an
      * allow-list). Falls back to a sanitised filename extension only as defence-in-depth; the raw

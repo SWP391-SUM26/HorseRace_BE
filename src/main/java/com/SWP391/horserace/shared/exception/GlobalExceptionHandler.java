@@ -3,6 +3,8 @@ package com.SWP391.horserace.shared.exception;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
@@ -74,6 +76,19 @@ public class GlobalExceptionHandler {
      * Malformed request body (e.g. an invalid enum value in JSON) or an unconvertible query/path
      * param (e.g. a bad enum/UUID bound via @ModelAttribute/@RequestParam) → 400, not a 500.
      */
+    /**
+     * A DB constraint slipped past the service-level checks (e.g. reusing the microchip of a
+     * soft-deleted horse, or a rare generated-code race) → 409 Conflict, not a generic 500.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handlingDataIntegrity(DataIntegrityViolationException exception) {
+        log.warn("Data integrity violation: {}", exception.getMostSpecificCause().getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.<Void>builder()
+                .success(false)
+                .message("The request conflicts with existing data (duplicate or constraint violation)")
+                .build());
+    }
+
     @ExceptionHandler({HttpMessageNotReadableException.class,
             MethodArgumentTypeMismatchException.class,
             BindException.class})
