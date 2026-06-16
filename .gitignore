@@ -5,6 +5,9 @@ target/
 ### Local secrets (NEVER commit) ###
 **/application-local.properties
 .env
+
+### Uploaded files (local storage) ###
+uploads/
 !**/src/main/**/target/
 !**/src/test/**/target/
 

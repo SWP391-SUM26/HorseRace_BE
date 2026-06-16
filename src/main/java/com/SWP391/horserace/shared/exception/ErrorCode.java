@@ -56,7 +56,14 @@ public enum ErrorCode {
     // ---- tournament ----
     TOURNAMENT_NOT_FOUND(3001, "Tournament not found", HttpStatus.NOT_FOUND),
     TOURNAMENT_CODE_EXISTED(3002, "Tournament code already existed", HttpStatus.CONFLICT),
-    TOURNAMENT_INVALID_STATUS(3003, "Invalid status transition for tournament", HttpStatus.BAD_REQUEST);
+    TOURNAMENT_INVALID_STATUS(3003, "Invalid status transition for tournament", HttpStatus.BAD_REQUEST),
+
+    // ---- file upload / storage ----
+    FILE_EMPTY(4001, "Uploaded file is empty", HttpStatus.BAD_REQUEST),
+    INVALID_FILE_TYPE(4002, "Unsupported file type. Allowed: PNG, JPEG, WEBP, GIF", HttpStatus.BAD_REQUEST),
+    FILE_TOO_LARGE(4003, "File exceeds the maximum allowed size (5MB)", HttpStatus.PAYLOAD_TOO_LARGE),
+    FILE_STORAGE_FAILED(4004, "Failed to store the uploaded file", HttpStatus.INTERNAL_SERVER_ERROR),
+    FILE_NOT_FOUND(4005, "File not found", HttpStatus.NOT_FOUND);
 
     private final int code;
     private final String message;
