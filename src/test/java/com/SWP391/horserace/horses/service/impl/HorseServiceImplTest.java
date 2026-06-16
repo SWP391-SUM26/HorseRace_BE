@@ -3,6 +3,8 @@ package com.SWP391.horserace.horses.service.impl;
 import com.SWP391.horserace.horses.dto.HorseRequest;
 import com.SWP391.horserace.horses.dto.HorseResponse;
 import com.SWP391.horserace.horses.entity.Horse;
+import com.SWP391.horserace.horses.entity.HorseGender;
+import com.SWP391.horserace.horses.entity.HorseStatus;
 import com.SWP391.horserace.horses.repository.HorseRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
@@ -41,7 +43,7 @@ class HorseServiceImplTest {
         owner = User.builder().userId(ownerId).fullName("Owen Owner").build();
     }
 
-    private static HorseRequest req(String name, String gender) {
+    private static HorseRequest req(String name, HorseGender gender) {
         return new HorseRequest(name, null, gender, "Arabian", null, null, null, null, null, null, null);
     }
 
@@ -59,11 +61,12 @@ class HorseServiceImplTest {
         when(horseRepository.existsByHorseCode(any())).thenReturn(false);
         when(horseRepository.save(any(Horse.class))).thenAnswer(i -> i.getArgument(0));
 
-        HorseResponse res = service.createHorse(ownerId, req("Midnight Thunder", "MALE"));
+        HorseResponse res = service.createHorse(ownerId, req("Midnight Thunder", HorseGender.MALE));
 
         assertThat(res.getOwnerUserId()).isEqualTo(ownerId);
         assertThat(res.getHorseCode()).isEqualTo("HRS0005");
-        assertThat(res.getStatus()).isEqualTo("ACTIVE");
+        assertThat(res.getStatus()).isEqualTo(HorseStatus.ACTIVE);
+        assertThat(res.getGender()).isEqualTo(HorseGender.MALE);
         assertThat(res.getName()).isEqualTo("Midnight Thunder");
     }
 

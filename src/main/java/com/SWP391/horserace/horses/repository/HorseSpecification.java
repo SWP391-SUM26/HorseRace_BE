@@ -10,8 +10,8 @@ import java.util.List;
 
 /**
  * Builds a dynamic WHERE clause from {@link HorseFilterRequest}. Always restricts to non-deleted
- * horses; each non-blank filter adds an AND predicate. Sorting/paging are applied by the caller
- * via {@code Pageable}, so this only contributes predicates.
+ * horses; each provided filter adds an AND predicate. Sorting/paging are applied by the caller via
+ * {@code Pageable}, so this only contributes predicates.
  */
 public final class HorseSpecification {
 
@@ -29,11 +29,11 @@ public final class HorseSpecification {
                         cb.like(cb.lower(root.get("horseCode")), like),
                         cb.like(cb.lower(root.get("microchipNo")), like)));
             }
-            if (f.getStatus() != null && !f.getStatus().isBlank()) {
-                predicates.add(cb.equal(cb.upper(root.get("status")), f.getStatus().trim().toUpperCase()));
+            if (f.getStatus() != null) {
+                predicates.add(cb.equal(root.get("status"), f.getStatus()));
             }
-            if (f.getGender() != null && !f.getGender().isBlank()) {
-                predicates.add(cb.equal(cb.upper(root.get("gender")), f.getGender().trim().toUpperCase()));
+            if (f.getGender() != null) {
+                predicates.add(cb.equal(root.get("gender"), f.getGender()));
             }
             if (f.getBreed() != null && !f.getBreed().isBlank()) {
                 predicates.add(cb.like(cb.lower(root.get("breed")), "%" + f.getBreed().trim().toLowerCase() + "%"));

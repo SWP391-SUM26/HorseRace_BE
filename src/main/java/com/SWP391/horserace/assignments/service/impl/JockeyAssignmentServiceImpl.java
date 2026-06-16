@@ -4,6 +4,7 @@ import com.SWP391.horserace.assignments.dto.InvitationFilterRequest;
 import com.SWP391.horserace.assignments.dto.InvitationResponse;
 import com.SWP391.horserace.assignments.dto.SendInvitationRequest;
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
+import com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
 import com.SWP391.horserace.assignments.service.JockeyAssignmentService;
 import com.SWP391.horserace.horses.entity.Horse;
@@ -74,7 +75,7 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         JockeyAssignment assignment = JockeyAssignment.builder()
                 .entry(entry)
                 .jockey(jockeyProfile.getJockeyUser())
-                .status("INVITED")
+                .status(JockeyAssignmentStatus.INVITED)
                 .invitedAt(OffsetDateTime.now())
                 .assignedBy(assignedByUser)
                 .build();
@@ -102,18 +103,26 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         boolean hasOwner = filter.getOwnerUserId() != null;
         boolean hasStatus = filter.getStatus() != null && !filter.getStatus().isBlank();
 
+        JockeyAssignmentStatus statusFilter = hasStatus ? parseStatus(filter.getStatus()) : null;
+
+        // An unrecognized status string matches no rows — return an empty page (HTTP 200),
+        // preserving the previous string-literal behavior.
+        if (hasStatus && statusFilter == null) {
+            return Page.empty(pageable);
+        }
+
         if (hasJockey && hasStatus) {
             page = assignmentRepository.findByJockeyUserIdAndStatus(
-                    filter.getJockeyUserId(), filter.getStatus().toUpperCase(), pageable);
+                    filter.getJockeyUserId(), statusFilter, pageable);
         } else if (hasJockey) {
             page = assignmentRepository.findByJockeyUserId(filter.getJockeyUserId(), pageable);
         } else if (hasOwner && hasStatus) {
             page = assignmentRepository.findByOwnerUserIdAndStatus(
-                    filter.getOwnerUserId(), filter.getStatus().toUpperCase(), pageable);
+                    filter.getOwnerUserId(), statusFilter, pageable);
         } else if (hasOwner) {
             page = assignmentRepository.findByOwnerUserId(filter.getOwnerUserId(), pageable);
         } else if (hasStatus) {
-            page = assignmentRepository.findByStatus(filter.getStatus().toUpperCase(), pageable);
+            page = assignmentRepository.findByStatus(statusFilter, pageable);
         } else {
             page = assignmentRepository.findAllWithDetails(pageable);
         }
@@ -139,11 +148,11 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         */
 
         // Must be in INVITED status
-        if (!"INVITED".equals(assignment.getStatus())) {
+        if (assignment.getStatus() != JockeyAssignmentStatus.INVITED) {
             throw new AppException(ErrorCode.INVITATION_NOT_PENDING);
         }
 
-        assignment.setStatus("ACCEPTED");
+        assignment.setStatus(JockeyAssignmentStatus.ACCEPTED);
         assignment.setRespondedAt(OffsetDateTime.now());
         assignment = assignmentRepository.save(assignment);
 
@@ -168,11 +177,11 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         */
 
         // Must be in INVITED status
-        if (!"INVITED".equals(assignment.getStatus())) {
+        if (assignment.getStatus() != JockeyAssignmentStatus.INVITED) {
             throw new AppException(ErrorCode.INVITATION_NOT_PENDING);
         }
 
-        assignment.setStatus("DECLINED");
+        assignment.setStatus(JockeyAssignmentStatus.DECLINED);
         assignment.setRespondedAt(OffsetDateTime.now());
         assignment = assignmentRepository.save(assignment);
 
@@ -198,11 +207,11 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         */
 
         // Can only cancel INVITED status
-        if (!"INVITED".equals(assignment.getStatus())) {
+        if (assignment.getStatus() != JockeyAssignmentStatus.INVITED) {
             throw new AppException(ErrorCode.INVITATION_CANNOT_CANCEL);
         }
 
-        assignment.setStatus("CANCELLED");
+        assignment.setStatus(JockeyAssignmentStatus.CANCELLED);
         assignment.setRespondedAt(OffsetDateTime.now());
         assignmentRepository.save(assignment);
     }
@@ -259,6 +268,18 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
                 .entryCode(entry.getEntryCode())
                 .entryNo(entry.getEntryNo())
                 .build();
+    }
+
+    /**
+     * Parse a user-supplied status string (case-insensitive) into a {@link JockeyAssignmentStatus}.
+     * Returns {@code null} when the value does not match any enum constant.
+     */
+    private JockeyAssignmentStatus parseStatus(String raw) {
+        try {
+            return JockeyAssignmentStatus.valueOf(raw.trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 
     /** Build a Spring Sort from user-supplied field name and direction. */

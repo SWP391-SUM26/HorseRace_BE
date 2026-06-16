@@ -4,6 +4,7 @@ import com.SWP391.horserace.horses.dto.HorseFilterRequest;
 import com.SWP391.horserace.horses.dto.HorseRequest;
 import com.SWP391.horserace.horses.dto.HorseResponse;
 import com.SWP391.horserace.horses.entity.Horse;
+import com.SWP391.horserace.horses.entity.HorseStatus;
 import com.SWP391.horserace.horses.repository.HorseRepository;
 import com.SWP391.horserace.horses.repository.HorseSpecification;
 import com.SWP391.horserace.horses.service.HorseService;
@@ -78,7 +79,7 @@ public class HorseServiceImpl implements HorseService {
                 .originCountry(trimToNull(request.originCountry()))
                 .healthStatus(request.healthStatus())
                 .registrationStatus(trimToNull(request.registrationStatus()))
-                .status(request.status() != null ? request.status() : "ACTIVE")
+                .status(request.status() != null ? request.status() : HorseStatus.ACTIVE)
                 .build();
 
         return mapToResponse(horseRepository.save(horse));

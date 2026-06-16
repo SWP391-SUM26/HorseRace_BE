@@ -44,8 +44,9 @@ public class Horse {
     private String microchipNo;
 
     /** MALE | FEMALE | GELDING */
+    @Enumerated(EnumType.STRING)
     @Column(name = "gender", length = 30)
-    private String gender;
+    private HorseGender gender;
 
     @Column(name = "breed", length = 100)
     private String breed;
@@ -63,16 +64,18 @@ public class Horse {
     private String originCountry;
 
     /** HEALTHY | INJURED | QUARANTINE | UNFIT */
+    @Enumerated(EnumType.STRING)
     @Column(name = "health_status", length = 50)
-    private String healthStatus;
+    private HorseHealthStatus healthStatus;
 
     @Column(name = "registration_status", length = 50)
     private String registrationStatus;
 
     /** ACTIVE | RETIRED | INACTIVE */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "ACTIVE";
+    private HorseStatus status = HorseStatus.ACTIVE;
 
     /** Public URL of the horse photo, served via GET /api/v1/files/{key}. */
     @Column(name = "image_url", columnDefinition = "text")

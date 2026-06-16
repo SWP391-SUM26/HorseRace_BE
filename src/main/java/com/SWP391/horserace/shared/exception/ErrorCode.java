@@ -58,19 +58,28 @@ public enum ErrorCode {
     TOURNAMENT_CODE_EXISTED(3002, "Tournament code already existed", HttpStatus.CONFLICT),
     TOURNAMENT_INVALID_STATUS(3003, "Invalid status transition for tournament", HttpStatus.BAD_REQUEST),
 
-    // ---- file upload / storage ----
-    FILE_EMPTY(4001, "Uploaded file is empty", HttpStatus.BAD_REQUEST),
-    INVALID_FILE_TYPE(4002, "Unsupported file type. Allowed: PNG, JPEG, WEBP, GIF", HttpStatus.BAD_REQUEST),
-    FILE_TOO_LARGE(4003, "File exceeds the maximum allowed size (5MB)", HttpStatus.PAYLOAD_TOO_LARGE),
-    FILE_STORAGE_FAILED(4004, "Failed to store the uploaded file", HttpStatus.INTERNAL_SERVER_ERROR),
-    FILE_NOT_FOUND(4005, "File not found", HttpStatus.NOT_FOUND),
+    // ---- staffing / referee assignment ----
+    STAFF_NOT_FOUND(4001, "Staff member not found", HttpStatus.NOT_FOUND),
+    STAFF_NOT_REFEREE(4002, "User is not a referee", HttpStatus.BAD_REQUEST),
+    RACE_NOT_FOUND(4003, "Race not found", HttpStatus.NOT_FOUND),
+    REFEREE_ALREADY_ASSIGNED(4004, "Referee is already assigned to this race", HttpStatus.CONFLICT),
+    REFEREE_ASSIGNMENT_NOT_FOUND(4005, "Referee assignment not found", HttpStatus.NOT_FOUND),
+    ASSIGNMENT_ALREADY_REVOKED(4006, "Assignment has already been revoked", HttpStatus.BAD_REQUEST),
+    STAFF_EMAIL_EXISTED(4007, "Email is already registered", HttpStatus.CONFLICT),
 
     // ---- horse management ----
     HORSE_NOT_FOUND(5001, "Horse not found", HttpStatus.NOT_FOUND),
     HORSE_NAME_REQUIRED(5002, "Horse name is required", HttpStatus.BAD_REQUEST),
     HORSE_CODE_EXISTED(5003, "Horse code already exists", HttpStatus.CONFLICT),
     MICROCHIP_EXISTED(5004, "Microchip number already exists", HttpStatus.CONFLICT),
-    NOT_HORSE_OWNER(5005, "You are not the owner of this horse", HttpStatus.FORBIDDEN);
+    NOT_HORSE_OWNER(5005, "You are not the owner of this horse", HttpStatus.FORBIDDEN),
+
+    // ---- file upload / storage ----
+    FILE_EMPTY(6001, "Uploaded file is empty", HttpStatus.BAD_REQUEST),
+    INVALID_FILE_TYPE(6002, "Unsupported file type. Allowed: PNG, JPEG, WEBP, GIF", HttpStatus.BAD_REQUEST),
+    FILE_TOO_LARGE(6003, "File exceeds the maximum allowed size (5MB)", HttpStatus.PAYLOAD_TOO_LARGE),
+    FILE_STORAGE_FAILED(6004, "Failed to store the uploaded file", HttpStatus.INTERNAL_SERVER_ERROR),
+    FILE_NOT_FOUND(6005, "File not found", HttpStatus.NOT_FOUND);
 
     private final int code;
     private final String message;

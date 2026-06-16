@@ -39,9 +39,10 @@ public class JockeyAssignment {
     private User jockey;
 
     /** INVITED | ACCEPTED | DECLINED | CANCELLED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "INVITED";
+    private JockeyAssignmentStatus status = JockeyAssignmentStatus.INVITED;
 
     @Column(name = "invited_at")
     private OffsetDateTime invitedAt;

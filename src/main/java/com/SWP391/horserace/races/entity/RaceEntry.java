@@ -46,9 +46,10 @@ public class RaceEntry {
     private Integer laneNo;
 
     /** ENTERED | CHECKED_IN | SCRATCHED | DISQUALIFIED | FINISHED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "ENTERED";
+    private RaceEntryStatus status = RaceEntryStatus.ENTERED;
 
     @Column(name = "checked_in_at")
     private OffsetDateTime checkedInAt;

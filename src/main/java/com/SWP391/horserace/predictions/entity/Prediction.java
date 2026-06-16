@@ -44,8 +44,9 @@ public class Prediction {
     private RaceEntry predictedEntry;
 
     /** WIN | PLACE | SHOW | EXACTA | QUINELLA */
+    @Enumerated(EnumType.STRING)
     @Column(name = "prediction_type", length = 50)
-    private String predictionType;
+    private PredictionType predictionType;
 
     @Column(name = "locked_odds", precision = 10, scale = 2)
     private BigDecimal lockedOdds;
@@ -57,9 +58,10 @@ public class Prediction {
     private BigDecimal potentialPayout;
 
     /** PENDING | CONFIRMED | WON | LOST | VOID | REFUNDED */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
-    private String status = "PENDING";
+    private PredictionStatus status = PredictionStatus.PENDING;
 
     @Column(name = "submitted_at")
     private OffsetDateTime submittedAt;

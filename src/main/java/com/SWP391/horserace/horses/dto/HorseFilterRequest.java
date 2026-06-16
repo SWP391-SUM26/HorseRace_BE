@@ -1,12 +1,15 @@
 package com.SWP391.horserace.horses.dto;
 
+import com.SWP391.horserace.horses.entity.HorseGender;
+import com.SWP391.horserace.horses.entity.HorseStatus;
 import lombok.Data;
 
 import java.util.UUID;
 
 /**
  * Query parameters for the horse list endpoint — combines search, filter, sort and pagination
- * (bound from the query string via {@code @ModelAttribute}).
+ * (bound from the query string via {@code @ModelAttribute}). Enum filters are converted from the
+ * query string by Spring (e.g. {@code ?status=ACTIVE}).
  */
 @Data
 public class HorseFilterRequest {
@@ -14,8 +17,8 @@ public class HorseFilterRequest {
     /** Free-text search across horse code, name and microchip number. */
     private String q;
 
-    private String status;       // ACTIVE | RETIRED | INACTIVE
-    private String gender;       // MALE | FEMALE | GELDING
+    private HorseStatus status;
+    private HorseGender gender;
     private String breed;        // partial match
     private UUID ownerUserId;    // exact owner
 

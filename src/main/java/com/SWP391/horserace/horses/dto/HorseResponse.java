@@ -1,5 +1,8 @@
 package com.SWP391.horserace.horses.dto;
 
+import com.SWP391.horserace.horses.entity.HorseGender;
+import com.SWP391.horserace.horses.entity.HorseHealthStatus;
+import com.SWP391.horserace.horses.entity.HorseStatus;
 import lombok.Builder;
 import lombok.Data;
 
@@ -17,15 +20,15 @@ public class HorseResponse {
     private String ownerName;
     private String name;
     private String microchipNo;
-    private String gender;
+    private HorseGender gender;
     private String breed;
     private String color;
     private LocalDate dateOfBirth;
     private BigDecimal weight;
     private String originCountry;
-    private String healthStatus;
+    private HorseHealthStatus healthStatus;
     private String registrationStatus;
-    private String status;
+    private HorseStatus status;
     private String imageUrl;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;

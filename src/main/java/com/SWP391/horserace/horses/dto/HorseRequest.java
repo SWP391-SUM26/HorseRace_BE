@@ -1,6 +1,8 @@
 package com.SWP391.horserace.horses.dto;
 
-import jakarta.validation.constraints.Pattern;
+import com.SWP391.horserace.horses.entity.HorseGender;
+import com.SWP391.horserace.horses.entity.HorseHealthStatus;
+import com.SWP391.horserace.horses.entity.HorseStatus;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
@@ -9,9 +11,8 @@ import java.time.LocalDate;
 
 /**
  * Create/update payload for a horse. Used for POST (create — name required, enforced in the
- * service) and PUT (partial update — only non-null fields are applied). Validation mirrors the
- * {@code horse} column constraints; enum-like fields are checked against their CHECK values
- * (the {@code @Pattern}s allow null so partial updates pass).
+ * service) and PUT (partial update — only non-null fields are applied). Enum fields are bound by
+ * Jackson from their names (e.g. "MALE"); an invalid value yields a 400 before reaching the service.
  */
 public record HorseRequest(
 
@@ -21,8 +22,7 @@ public record HorseRequest(
         @Size(max = 100, message = "Microchip number must not exceed 100 characters")
         String microchipNo,
 
-        @Pattern(regexp = "^(MALE|FEMALE|GELDING)$", message = "Gender must be MALE, FEMALE or GELDING")
-        String gender,
+        HorseGender gender,
 
         @Size(max = 100, message = "Breed must not exceed 100 characters")
         String breed,
@@ -38,15 +38,11 @@ public record HorseRequest(
         @Size(max = 100, message = "Origin country must not exceed 100 characters")
         String originCountry,
 
-        @Pattern(regexp = "^(HEALTHY|INJURED|QUARANTINE|UNFIT)$",
-                message = "Health status must be HEALTHY, INJURED, QUARANTINE or UNFIT")
-        String healthStatus,
+        HorseHealthStatus healthStatus,
 
         @Size(max = 50, message = "Registration status must not exceed 50 characters")
         String registrationStatus,
 
-        @Pattern(regexp = "^(ACTIVE|RETIRED|INACTIVE)$",
-                message = "Status must be ACTIVE, RETIRED or INACTIVE")
-        String status
+        HorseStatus status
 ) {
 }
