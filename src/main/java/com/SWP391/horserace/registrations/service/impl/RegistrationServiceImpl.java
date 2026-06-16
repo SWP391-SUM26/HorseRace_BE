@@ -134,11 +134,9 @@ public class RegistrationServiceImpl implements RegistrationService {
         requireSourceStatus(registration,
                 RegistrationStatus.SUBMITTED, RegistrationStatus.UNDER_REVIEW);
 
-        User reviewer = userRepository.findByUserIdAndDeletedFalse(currentUserId)
-                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
-
+        // Reject does NOT set approvedBy — that field records the approver only. A rejected
+        // registration leaves approvedBy null; the reviewer is captured by reviewedAt + reason.
         registration.setStatus(RegistrationStatus.REJECTED);
-        registration.setApprovedBy(reviewer);
         registration.setRejectionReason(request.reason());
         registration.setReviewedAt(OffsetDateTime.now());
 
