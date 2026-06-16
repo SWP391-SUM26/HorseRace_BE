@@ -78,7 +78,14 @@ public enum ErrorCode {
     INVALID_FILE_TYPE(6002, "Unsupported file type. Allowed: PNG, JPEG, WEBP, GIF", HttpStatus.BAD_REQUEST),
     FILE_TOO_LARGE(6003, "File exceeds the maximum allowed size (5MB)", HttpStatus.PAYLOAD_TOO_LARGE),
     FILE_STORAGE_FAILED(6004, "Failed to store the uploaded file", HttpStatus.INTERNAL_SERVER_ERROR),
-    FILE_NOT_FOUND(6005, "File not found", HttpStatus.NOT_FOUND);
+    FILE_NOT_FOUND(6005, "File not found", HttpStatus.NOT_FOUND),
+
+    // ---- registration management ----
+    REGISTRATION_NOT_FOUND(7001, "Registration not found", HttpStatus.NOT_FOUND),
+    REGISTRATION_ALREADY_EXISTS(7002, "This horse is already registered for this tournament", HttpStatus.CONFLICT),
+    REGISTRATION_INVALID_STATUS(7003, "Invalid status transition for this registration", HttpStatus.BAD_REQUEST),
+    NOT_REGISTRATION_OWNER(7004, "You are not the owner of this registration", HttpStatus.FORBIDDEN),
+    TOURNAMENT_NOT_ACCEPTING_REGISTRATION(7005, "Tournament is not open for registration", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;
