@@ -207,9 +207,7 @@ class RegistrationServiceImplTest {
         TournamentRegistration reg = TournamentRegistration.builder()
                 .registrationId(id).owner(owner).tournament(tournament).horse(horse)
                 .status(RegistrationStatus.SUBMITTED).build();
-        User reviewer = User.builder().userId(reviewerId).fullName("Adam Admin").build();
         when(registrationRepository.findById(id)).thenReturn(Optional.of(reg));
-        when(userRepository.findByUserIdAndDeletedFalse(reviewerId)).thenReturn(Optional.of(reviewer));
         when(registrationRepository.save(any(TournamentRegistration.class)))
                 .thenAnswer(i -> i.getArgument(0));
 
@@ -219,6 +217,8 @@ class RegistrationServiceImplTest {
         assertThat(res.getStatus()).isEqualTo(RegistrationStatus.REJECTED);
         assertThat(res.getRejectionReason()).isEqualTo("Horse failed vet check");
         assertThat(res.getReviewedAt()).isNotNull();
+        // reject must NOT populate approvedBy (that field is for the approver only)
+        assertThat(res.getApprovedByUserId()).isNull();
     }
 
     @Test

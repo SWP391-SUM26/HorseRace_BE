@@ -26,4 +26,10 @@ public interface RaceEntryRepository extends JpaRepository<RaceEntry, UUID> {
          WHERE re.entryId = :entryId
         """)
     Optional<RaceEntry> findByIdWithDetails(@Param("entryId") UUID entryId);
+
+    java.util.List<RaceEntry> findByRace_RaceId(UUID raceId);
+
+    long countByRace_RaceId(UUID raceId);
+
+    boolean existsByEntryCode(String entryCode);
 }
