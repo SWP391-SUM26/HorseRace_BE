@@ -3,6 +3,7 @@ package com.SWP391.horserace.users.service.impl;
 import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
+import com.SWP391.horserace.shared.storage.ImageUploadService;
 import com.SWP391.horserace.users.dto.UpdateProfileRequest;
 import com.SWP391.horserace.users.dto.UserResponse;
 import com.SWP391.horserace.users.entity.User;
@@ -11,6 +12,7 @@ import com.SWP391.horserace.users.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -21,6 +23,7 @@ import java.util.stream.Collectors;
 public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
+    private final ImageUploadService imageUploadService;
 
     @Override
     @Transactional(readOnly = true)
@@ -60,6 +63,21 @@ public class UserServiceImpl implements UserService {
 
         // updated_at is maintained by Hibernate @UpdateTimestamp on flush.
         return mapToResponse(userRepository.save(user));
+    }
+
+    @Override
+    @Transactional
+    public UserResponse updateAvatar(UUID userId, MultipartFile file) {
+        if (userId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        User user = loadActiveUser(userId);
+
+        String oldAvatarUrl = user.getAvatarUrl();
+        user.setAvatarUrl(imageUploadService.storeImageAsUrl(file, "avatars"));
+        UserResponse response = mapToResponse(userRepository.save(user));
+        imageUploadService.deleteByUrl(oldAvatarUrl); // best-effort cleanup of the replaced file
+        return response;
     }
 
     private User loadActiveUser(UUID userId) {

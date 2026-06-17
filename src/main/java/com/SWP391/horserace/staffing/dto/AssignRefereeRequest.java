@@ -1,5 +1,6 @@
 package com.SWP391.horserace.staffing.dto;
 
+import com.SWP391.horserace.assignments.entity.PanelRole;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -24,5 +25,5 @@ public class AssignRefereeRequest {
     private UUID refereeUserId;
 
     /** CHIEF | JUDGE | STEWARD | TIMEKEEPER | OBSERVER */
-    private String panelRole;
+    private PanelRole panelRole;
 }

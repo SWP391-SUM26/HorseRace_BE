@@ -65,7 +65,27 @@ public enum ErrorCode {
     REFEREE_ALREADY_ASSIGNED(4004, "Referee is already assigned to this race", HttpStatus.CONFLICT),
     REFEREE_ASSIGNMENT_NOT_FOUND(4005, "Referee assignment not found", HttpStatus.NOT_FOUND),
     ASSIGNMENT_ALREADY_REVOKED(4006, "Assignment has already been revoked", HttpStatus.BAD_REQUEST),
-    STAFF_EMAIL_EXISTED(4007, "Email is already registered", HttpStatus.CONFLICT);
+    STAFF_EMAIL_EXISTED(4007, "Email is already registered", HttpStatus.CONFLICT),
+
+    // ---- horse management ----
+    HORSE_NOT_FOUND(5001, "Horse not found", HttpStatus.NOT_FOUND),
+    HORSE_NAME_REQUIRED(5002, "Horse name is required", HttpStatus.BAD_REQUEST),
+    MICROCHIP_EXISTED(5004, "Microchip number already exists", HttpStatus.CONFLICT),
+    NOT_HORSE_OWNER(5005, "You are not the owner of this horse", HttpStatus.FORBIDDEN),
+
+    // ---- file upload / storage ----
+    FILE_EMPTY(6001, "Uploaded file is empty", HttpStatus.BAD_REQUEST),
+    INVALID_FILE_TYPE(6002, "Unsupported file type. Allowed: PNG, JPEG, WEBP, GIF", HttpStatus.BAD_REQUEST),
+    FILE_TOO_LARGE(6003, "File exceeds the maximum allowed size (5MB)", HttpStatus.PAYLOAD_TOO_LARGE),
+    FILE_STORAGE_FAILED(6004, "Failed to store the uploaded file", HttpStatus.INTERNAL_SERVER_ERROR),
+    FILE_NOT_FOUND(6005, "File not found", HttpStatus.NOT_FOUND),
+
+    // ---- registration management ----
+    REGISTRATION_NOT_FOUND(7001, "Registration not found", HttpStatus.NOT_FOUND),
+    REGISTRATION_ALREADY_EXISTS(7002, "This horse is already registered for this tournament", HttpStatus.CONFLICT),
+    REGISTRATION_INVALID_STATUS(7003, "Invalid status transition for this registration", HttpStatus.BAD_REQUEST),
+    NOT_REGISTRATION_OWNER(7004, "You are not the owner of this registration", HttpStatus.FORBIDDEN),
+    TOURNAMENT_NOT_ACCEPTING_REGISTRATION(7005, "Tournament is not open for registration", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;
