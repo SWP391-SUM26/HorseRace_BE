@@ -67,6 +67,25 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
+    public UserResponse updateUserById(UUID id, UpdateProfileRequest request) {
+        User user = loadActiveUser(id);
+
+        // Partial update of display fields only (same scope as self-service update).
+        if (request.fullName() != null) {
+            user.setFullName(request.fullName().trim());
+        }
+        if (request.phone() != null) {
+            user.setPhone(request.phone().trim());
+        }
+        if (request.avatarUrl() != null) {
+            user.setAvatarUrl(request.avatarUrl().trim());
+        }
+
+        return mapToResponse(userRepository.save(user));
+    }
+
+    @Override
+    @Transactional
     public UserResponse updateAvatar(UUID userId, MultipartFile file) {
         if (userId == null) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
