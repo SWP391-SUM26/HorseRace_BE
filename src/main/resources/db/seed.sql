@@ -205,3 +205,115 @@ INSERT INTO jockey_assignment (assignment_id, entry_id, jockey_user_id, status, 
         '11111111-1111-1111-1111-111111111111',
         'INVITED', CURRENT_TIMESTAMP, NULL,
         (SELECT user_id FROM app_user WHERE email = 'owner@horserace.local'));
+
+-- =========================================================
+-- EXTRA DEMO DATA (V4) — richer dataset for FE list/detail pages.
+-- All passwords are un-prefixed plaintext (dev encoder treats them as raw).
+-- =========================================================
+
+-- More users: 2 owners + 2 spectators (looked up later by email)
+INSERT INTO app_user (role_id, user_code, full_name, email, phone, password_hash, status, kyc_status) VALUES
+    ((SELECT role_id FROM role WHERE role_code = 'HORSE_OWNER'),
+        'USR0007', 'Maria Stables', 'maria@horserace.local', '0900000007', 'owner123', 'ACTIVE', 'VERIFIED'),
+    ((SELECT role_id FROM role WHERE role_code = 'HORSE_OWNER'),
+        'USR0008', 'Khalid Al Falah', 'khalid@horserace.local', '0900000008', 'owner123', 'ACTIVE', 'VERIFIED'),
+    ((SELECT role_id FROM role WHERE role_code = 'SPECTATOR'),
+        'USR0013', 'Sam Watcher', 'sam@horserace.local', '0900000013', 'spec123', 'ACTIVE', 'VERIFIED'),
+    ((SELECT role_id FROM role WHERE role_code = 'SPECTATOR'),
+        'USR0014', 'Nina Fan', 'nina@horserace.local', '0900000014', 'spec123', 'INACTIVE', 'PENDING');
+
+-- More jockeys + referees (fixed UUIDs so profiles/assignments can reference them)
+INSERT INTO app_user (user_id, role_id, user_code, full_name, email, phone, password_hash, status, kyc_status) VALUES
+    ('33333333-3333-3333-3333-333333333333', (SELECT role_id FROM role WHERE role_code = 'JOCKEY'),
+        'USR0009', 'Frankie Dettori', 'frankie@horserace.local', '0900000009', 'jockey123', 'ACTIVE', 'VERIFIED'),
+    ('44444444-4444-4444-4444-444444444444', (SELECT role_id FROM role WHERE role_code = 'JOCKEY'),
+        'USR0010', 'Ryan Moore', 'ryan@horserace.local', '0900000010', 'jockey123', 'ACTIVE', 'VERIFIED'),
+    ('55555555-5555-5555-5555-555555555555', (SELECT role_id FROM role WHERE role_code = 'RACE_REFEREE'),
+        'USR0011', 'Robert Steward', 'robert@horserace.local', '0900000011', 'ref123', 'ACTIVE', 'VERIFIED'),
+    ('66666666-6666-6666-6666-666666666666', (SELECT role_id FROM role WHERE role_code = 'RACE_REFEREE'),
+        'USR0012', 'Linda Judge', 'linda@horserace.local', '0900000012', 'ref123', 'ACTIVE', 'VERIFIED');
+
+INSERT INTO jockey_profile (jockey_user_id, license_no, body_weight, height_cm, experience_yrs, win_count, bio) VALUES
+    ('33333333-3333-3333-3333-333333333333', 'LIC-FRANKIE-003', 53.00, 160.00, 20, 500, 'Legendary jockey with decades of Group 1 wins.'),
+    ('44444444-4444-4444-4444-444444444444', 'LIC-RYAN-004', 53.50, 168.00, 15, 320, 'Multiple champion jockey, strong on the big stage.');
+
+-- More horses (owned by Maria, Khalid and Owen) — varied gender/health/status
+INSERT INTO horse (horse_id, owner_user_id, horse_code, name, microchip_no, gender, breed, color, date_of_birth, weight, origin_country, health_status, status) VALUES
+    ('aaaa0000-0000-0000-0000-000000000005', (SELECT user_id FROM app_user WHERE email='maria@horserace.local'),
+        'HRS0005', 'Desert Storm', 'MC-0005', 'MALE', 'Arabian', 'Bay', '2019-04-12', 455.00, 'KSA', 'HEALTHY', 'ACTIVE'),
+    ('aaaa0000-0000-0000-0000-000000000006', (SELECT user_id FROM app_user WHERE email='maria@horserace.local'),
+        'HRS0006', 'Lunar Eclipse', 'MC-0006', 'FEMALE', 'Thoroughbred', 'Black', '2021-02-18', 470.00, 'IRE', 'HEALTHY', 'ACTIVE'),
+    ('aaaa0000-0000-0000-0000-000000000007', (SELECT user_id FROM app_user WHERE email='khalid@horserace.local'),
+        'HRS0007', 'Royal Flush', 'MC-0007', 'GELDING', 'Thoroughbred', 'Chestnut', '2018-09-30', 490.00, 'GBR', 'HEALTHY', 'ACTIVE'),
+    ('aaaa0000-0000-0000-0000-000000000008', (SELECT user_id FROM app_user WHERE email='khalid@horserace.local'),
+        'HRS0008', 'Sandstorm', 'MC-0008', 'MALE', 'Arabian', 'Grey', '2020-11-05', 460.00, 'UAE', 'INJURED', 'ACTIVE'),
+    ('aaaa0000-0000-0000-0000-000000000009', (SELECT user_id FROM app_user WHERE email='owner@horserace.local'),
+        'HRS0009', 'Old Glory', 'MC-0009', 'MALE', 'Thoroughbred', 'Bay', '2015-06-20', 500.00, 'USA', 'HEALTHY', 'RETIRED'),
+    ('aaaa0000-0000-0000-0000-000000000010', (SELECT user_id FROM app_user WHERE email='owner@horserace.local'),
+        'HRS0010', 'Misty Dawn', 'MC-0010', 'FEMALE', 'Arabian', 'White', '2022-03-08', 430.00, 'USA', 'QUARANTINE', 'INACTIVE'),
+    ('aaaa0000-0000-0000-0000-000000000011', (SELECT user_id FROM app_user WHERE email='maria@horserace.local'),
+        'HRS0011', 'Thunderbolt', 'MC-0011', 'MALE', 'Thoroughbred', 'Dark Bay', '2019-12-01', 485.00, 'AUS', 'HEALTHY', 'ACTIVE'),
+    ('aaaa0000-0000-0000-0000-000000000012', (SELECT user_id FROM app_user WHERE email='khalid@horserace.local'),
+        'HRS0012', 'Comet Tail', 'MC-0012', 'FEMALE', 'Arabian', 'Palomino', '2021-08-14', 445.00, 'UAE', 'UNFIT', 'ACTIVE');
+
+-- More tournaments (varied statuses)
+INSERT INTO tournament (tournament_id, tournament_code, name, description, start_date, end_date, registration_open_at, registration_close_at, location, status, created_by_user_id) VALUES
+    ('bbbb0000-0000-0000-0000-000000000002', 'TOUR-2025-002', 'Royal Ascot 2025', 'Prestigious British flat racing festival.',
+        '2025-06-17 13:00:00+07', '2025-06-21 19:00:00+07', NULL, NULL, 'Ascot, UK', 'PUBLISHED',
+        (SELECT user_id FROM app_user WHERE email='admin@horserace.local')),
+    ('bbbb0000-0000-0000-0000-000000000003', 'TOUR-2025-003', 'Kentucky Derby 2025', 'The most exciting two minutes in sports.',
+        '2025-05-03 02:00:00+07', '2025-05-03 09:00:00+07', '2025-03-01 00:00:00+07', '2025-04-20 23:59:00+07', 'Louisville, USA', 'REGISTRATION_OPEN',
+        (SELECT user_id FROM app_user WHERE email='admin@horserace.local')),
+    ('bbbb0000-0000-0000-0000-000000000004', 'TOUR-2024-004', 'Melbourne Cup 2024', 'The race that stops a nation.',
+        '2024-11-05 10:00:00+07', '2024-11-05 16:00:00+07', NULL, NULL, 'Melbourne, AUS', 'COMPLETED',
+        (SELECT user_id FROM app_user WHERE email='admin@horserace.local')),
+    ('bbbb0000-0000-0000-0000-000000000005', 'TOUR-2025-005', 'Saudi Cup 2025', 'The world''s richest horse race.',
+        '2025-02-22 20:00:00+07', '2025-02-22 23:30:00+07', NULL, NULL, 'Riyadh, KSA', 'DRAFT',
+        (SELECT user_id FROM app_user WHERE email='admin@horserace.local'));
+
+-- More races (varied statuses across tournaments)
+INSERT INTO race (race_id, tournament_id, race_code, name, race_type, distance_meter, track_condition, scheduled_start_at, actual_start_at, actual_end_at, status) VALUES
+    ('cccc0000-0000-0000-0000-000000000003', 'bbbb0000-0000-0000-0000-000000000002', 'RACE-003', 'Ascot Gold Cup', 'FLAT', 4000, 'GOOD', '2025-06-19 15:30:00+07', NULL, NULL, 'OPEN'),
+    ('cccc0000-0000-0000-0000-000000000004', 'bbbb0000-0000-0000-0000-000000000002', 'RACE-004', 'Queen Anne Stakes', 'FLAT', 1600, 'FIRM', '2025-06-17 14:30:00+07', NULL, NULL, 'SCHEDULED'),
+    ('cccc0000-0000-0000-0000-000000000005', 'bbbb0000-0000-0000-0000-000000000003', 'RACE-005', 'Derby Trial', 'FLAT', 2000, 'GOOD', '2025-04-15 03:00:00+07', NULL, NULL, 'SCHEDULED'),
+    ('cccc0000-0000-0000-0000-000000000006', 'bbbb0000-0000-0000-0000-000000000004', 'RACE-006', 'Melbourne Cup Final', 'FLAT', 3200, 'SOFT', '2024-11-05 11:00:00+07', '2024-11-05 11:02:00+07', '2024-11-05 11:05:30+07', 'FINISHED'),
+    ('cccc0000-0000-0000-0000-000000000007', 'bbbb0000-0000-0000-0000-000000000004', 'RACE-007', 'Lightning Stakes', 'FLAT', 1000, 'GOOD', '2024-11-05 10:00:00+07', '2024-11-05 10:01:00+07', '2024-11-05 10:02:10+07', 'OFFICIAL'),
+    ('cccc0000-0000-0000-0000-000000000008', 'bbbb1111-bbbb-1111-bbbb-111111111111', 'RACE-008', 'Dubai Sprint', 'FLAT', 1200, 'GOOD', '2024-10-30 15:00:00+07', NULL, NULL, 'CANCELLED');
+
+-- More registrations (varied statuses — drives the approval queue UI)
+INSERT INTO tournament_registration (registration_id, owner_user_id, tournament_id, horse_id, registration_code, status, submitted_at, reviewed_at, approved_by_user_id, rejection_reason) VALUES
+    ('dddd0000-0000-0000-0000-000000000005', (SELECT user_id FROM app_user WHERE email='maria@horserace.local'),
+        'bbbb0000-0000-0000-0000-000000000002', 'aaaa0000-0000-0000-0000-000000000005', 'REG-005', 'SUBMITTED', CURRENT_TIMESTAMP - INTERVAL '2 days', NULL, NULL, NULL),
+    ('dddd0000-0000-0000-0000-000000000006', (SELECT user_id FROM app_user WHERE email='maria@horserace.local'),
+        'bbbb0000-0000-0000-0000-000000000002', 'aaaa0000-0000-0000-0000-000000000006', 'REG-006', 'UNDER_REVIEW', CURRENT_TIMESTAMP - INTERVAL '2 days', NULL, NULL, NULL),
+    ('dddd0000-0000-0000-0000-000000000007', (SELECT user_id FROM app_user WHERE email='khalid@horserace.local'),
+        'bbbb0000-0000-0000-0000-000000000002', 'aaaa0000-0000-0000-0000-000000000007', 'REG-007', 'APPROVED', CURRENT_TIMESTAMP - INTERVAL '5 days', CURRENT_TIMESTAMP - INTERVAL '4 days',
+        (SELECT user_id FROM app_user WHERE email='admin@horserace.local'), NULL),
+    ('dddd0000-0000-0000-0000-000000000008', (SELECT user_id FROM app_user WHERE email='khalid@horserace.local'),
+        'bbbb0000-0000-0000-0000-000000000002', 'aaaa0000-0000-0000-0000-000000000008', 'REG-008', 'REJECTED', CURRENT_TIMESTAMP - INTERVAL '5 days', CURRENT_TIMESTAMP - INTERVAL '4 days',
+        (SELECT user_id FROM app_user WHERE email='admin@horserace.local'), 'Horse flagged INJURED at vet inspection.'),
+    ('dddd0000-0000-0000-0000-000000000009', (SELECT user_id FROM app_user WHERE email='maria@horserace.local'),
+        'bbbb0000-0000-0000-0000-000000000003', 'aaaa0000-0000-0000-0000-000000000011', 'REG-009', 'SUBMITTED', CURRENT_TIMESTAMP - INTERVAL '1 day', NULL, NULL, NULL),
+    ('dddd0000-0000-0000-0000-000000000010', (SELECT user_id FROM app_user WHERE email='khalid@horserace.local'),
+        'bbbb0000-0000-0000-0000-000000000003', 'aaaa0000-0000-0000-0000-000000000012', 'REG-010', 'SUBMITTED', CURRENT_TIMESTAMP - INTERVAL '1 day', NULL, NULL, NULL),
+    ('dddd0000-0000-0000-0000-000000000011', (SELECT user_id FROM app_user WHERE email='maria@horserace.local'),
+        'bbbb0000-0000-0000-0000-000000000003', 'aaaa0000-0000-0000-0000-000000000005', 'REG-011', 'WITHDRAWN', CURRENT_TIMESTAMP - INTERVAL '6 days', NULL, NULL, NULL),
+    ('dddd0000-0000-0000-0000-000000000012', (SELECT user_id FROM app_user WHERE email='owner@horserace.local'),
+        'bbbb0000-0000-0000-0000-000000000004', 'aaaa0000-0000-0000-0000-000000000009', 'REG-012', 'APPROVED', CURRENT_TIMESTAMP - INTERVAL '20 days', CURRENT_TIMESTAMP - INTERVAL '19 days',
+        (SELECT user_id FROM app_user WHERE email='admin@horserace.local'), NULL);
+
+-- More race entries (from APPROVED registrations into races of the same tournament)
+INSERT INTO race_entry (entry_id, registration_id, race_id, entry_code, entry_no, lane_no, status) VALUES
+    ('eeee0000-0000-0000-0000-000000000005', 'dddd0000-0000-0000-0000-000000000007', 'cccc0000-0000-0000-0000-000000000003', 'ENT-005', 1, 1, 'ENTERED'),
+    ('eeee0000-0000-0000-0000-000000000006', 'dddd0000-0000-0000-0000-000000000012', 'cccc0000-0000-0000-0000-000000000006', 'ENT-006', 1, 1, 'FINISHED'),
+    ('eeee0000-0000-0000-0000-000000000007', 'dddd3333-dddd-3333-dddd-333333333333', 'cccc2222-cccc-2222-cccc-222222222222', 'ENT-007', 1, 1, 'ENTERED'),
+    ('eeee0000-0000-0000-0000-000000000008', 'dddd4444-dddd-4444-dddd-444444444444', 'cccc2222-cccc-2222-cccc-222222222222', 'ENT-008', 3, 3, 'ENTERED');
+
+-- Referee assignments (so staffing pages show data)
+INSERT INTO referee_assignment (ref_assignment_id, race_id, referee_user_id, panel_role, status, assigned_at, created_by_user_id) VALUES
+    ('ffff0000-0000-0000-0000-000000000001', 'cccc1111-cccc-1111-cccc-111111111111', '55555555-5555-5555-5555-555555555555', 'CHIEF', 'ASSIGNED', CURRENT_TIMESTAMP - INTERVAL '3 days',
+        (SELECT user_id FROM app_user WHERE email='admin@horserace.local')),
+    ('ffff0000-0000-0000-0000-000000000002', 'cccc1111-cccc-1111-cccc-111111111111', '66666666-6666-6666-6666-666666666666', 'JUDGE', 'CONFIRMED', CURRENT_TIMESTAMP - INTERVAL '3 days',
+        (SELECT user_id FROM app_user WHERE email='admin@horserace.local')),
+    ('ffff0000-0000-0000-0000-000000000003', 'cccc0000-0000-0000-0000-000000000006', '55555555-5555-5555-5555-555555555555', 'CHIEF', 'CONFIRMED', CURRENT_TIMESTAMP - INTERVAL '21 days',
+        (SELECT user_id FROM app_user WHERE email='admin@horserace.local'));
