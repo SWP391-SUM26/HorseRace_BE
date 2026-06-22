@@ -291,6 +291,7 @@ CREATE TABLE tournament_registration (
     owner_user_id       UUID NOT NULL REFERENCES app_user(user_id),
     tournament_id       UUID NOT NULL REFERENCES tournament(tournament_id),
     horse_id            UUID NOT NULL REFERENCES horse(horse_id),
+    race_id             UUID REFERENCES race(race_id),  -- ngựa chọn cuộc đua khi đăng ký (nullable)
     registration_code   VARCHAR(50) UNIQUE NOT NULL,
     status              VARCHAR(50) NOT NULL DEFAULT 'SUBMITTED'
                         CHECK (status IN ('DRAFT', 'SUBMITTED', 'UNDER_REVIEW',

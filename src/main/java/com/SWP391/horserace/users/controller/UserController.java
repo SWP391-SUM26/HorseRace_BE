@@ -140,6 +140,21 @@ public class UserController {
                 .build();
     }
 
+    /**
+     * PUT /api/v1/users/{id} — admin updates a user's display profile by id
+     * (fullName / phone / avatarUrl). Admin-intended; role enforcement is deferred to the
+     * RBAC phase (consistent with the rest of the API's current dev posture).
+     */
+    @PutMapping("/{id}")
+    public ApiResponse<UserResponse> updateUserById(@PathVariable UUID id,
+                                                    @Valid @RequestBody UpdateProfileRequest request) {
+        return ApiResponse.<UserResponse>builder()
+                .success(true)
+                .message("User updated")
+                .data(userService.updateUserById(id, request))
+                .build();
+    }
+
     /** DELETE /api/v1/users/{id} — admin soft-delete a user by UUID. */
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteUser(@PathVariable UUID id) {

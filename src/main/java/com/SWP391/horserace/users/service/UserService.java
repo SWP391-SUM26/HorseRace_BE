@@ -17,6 +17,12 @@ public interface UserService {
     /** Apply a partial profile update for the given user and persist it. */
     UserResponse updateMyProfile(UUID userId, UpdateProfileRequest request);
 
+    /**
+     * Admin: update any user's display profile by id (fullName / phone / avatarUrl). Identity and
+     * security fields (email, password, role, status, kyc) are intentionally out of scope here.
+     */
+    UserResponse updateUserById(UUID id, UpdateProfileRequest request);
+
     /** Store an uploaded avatar image, set the user's avatarUrl, and return the updated profile. */
     UserResponse updateAvatar(UUID userId, MultipartFile file);
 
