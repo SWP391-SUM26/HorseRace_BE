@@ -2,6 +2,12 @@ package com.SWP391.horserace.registrations.service.impl;
 
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.repository.HorseRepository;
+import com.SWP391.horserace.races.entity.Race;
+import com.SWP391.horserace.races.entity.RaceEntry;
+import com.SWP391.horserace.races.entity.RaceEntryStatus;
+import com.SWP391.horserace.races.entity.RaceStatus;
+import com.SWP391.horserace.races.repository.RaceEntryRepository;
+import com.SWP391.horserace.races.repository.RaceRepository;
 import com.SWP391.horserace.registrations.dto.RegistrationRequest;
 import com.SWP391.horserace.registrations.dto.RegistrationResponse;
 import com.SWP391.horserace.registrations.dto.RejectRegistrationRequest;
@@ -19,6 +25,7 @@ import com.SWP391.horserace.users.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -28,6 +35,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -37,6 +46,8 @@ class RegistrationServiceImplTest {
     @Mock TournamentRepository tournamentRepository;
     @Mock HorseRepository horseRepository;
     @Mock UserRepository userRepository;
+    @Mock RaceRepository raceRepository;
+    @Mock RaceEntryRepository raceEntryRepository;
 
     private RegistrationServiceImpl service;
 
@@ -51,7 +62,8 @@ class RegistrationServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new RegistrationServiceImpl(
-                registrationRepository, tournamentRepository, horseRepository, userRepository);
+                registrationRepository, tournamentRepository, horseRepository, userRepository,
+                raceRepository, raceEntryRepository);
 
         owner = User.builder().userId(ownerId).fullName("Owen Owner").build();
         horse = Horse.builder().horseId(horseId).owner(owner).horseCode("HRS0001").name("Thunder").build();
@@ -63,7 +75,11 @@ class RegistrationServiceImplTest {
     }
 
     private RegistrationRequest req() {
-        return new RegistrationRequest(tournamentId, horseId);
+        return new RegistrationRequest(tournamentId, horseId, null);
+    }
+
+    private RegistrationRequest reqWithRace(UUID raceId) {
+        return new RegistrationRequest(tournamentId, horseId, raceId);
     }
 
     // ── submit ──
@@ -163,6 +179,59 @@ class RegistrationServiceImplTest {
         assertThat(res.getRegistrationCode()).isEqualTo("REG00001");
     }
 
+    @Test
+    void submit_withRaceInTournament_setsRaceOnRegistration() {
+        UUID raceId = UUID.randomUUID();
+        Race race = Race.builder().raceId(raceId).name("Race 1")
+                .tournament(tournament).status(RaceStatus.SCHEDULED).build();
+        when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(registrationRepository.existsByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(false);
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(userRepository.findByUserIdAndDeletedFalse(ownerId)).thenReturn(Optional.of(owner));
+        when(registrationRepository.count()).thenReturn(0L);
+        when(registrationRepository.existsByRegistrationCode(any())).thenReturn(false);
+        when(registrationRepository.save(any(TournamentRegistration.class)))
+                .thenAnswer(i -> i.getArgument(0));
+
+        RegistrationResponse res = service.submitRegistration(ownerId, reqWithRace(raceId));
+
+        assertThat(res.getRaceId()).isEqualTo(raceId);
+        assertThat(res.getRaceName()).isEqualTo("Race 1");
+    }
+
+    @Test
+    void submit_withRaceNotFound_throws() {
+        UUID raceId = UUID.randomUUID();
+        when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(registrationRepository.existsByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(false);
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.submitRegistration(ownerId, reqWithRace(raceId)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_FOUND);
+    }
+
+    @Test
+    void submit_withRaceOfDifferentTournament_mismatch() {
+        UUID raceId = UUID.randomUUID();
+        Tournament otherTournament = Tournament.builder().tournamentId(UUID.randomUUID()).name("Other").build();
+        Race race = Race.builder().raceId(raceId).name("Foreign Race")
+                .tournament(otherTournament).status(RaceStatus.SCHEDULED).build();
+        when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(registrationRepository.existsByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(false);
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+
+        assertThatThrownBy(() -> service.submitRegistration(ownerId, reqWithRace(raceId)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_TOURNAMENT_MISMATCH);
+    }
+
     // ── approve ──
 
     @Test
@@ -196,6 +265,78 @@ class RegistrationServiceImplTest {
         assertThatThrownBy(() -> service.approveRegistration(reviewerId, id))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.REGISTRATION_INVALID_STATUS);
+    }
+
+    @Test
+    void approve_withChosenRace_createsRaceEntry() {
+        UUID id = UUID.randomUUID();
+        UUID reviewerId = UUID.randomUUID();
+        UUID raceId = UUID.randomUUID();
+        Race race = Race.builder().raceId(raceId).name("Race 1")
+                .tournament(tournament).status(RaceStatus.OPEN).maxParticipants(8).build();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(id).owner(owner).tournament(tournament).horse(horse).race(race)
+                .status(RegistrationStatus.SUBMITTED).build();
+        User reviewer = User.builder().userId(reviewerId).fullName("Adam Admin").build();
+        when(registrationRepository.findById(id)).thenReturn(Optional.of(reg));
+        when(userRepository.findByUserIdAndDeletedFalse(reviewerId)).thenReturn(Optional.of(reviewer));
+        when(registrationRepository.save(any(TournamentRegistration.class)))
+                .thenAnswer(i -> i.getArgument(0));
+        when(raceEntryRepository.countByRace_RaceId(raceId)).thenReturn(0L);
+        when(raceEntryRepository.count()).thenReturn(0L);
+        when(raceEntryRepository.existsByEntryCode(any())).thenReturn(false);
+        when(raceEntryRepository.save(any(RaceEntry.class))).thenAnswer(i -> i.getArgument(0));
+
+        RegistrationResponse res = service.approveRegistration(reviewerId, id);
+
+        assertThat(res.getStatus()).isEqualTo(RegistrationStatus.APPROVED);
+
+        ArgumentCaptor<RaceEntry> captor = ArgumentCaptor.forClass(RaceEntry.class);
+        verify(raceEntryRepository).save(captor.capture());
+        RaceEntry savedEntry = captor.getValue();
+        assertThat(savedEntry.getRace()).isEqualTo(race);
+        assertThat(savedEntry.getRegistration()).isEqualTo(reg);
+        assertThat(savedEntry.getStatus()).isEqualTo(RaceEntryStatus.ENTERED);
+        assertThat(savedEntry.getEntryCode()).isEqualTo("ENT00001");
+    }
+
+    @Test
+    void approve_withoutRace_noRaceEntryCreated() {
+        UUID id = UUID.randomUUID();
+        UUID reviewerId = UUID.randomUUID();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(id).owner(owner).tournament(tournament).horse(horse)
+                .status(RegistrationStatus.SUBMITTED).build();
+        when(registrationRepository.findById(id)).thenReturn(Optional.of(reg));
+        when(registrationRepository.save(any(TournamentRegistration.class)))
+                .thenAnswer(i -> i.getArgument(0));
+
+        RegistrationResponse res = service.approveRegistration(reviewerId, id);
+
+        assertThat(res.getStatus()).isEqualTo(RegistrationStatus.APPROVED);
+        verify(raceEntryRepository, never()).save(any());
+    }
+
+    @Test
+    void approve_intoRaceNotOpen_throws() {
+        UUID id = UUID.randomUUID();
+        UUID reviewerId = UUID.randomUUID();
+        UUID raceId = UUID.randomUUID();
+        Race race = Race.builder().raceId(raceId).name("Race 1")
+                .tournament(tournament).status(RaceStatus.CLOSED).build();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(id).owner(owner).tournament(tournament).horse(horse).race(race)
+                .status(RegistrationStatus.SUBMITTED).build();
+        User reviewer = User.builder().userId(reviewerId).fullName("Adam Admin").build();
+        when(registrationRepository.findById(id)).thenReturn(Optional.of(reg));
+        when(userRepository.findByUserIdAndDeletedFalse(reviewerId)).thenReturn(Optional.of(reviewer));
+        when(registrationRepository.save(any(TournamentRegistration.class)))
+                .thenAnswer(i -> i.getArgument(0));
+
+        assertThatThrownBy(() -> service.approveRegistration(reviewerId, id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_OPEN_FOR_ENTRY);
+        verify(raceEntryRepository, never()).save(any());
     }
 
     // ── reject ──

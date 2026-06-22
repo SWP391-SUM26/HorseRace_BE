@@ -1,6 +1,7 @@
 package com.SWP391.horserace.users.service.impl;
 
 import com.SWP391.horserace.roles.entity.Role;
+import com.SWP391.horserace.roles.repository.PermissionRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.shared.storage.ImageUploadService;
@@ -24,6 +25,7 @@ public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final ImageUploadService imageUploadService;
+    private final PermissionRepository permissionRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -78,6 +80,17 @@ public class UserServiceImpl implements UserService {
         UserResponse response = mapToResponse(userRepository.save(user));
         imageUploadService.deleteByUrl(oldAvatarUrl); // best-effort cleanup of the replaced file
         return response;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<String> getMyPermissions(UUID userId) {
+        User user = loadActiveUser(userId);
+        Role role = user.getRole();
+        if (role == null || role.getRoleId() == null) {
+            return List.of();
+        }
+        return permissionRepository.findPermissionCodesByRoleId(role.getRoleId());
     }
 
     private User loadActiveUser(UUID userId) {
