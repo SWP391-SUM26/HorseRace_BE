@@ -25,6 +25,7 @@ DROP TABLE IF EXISTS role_permission          CASCADE;
 DROP TABLE IF EXISTS permission               CASCADE;
 DROP TABLE IF EXISTS betting_pool             CASCADE;
 DROP TABLE IF EXISTS email_change_request     CASCADE;
+DROP TABLE IF EXISTS email_verification_token CASCADE;
 DROP TABLE IF EXISTS password_reset_token     CASCADE;
 DROP TABLE IF EXISTS refresh_token            CASCADE;
 DROP TABLE IF EXISTS notification             CASCADE;
@@ -290,6 +291,7 @@ CREATE TABLE tournament_registration (
     owner_user_id       UUID NOT NULL REFERENCES app_user(user_id),
     tournament_id       UUID NOT NULL REFERENCES tournament(tournament_id),
     horse_id            UUID NOT NULL REFERENCES horse(horse_id),
+    race_id             UUID REFERENCES race(race_id),  -- ngựa chọn cuộc đua khi đăng ký (nullable)
     registration_code   VARCHAR(50) UNIQUE NOT NULL,
     status              VARCHAR(50) NOT NULL DEFAULT 'SUBMITTED'
                         CHECK (status IN ('DRAFT', 'SUBMITTED', 'UNDER_REVIEW',

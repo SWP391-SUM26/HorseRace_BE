@@ -24,6 +24,9 @@ public class RegistrationResponse {
     private String horseName;
     private String horseCode;
 
+    private UUID raceId;
+    private String raceName;
+
     private OffsetDateTime submittedAt;
     private OffsetDateTime reviewedAt;
     private UUID approvedByUserId;

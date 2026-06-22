@@ -1,6 +1,7 @@
 package com.SWP391.horserace.registrations.entity;
 
 import com.SWP391.horserace.horses.entity.Horse;
+import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.tournaments.entity.Tournament;
 import com.SWP391.horserace.users.entity.User;
 import jakarta.persistence.*;
@@ -41,6 +42,11 @@ public class TournamentRegistration {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "horse_id")
     private Horse horse;
+
+    /** Optional race the owner chose at registration time. When set, approval auto-creates a race_entry. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "race_id")
+    private Race race;
 
     @Column(name = "registration_code", nullable = false, unique = true, length = 50)
     private String registrationCode;
