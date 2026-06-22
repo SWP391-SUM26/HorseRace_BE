@@ -72,6 +72,7 @@ public enum ErrorCode {
     HORSE_NAME_REQUIRED(5002, "Horse name is required", HttpStatus.BAD_REQUEST),
     MICROCHIP_EXISTED(5004, "Microchip number already exists", HttpStatus.CONFLICT),
     NOT_HORSE_OWNER(5005, "You are not the owner of this horse", HttpStatus.FORBIDDEN),
+    HORSE_NO_APPROVED_REGISTRATION(5006, "Horse has no approved registration for this race's tournament", HttpStatus.BAD_REQUEST),
 
     // ---- file upload / storage ----
     FILE_EMPTY(6001, "Uploaded file is empty", HttpStatus.BAD_REQUEST),

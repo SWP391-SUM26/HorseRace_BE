@@ -32,4 +32,19 @@ public interface RaceEntryRepository extends JpaRepository<RaceEntry, UUID> {
     long countByRace_RaceId(UUID raceId);
 
     boolean existsByEntryCode(String entryCode);
+
+    /**
+     * Full race history for one horse: every race entry created from any of the horse's
+     * registrations, newest scheduled race first. Race + tournament are eagerly fetched so the
+     * caller can build history items without lazy-loading.
+     */
+    @Query("""
+        SELECT re FROM RaceEntry re
+          JOIN FETCH re.race rc
+          JOIN FETCH rc.tournament t
+          JOIN re.registration r
+         WHERE r.horse.horseId = :horseId
+         ORDER BY rc.scheduledStartAt DESC NULLS LAST
+        """)
+    java.util.List<RaceEntry> findHistoryByHorseId(@Param("horseId") UUID horseId);
 }

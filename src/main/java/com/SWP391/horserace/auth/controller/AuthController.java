@@ -9,10 +9,13 @@ import com.SWP391.horserace.auth.dto.RefreshRequest;
 import com.SWP391.horserace.auth.dto.RegisterJockeyRequest;
 import com.SWP391.horserace.auth.dto.RegisterOwnerRequest;
 import com.SWP391.horserace.auth.dto.RegisterSpectatorRequest;
+import com.SWP391.horserace.auth.dto.RequestEmailVerificationRequest;
 import com.SWP391.horserace.auth.dto.ResendCodeRequest;
 import com.SWP391.horserace.auth.dto.ResetPasswordRequest;
 import com.SWP391.horserace.auth.dto.VerifyCodeRequest;
+import com.SWP391.horserace.auth.dto.VerifyEmailRequest;
 import com.SWP391.horserace.auth.service.AuthService;
+import com.SWP391.horserace.auth.service.EmailVerificationService;
 import com.SWP391.horserace.auth.service.PasswordResetService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,6 +36,7 @@ public class AuthController {
 
     private final AuthService authService;
     private final PasswordResetService passwordResetService;
+    private final EmailVerificationService emailVerificationService;
 
     /** POST /api/v1/auth/login — email + password → access + refresh tokens. */
     @PostMapping("/login")
@@ -162,6 +166,30 @@ public class AuthController {
         return ApiResponse.<Void>builder()
                 .success(true)
                 .message("Password has been reset successfully")
+                .build();
+    }
+
+    // =========================================================
+    // Email verification endpoints (standalone — does not affect login)
+    // =========================================================
+
+    /** POST /api/v1/auth/verify-email/request — send a 6-digit verification code to the email. */
+    @PostMapping("/verify-email/request")
+    public ApiResponse<Void> requestEmailVerification(@Valid @RequestBody RequestEmailVerificationRequest request) {
+        emailVerificationService.requestVerification(request.email());
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("If that email is registered, a verification code has been sent")
+                .build();
+    }
+
+    /** POST /api/v1/auth/verify-email — validate the 6-digit code and mark the email verified. */
+    @PostMapping("/verify-email")
+    public ApiResponse<Void> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        emailVerificationService.verifyEmail(request.email(), request.code());
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("Email verified successfully")
                 .build();
     }
 

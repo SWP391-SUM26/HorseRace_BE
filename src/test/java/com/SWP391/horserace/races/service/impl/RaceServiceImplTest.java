@@ -3,6 +3,7 @@ package com.SWP391.horserace.races.service.impl;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.races.dto.AssignParticipantRequest;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
+import com.SWP391.horserace.races.dto.RaceFilterRequest;
 import com.SWP391.horserace.races.dto.RaceRequest;
 import com.SWP391.horserace.races.dto.RaceResponse;
 import com.SWP391.horserace.races.dto.ScheduleRaceRequest;
@@ -24,10 +25,17 @@ import com.SWP391.horserace.users.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -196,6 +204,46 @@ class RaceServiceImplTest {
         assertThatThrownBy(() -> service.cancelRace(currentUserId, id))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_STATUS);
+    }
+
+    // ── listRaces ──
+
+    @Test
+    void listRaces_withDateRange_returnsMappedPageWithoutThrowing() {
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.SCHEDULED).build();
+        Page<Race> page = new PageImpl<>(List.of(race));
+        when(raceRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(page);
+
+        RaceFilterRequest filter = RaceFilterRequest.builder()
+                .dateFrom(OffsetDateTime.now().minusDays(1))
+                .dateTo(OffsetDateTime.now().plusDays(1))
+                .build();
+
+        Page<RaceResponse> result = service.listRaces(filter);
+
+        assertThat(result.getTotalElements()).isEqualTo(1);
+        assertThat(result.getContent().get(0).getRaceId()).isEqualTo(id);
+        assertThat(result.getContent().get(0).getRaceCode()).isEqualTo("RACE00001");
+    }
+
+    @Test
+    void listRaces_sortByRaceCode_buildsPageableSortedByRaceCode() {
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        when(raceRepository.findAll(any(Specification.class), pageableCaptor.capture()))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        RaceFilterRequest filter = RaceFilterRequest.builder()
+                .sortBy("raceCode")
+                .sortDir("asc")
+                .build();
+
+        service.listRaces(filter);
+
+        Sort.Order order = pageableCaptor.getValue().getSort().getOrderFor("raceCode");
+        assertThat(order).isNotNull();
+        assertThat(order.getDirection()).isEqualTo(Sort.Direction.ASC);
     }
 
     // ── assignParticipant ──
