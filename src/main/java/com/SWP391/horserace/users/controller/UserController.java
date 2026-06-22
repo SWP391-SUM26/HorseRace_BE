@@ -95,6 +95,30 @@ public class UserController {
                 .build();
     }
 
+    /**
+     * GET /api/v1/users/me/permissions — the current authenticated user's permission codes
+     * (resolved from role -> role_permission -> permission). Lets the FE drive UI from real
+     * permissions instead of hardcoding them.
+     */
+    @GetMapping("/me/permissions")
+    public ApiResponse<List<String>> getMyPermissions(@AuthenticationPrincipal UUID userId) {
+        return ApiResponse.<List<String>>builder()
+                .success(true)
+                .message("Fetched current user permissions")
+                .data(userService.getMyPermissions(userId))
+                .build();
+    }
+
+    /** GET /api/v1/users/{id}/permissions — permission codes for a given user (admin/lookup). */
+    @GetMapping("/{id}/permissions")
+    public ApiResponse<List<String>> getUserPermissions(@PathVariable UUID id) {
+        return ApiResponse.<List<String>>builder()
+                .success(true)
+                .message("Fetched user permissions")
+                .data(userService.getMyPermissions(id))
+                .build();
+    }
+
     /** GET /api/v1/users — list all active users. */
     @GetMapping
     public ApiResponse<List<UserResponse>> getAllUsers() {

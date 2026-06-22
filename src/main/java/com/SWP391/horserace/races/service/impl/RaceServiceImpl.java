@@ -73,6 +73,12 @@ public class RaceServiceImpl implements RaceService {
             if (filter.getRaceType() != null && !filter.getRaceType().isBlank()) {
                 predicates.add(cb.equal(root.get("raceType"), filter.getRaceType()));
             }
+            if (filter.getDateFrom() != null) {
+                predicates.add(cb.greaterThanOrEqualTo(root.get("scheduledStartAt"), filter.getDateFrom()));
+            }
+            if (filter.getDateTo() != null) {
+                predicates.add(cb.lessThanOrEqualTo(root.get("scheduledStartAt"), filter.getDateTo()));
+            }
 
             return cb.and(predicates.toArray(new Predicate[0]));
         };
@@ -291,6 +297,9 @@ public class RaceServiceImpl implements RaceService {
         String field = switch (f.getSortBy() != null ? f.getSortBy().trim().toLowerCase() : "createdat") {
             case "scheduledstartat" -> "scheduledStartAt";
             case "name" -> "name";
+            case "racecode" -> "raceCode";
+            case "status" -> "status";
+            case "distancemeter" -> "distanceMeter";
             default -> "createdAt";
         };
         Sort.Direction dir = "asc".equalsIgnoreCase(f.getSortDir()) ? Sort.Direction.ASC : Sort.Direction.DESC;
