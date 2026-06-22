@@ -104,7 +104,11 @@ public enum ErrorCode {
     PREDICTION_ENTRY_MISMATCH(9005, "The predicted entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
     PREDICTION_CANNOT_CANCEL(9006, "Prediction cannot be cancelled at this stage", HttpStatus.BAD_REQUEST),
     IDEMPOTENCY_KEY_EXISTED(9007, "Idempotency key already exists", HttpStatus.CONFLICT),
-    BETTING_POOL_CLOSED(9008, "Betting pool is not open", HttpStatus.BAD_REQUEST);
+    BETTING_POOL_CLOSED(9008, "Betting pool is not open", HttpStatus.BAD_REQUEST),
+
+    // ---- referee management ----
+    REPORT_NOT_FOUND(9101, "Referee report not found", HttpStatus.NOT_FOUND),
+    REPORT_INVALID_STATUS(9102, "Invalid status transition for this report", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;
