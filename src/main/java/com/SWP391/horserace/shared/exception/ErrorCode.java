@@ -72,6 +72,7 @@ public enum ErrorCode {
     HORSE_NAME_REQUIRED(5002, "Horse name is required", HttpStatus.BAD_REQUEST),
     MICROCHIP_EXISTED(5004, "Microchip number already exists", HttpStatus.CONFLICT),
     NOT_HORSE_OWNER(5005, "You are not the owner of this horse", HttpStatus.FORBIDDEN),
+    HORSE_NO_APPROVED_REGISTRATION(5006, "Horse has no approved registration for this race's tournament", HttpStatus.BAD_REQUEST),
 
     // ---- file upload / storage ----
     FILE_EMPTY(6001, "Uploaded file is empty", HttpStatus.BAD_REQUEST),
@@ -93,7 +94,17 @@ public enum ErrorCode {
     RACE_NOT_OPEN_FOR_ENTRY(8003, "Race is not open for participant entry", HttpStatus.BAD_REQUEST),
     RACE_TOURNAMENT_MISMATCH(8004, "Registration and race belong to different tournaments", HttpStatus.BAD_REQUEST),
     RACE_FULL(8005, "Race has reached its maximum number of participants", HttpStatus.BAD_REQUEST),
-    REGISTRATION_NOT_APPROVED(8006, "Registration is not approved", HttpStatus.BAD_REQUEST);
+    REGISTRATION_NOT_APPROVED(8006, "Registration is not approved", HttpStatus.BAD_REQUEST),
+
+    // ---- prediction system ----
+    PREDICTION_NOT_FOUND(9001, "Prediction not found", HttpStatus.NOT_FOUND),
+    PREDICTION_ALREADY_EXISTS(9002, "You have already made this type of prediction for this race and entry", HttpStatus.CONFLICT),
+    PREDICTION_RACE_NOT_OPEN(9003, "Race is not open for predictions", HttpStatus.BAD_REQUEST),
+    PREDICTION_ENTRY_NOT_FOUND(9004, "Race entry not found", HttpStatus.NOT_FOUND),
+    PREDICTION_ENTRY_MISMATCH(9005, "The predicted entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+    PREDICTION_CANNOT_CANCEL(9006, "Prediction cannot be cancelled at this stage", HttpStatus.BAD_REQUEST),
+    IDEMPOTENCY_KEY_EXISTED(9007, "Idempotency key already exists", HttpStatus.CONFLICT),
+    BETTING_POOL_CLOSED(9008, "Betting pool is not open", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

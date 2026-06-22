@@ -76,6 +76,10 @@ public class User {
     @Builder.Default
     private KycStatus kycStatus = KycStatus.PENDING;
 
+    @Column(name = "email_verified", nullable = false)
+    @Builder.Default
+    private boolean emailVerified = false;
+
     @Column(name = "last_login_at")
     private OffsetDateTime lastLoginAt;
 

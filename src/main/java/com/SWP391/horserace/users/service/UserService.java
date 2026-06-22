@@ -25,4 +25,10 @@ public interface UserService {
 
     /** Store an uploaded avatar image, set the user's avatarUrl, and return the updated profile. */
     UserResponse updateAvatar(UUID userId, MultipartFile file);
+
+    /**
+     * The permission codes granted to the given user (resolved from role -> role_permission ->
+     * permission). Returns an empty list if the user has no role or the role has no permissions.
+     */
+    List<String> getMyPermissions(UUID userId);
 }

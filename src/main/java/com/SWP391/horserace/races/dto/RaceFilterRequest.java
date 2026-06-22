@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Data
@@ -18,7 +19,10 @@ public class RaceFilterRequest {
     private UUID tournamentId;
     private String raceType;
 
-    private String sortBy; // scheduledStartAt, name, createdAt
+    private OffsetDateTime dateFrom;
+    private OffsetDateTime dateTo;
+
+    private String sortBy; // scheduledStartAt, name, raceCode, status, distanceMeter, createdAt
     private String sortDir; // asc / desc
 
     @Builder.Default

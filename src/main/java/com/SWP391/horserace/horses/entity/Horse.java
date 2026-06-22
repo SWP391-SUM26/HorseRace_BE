@@ -81,6 +81,12 @@ public class Horse {
     @Column(name = "image_url", columnDefinition = "text")
     private String imageUrl;
 
+    @Column(name = "last_health_check_at")
+    private OffsetDateTime lastHealthCheckAt;
+
+    @Column(name = "medical_note", columnDefinition = "text")
+    private String medicalNote;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private OffsetDateTime createdAt;

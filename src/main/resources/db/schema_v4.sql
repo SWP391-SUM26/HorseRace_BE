@@ -25,6 +25,7 @@ DROP TABLE IF EXISTS role_permission          CASCADE;
 DROP TABLE IF EXISTS permission               CASCADE;
 DROP TABLE IF EXISTS betting_pool             CASCADE;
 DROP TABLE IF EXISTS email_change_request     CASCADE;
+DROP TABLE IF EXISTS email_verification_token CASCADE;
 DROP TABLE IF EXISTS password_reset_token     CASCADE;
 DROP TABLE IF EXISTS refresh_token            CASCADE;
 DROP TABLE IF EXISTS notification             CASCADE;
@@ -102,6 +103,7 @@ CREATE TABLE app_user (
                   CHECK (status IN ('ACTIVE', 'INACTIVE', 'SUSPENDED', 'BANNED')),
     kyc_status    VARCHAR(30) NOT NULL DEFAULT 'PENDING'
                   CHECK (kyc_status IN ('PENDING', 'VERIFIED', 'REJECTED')),
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
     last_login_at TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -168,6 +170,19 @@ CREATE TABLE password_reset_token (
 );
 
 -- =========================================================
+-- EMAIL VERIFICATION TOKEN  (OTP 6 số xác thực email, lưu HASH)
+-- =========================================================
+CREATE TABLE email_verification_token (
+    token_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES app_user(user_id),
+    code_hash   VARCHAR(255) NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used        BOOLEAN NOT NULL DEFAULT FALSE,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================
 -- HORSE
 -- =========================================================
 CREATE TABLE horse (
@@ -188,6 +203,8 @@ CREATE TABLE horse (
     status              VARCHAR(50) NOT NULL DEFAULT 'ACTIVE'
                         CHECK (status IN ('ACTIVE', 'RETIRED', 'INACTIVE')),
     image_url           TEXT,                                         -- V4: ảnh ngựa (served via /api/v1/files)
+    last_health_check_at TIMESTAMPTZ,
+    medical_note         TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_deleted          BOOLEAN NOT NULL DEFAULT FALSE,
