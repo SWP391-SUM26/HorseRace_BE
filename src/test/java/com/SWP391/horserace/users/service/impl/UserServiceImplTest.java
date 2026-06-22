@@ -114,4 +114,28 @@ class UserServiceImplTest {
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.USER_NOT_EXISTED);
     }
+
+    @Test
+    void deleteUser_softDeletesUser() {
+        UUID userId = UUID.randomUUID();
+        User user = User.builder().userId(userId).build();
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(user));
+        when(userRepository.save(Mockito.any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.deleteUser(userId);
+
+        assertThat(user.isDeleted()).isTrue();
+        assertThat(user.getDeletedAt()).isNotNull();
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void deleteUser_userNotFound_throwsUserNotExisted() {
+        UUID userId = UUID.randomUUID();
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.deleteUser(userId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.USER_NOT_EXISTED);
+    }
 }

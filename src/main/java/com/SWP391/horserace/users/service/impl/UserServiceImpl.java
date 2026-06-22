@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -110,6 +111,15 @@ public class UserServiceImpl implements UserService {
             return List.of();
         }
         return permissionRepository.findPermissionCodesByRoleId(role.getRoleId());
+    }
+
+    @Override
+    @Transactional
+    public void deleteUser(UUID id) {
+        User user = loadActiveUser(id);
+        user.setDeleted(true);
+        user.setDeletedAt(OffsetDateTime.now());
+        userRepository.save(user);
     }
 
     private User loadActiveUser(UUID userId) {

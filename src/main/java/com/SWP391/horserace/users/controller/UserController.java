@@ -11,6 +11,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -151,6 +152,16 @@ public class UserController {
                 .success(true)
                 .message("User updated")
                 .data(userService.updateUserById(id, request))
+                .build();
+    }
+
+    /** DELETE /api/v1/users/{id} — admin soft-delete a user by UUID. */
+    @DeleteMapping("/{id}")
+    public ApiResponse<Void> deleteUser(@PathVariable UUID id) {
+        userService.deleteUser(id);
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("User deleted")
                 .build();
     }
 }
