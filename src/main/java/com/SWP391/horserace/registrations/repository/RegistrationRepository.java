@@ -1,5 +1,6 @@
 package com.SWP391.horserace.registrations.repository;
 
+import com.SWP391.horserace.registrations.entity.RegistrationStatus;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -17,6 +18,10 @@ public interface RegistrationRepository
     boolean existsByTournament_TournamentIdAndHorse_HorseId(UUID tournamentId, UUID horseId);
 
     boolean existsByRegistrationCode(String registrationCode);
+
+    /** Resolve a horse's registration for a given tournament in a particular status (e.g. APPROVED). */
+    Optional<TournamentRegistration> findFirstByHorse_HorseIdAndTournament_TournamentIdAndStatus(
+            UUID horseId, UUID tournamentId, RegistrationStatus status);
 
     @Query("SELECT r FROM TournamentRegistration r "
             + "JOIN FETCH r.owner "

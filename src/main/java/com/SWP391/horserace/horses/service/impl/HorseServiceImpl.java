@@ -1,16 +1,33 @@
 package com.SWP391.horserace.horses.service.impl;
 
+import com.SWP391.horserace.horses.dto.AssignHorseToRaceRequest;
 import com.SWP391.horserace.horses.dto.HorseFilterRequest;
 import com.SWP391.horserace.horses.dto.HorseRequest;
 import com.SWP391.horserace.horses.dto.HorseResponse;
+import com.SWP391.horserace.horses.dto.MedicalStatusResponse;
+import com.SWP391.horserace.horses.dto.RaceHistoryItemResponse;
+import com.SWP391.horserace.horses.dto.UpdateMedicalStatusRequest;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.entity.HorseStatus;
 import com.SWP391.horserace.horses.repository.HorseRepository;
 import com.SWP391.horserace.horses.repository.HorseSpecification;
 import com.SWP391.horserace.horses.service.HorseService;
+import com.SWP391.horserace.races.dto.RaceEntryResponse;
+import com.SWP391.horserace.races.entity.Race;
+import com.SWP391.horserace.races.entity.RaceEntry;
+import com.SWP391.horserace.races.entity.RaceEntryStatus;
+import com.SWP391.horserace.races.entity.RaceResult;
+import com.SWP391.horserace.races.entity.RaceStatus;
+import com.SWP391.horserace.races.repository.RaceEntryRepository;
+import com.SWP391.horserace.races.repository.RaceRepository;
+import com.SWP391.horserace.races.repository.RaceResultRepository;
+import com.SWP391.horserace.registrations.entity.RegistrationStatus;
+import com.SWP391.horserace.registrations.entity.TournamentRegistration;
+import com.SWP391.horserace.registrations.repository.RegistrationRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.shared.storage.ImageUploadService;
+import com.SWP391.horserace.tournaments.entity.Tournament;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +40,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -35,6 +55,10 @@ public class HorseServiceImpl implements HorseService {
     private final HorseRepository horseRepository;
     private final UserRepository userRepository;
     private final ImageUploadService imageUploadService;
+    private final RegistrationRepository registrationRepository;
+    private final RaceRepository raceRepository;
+    private final RaceEntryRepository raceEntryRepository;
+    private final RaceResultRepository raceResultRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -137,6 +161,89 @@ public class HorseServiceImpl implements HorseService {
         return response;
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public MedicalStatusResponse getMedicalStatus(UUID horseId) {
+        return mapToMedicalStatus(loadHorse(horseId));
+    }
+
+    @Override
+    @Transactional
+    public MedicalStatusResponse updateMedicalStatus(UUID currentUserId, UUID horseId,
+                                                     UpdateMedicalStatusRequest request) {
+        Horse horse = loadOwnedHorse(currentUserId, horseId);
+
+        if (request.healthStatus() != null) {
+            horse.setHealthStatus(request.healthStatus());
+        }
+        if (request.medicalNote() != null) {
+            horse.setMedicalNote(trimToNull(request.medicalNote()));
+        }
+        horse.setLastHealthCheckAt(OffsetDateTime.now());
+
+        return mapToMedicalStatus(horseRepository.save(horse));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<RaceHistoryItemResponse> getRaceHistory(UUID horseId) {
+        loadHorse(horseId); // 404 if the horse doesn't exist / is soft-deleted
+
+        List<RaceEntry> entries = raceEntryRepository.findHistoryByHorseId(horseId);
+        if (entries.isEmpty()) {
+            return List.of();
+        }
+
+        // Batch-load finish positions for these entries (one result row per entry, if any).
+        List<UUID> entryIds = entries.stream().map(RaceEntry::getEntryId).toList();
+        Map<UUID, Integer> finishByEntry = raceResultRepository.findByEntry_EntryIdIn(entryIds).stream()
+                .filter(r -> r.getEntry() != null && r.getFinishPosition() != null)
+                .collect(Collectors.toMap(r -> r.getEntry().getEntryId(), RaceResult::getFinishPosition,
+                        (a, b) -> a));
+
+        return entries.stream()
+                .map(e -> mapToHistoryItem(e, finishByEntry.get(e.getEntryId())))
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public RaceEntryResponse assignHorseToRace(UUID currentUserId, UUID horseId,
+                                               AssignHorseToRaceRequest request) {
+        Horse horse = loadOwnedHorse(currentUserId, horseId);
+
+        Race race = raceRepository.findByRaceIdAndDeletedFalse(request.raceId())
+                .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
+
+        if (race.getStatus() != RaceStatus.SCHEDULED && race.getStatus() != RaceStatus.OPEN) {
+            throw new AppException(ErrorCode.RACE_NOT_OPEN_FOR_ENTRY);
+        }
+
+        UUID tournamentId = race.getTournament() != null
+                ? race.getTournament().getTournamentId() : null;
+        if (tournamentId == null) {
+            throw new AppException(ErrorCode.HORSE_NO_APPROVED_REGISTRATION);
+        }
+
+        TournamentRegistration registration = registrationRepository
+                .findFirstByHorse_HorseIdAndTournament_TournamentIdAndStatus(
+                        horse.getHorseId(), tournamentId, RegistrationStatus.APPROVED)
+                .orElseThrow(() -> new AppException(ErrorCode.HORSE_NO_APPROVED_REGISTRATION));
+
+        RaceEntry entry = RaceEntry.builder()
+                .registration(registration)
+                .race(race)
+                .entryCode(generateEntryCode())
+                .entryNo(request.entryNo())
+                .laneNo(request.laneNo())
+                .status(RaceEntryStatus.ENTERED)
+                .build();
+
+        // DB UNIQUE (race_id, registration_id)/(race_id, lane_no)/(race_id, entry_no)
+        // guards dupes -> DataIntegrityViolationException -> existing 409 handler.
+        return mapToEntryResponse(raceEntryRepository.save(entry));
+    }
+
     // ── helpers ──
 
     private Horse loadHorse(UUID horseId) {
@@ -185,10 +292,66 @@ public class HorseServiceImpl implements HorseService {
         return PageRequest.of(page, size, Sort.by(dir, field));
     }
 
+    /** Sequential code ENTnnnnn, skipping any already taken (the DB UNIQUE is the final guard). */
+    private String generateEntryCode() {
+        long n = raceEntryRepository.count() + 1;
+        String code;
+        do {
+            code = String.format("ENT%05d", n++);
+        } while (raceEntryRepository.existsByEntryCode(code));
+        return code;
+    }
+
     private static String trimToNull(String s) {
         if (s == null) return null;
         String t = s.trim();
         return t.isEmpty() ? null : t;
+    }
+
+    private MedicalStatusResponse mapToMedicalStatus(Horse h) {
+        return MedicalStatusResponse.builder()
+                .horseId(h.getHorseId())
+                .horseName(h.getName())
+                .healthStatus(h.getHealthStatus())
+                .lastHealthCheckAt(h.getLastHealthCheckAt())
+                .medicalNote(h.getMedicalNote())
+                .build();
+    }
+
+    private RaceHistoryItemResponse mapToHistoryItem(RaceEntry e, Integer finishPosition) {
+        Race race = e.getRace();
+        Tournament t = race != null ? race.getTournament() : null;
+        return RaceHistoryItemResponse.builder()
+                .raceId(race != null ? race.getRaceId() : null)
+                .raceCode(race != null ? race.getRaceCode() : null)
+                .raceName(race != null ? race.getName() : null)
+                .tournamentId(t != null ? t.getTournamentId() : null)
+                .tournamentName(t != null ? t.getName() : null)
+                .scheduledStartAt(race != null ? race.getScheduledStartAt() : null)
+                .entryStatus(e.getStatus() != null ? e.getStatus().name() : null)
+                .finishPosition(finishPosition)
+                .entryCode(e.getEntryCode())
+                .build();
+    }
+
+    private RaceEntryResponse mapToEntryResponse(RaceEntry e) {
+        TournamentRegistration reg = e.getRegistration();
+        Horse horse = reg != null ? reg.getHorse() : null;
+        User owner = reg != null ? reg.getOwner() : null;
+        return RaceEntryResponse.builder()
+                .entryId(e.getEntryId())
+                .entryCode(e.getEntryCode())
+                .entryNo(e.getEntryNo())
+                .laneNo(e.getLaneNo())
+                .status(e.getStatus())
+                .raceId(e.getRace() != null ? e.getRace().getRaceId() : null)
+                .registrationId(reg != null ? reg.getRegistrationId() : null)
+                .horseId(horse != null ? horse.getHorseId() : null)
+                .horseName(horse != null ? horse.getName() : null)
+                .ownerUserId(owner != null ? owner.getUserId() : null)
+                .ownerName(owner != null ? owner.getFullName() : null)
+                .createdAt(e.getCreatedAt())
+                .build();
     }
 
     private HorseResponse mapToResponse(Horse h) {

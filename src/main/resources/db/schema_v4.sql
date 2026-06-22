@@ -188,6 +188,8 @@ CREATE TABLE horse (
     status              VARCHAR(50) NOT NULL DEFAULT 'ACTIVE'
                         CHECK (status IN ('ACTIVE', 'RETIRED', 'INACTIVE')),
     image_url           TEXT,                                         -- V4: ảnh ngựa (served via /api/v1/files)
+    last_health_check_at TIMESTAMPTZ,
+    medical_note         TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_deleted          BOOLEAN NOT NULL DEFAULT FALSE,
