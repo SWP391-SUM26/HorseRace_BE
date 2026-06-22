@@ -25,6 +25,7 @@ DROP TABLE IF EXISTS role_permission          CASCADE;
 DROP TABLE IF EXISTS permission               CASCADE;
 DROP TABLE IF EXISTS betting_pool             CASCADE;
 DROP TABLE IF EXISTS email_change_request     CASCADE;
+DROP TABLE IF EXISTS email_verification_token CASCADE;
 DROP TABLE IF EXISTS password_reset_token     CASCADE;
 DROP TABLE IF EXISTS refresh_token            CASCADE;
 DROP TABLE IF EXISTS notification             CASCADE;

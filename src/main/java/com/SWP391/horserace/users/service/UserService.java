@@ -25,4 +25,7 @@ public interface UserService {
      * permission). Returns an empty list if the user has no role or the role has no permissions.
      */
     List<String> getMyPermissions(UUID userId);
+
+    /** Admin: soft-delete a user by id (sets is_deleted/deleted_at). */
+    void deleteUser(UUID id);
 }
