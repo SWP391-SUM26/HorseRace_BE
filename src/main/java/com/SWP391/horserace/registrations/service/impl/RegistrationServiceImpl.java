@@ -2,6 +2,12 @@ package com.SWP391.horserace.registrations.service.impl;
 
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.repository.HorseRepository;
+import com.SWP391.horserace.races.entity.Race;
+import com.SWP391.horserace.races.entity.RaceEntry;
+import com.SWP391.horserace.races.entity.RaceEntryStatus;
+import com.SWP391.horserace.races.entity.RaceStatus;
+import com.SWP391.horserace.races.repository.RaceEntryRepository;
+import com.SWP391.horserace.races.repository.RaceRepository;
 import com.SWP391.horserace.registrations.dto.RegistrationFilterRequest;
 import com.SWP391.horserace.registrations.dto.RegistrationRequest;
 import com.SWP391.horserace.registrations.dto.RegistrationResponse;
@@ -40,6 +46,8 @@ public class RegistrationServiceImpl implements RegistrationService {
     private final TournamentRepository tournamentRepository;
     private final HorseRepository horseRepository;
     private final UserRepository userRepository;
+    private final RaceRepository raceRepository;
+    private final RaceEntryRepository raceEntryRepository;
 
     @Override
     @Transactional
@@ -72,6 +80,18 @@ public class RegistrationServiceImpl implements RegistrationService {
             throw new AppException(ErrorCode.REGISTRATION_ALREADY_EXISTS);
         }
 
+        // Optional chosen race: must exist and belong to the same tournament.
+        Race chosenRace = null;
+        if (request.raceId() != null) {
+            chosenRace = raceRepository.findByRaceIdAndDeletedFalse(request.raceId())
+                    .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
+            UUID raceTournamentId = chosenRace.getTournament() != null
+                    ? chosenRace.getTournament().getTournamentId() : null;
+            if (!tournament.getTournamentId().equals(raceTournamentId)) {
+                throw new AppException(ErrorCode.RACE_TOURNAMENT_MISMATCH);
+            }
+        }
+
         // The registering user (owner of record on the registration).
         User owner = userRepository.findByUserIdAndDeletedFalse(currentUserId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
@@ -80,6 +100,7 @@ public class RegistrationServiceImpl implements RegistrationService {
                 .owner(owner)
                 .tournament(tournament)
                 .horse(horse)
+                .race(chosenRace)
                 .registrationCode(generateRegistrationCode())
                 .status(RegistrationStatus.SUBMITTED)
                 .submittedAt(OffsetDateTime.now())
@@ -121,7 +142,14 @@ public class RegistrationServiceImpl implements RegistrationService {
         registration.setApprovedBy(reviewer);
         registration.setReviewedAt(OffsetDateTime.now());
 
-        return mapToResponse(registrationRepository.save(registration));
+        TournamentRegistration saved = registrationRepository.save(registration);
+
+        // "Approved into the race": if the owner chose a race, auto-create the race entry.
+        if (saved.getRace() != null) {
+            enterIntoRace(saved);
+        }
+
+        return mapToResponse(saved);
     }
 
     @Override
@@ -167,6 +195,42 @@ public class RegistrationServiceImpl implements RegistrationService {
     private TournamentRegistration loadRegistration(UUID id) {
         return registrationRepository.findById(id)
                 .orElseThrow(() -> new AppException(ErrorCode.REGISTRATION_NOT_FOUND));
+    }
+
+    /**
+     * Create the race entry for an approved registration that carries a chosen race.
+     * Mirrors RaceServiceImpl.assignParticipant guards (race open + capacity). The DB
+     * UNIQUE(race_id, registration_id) is the final guard against a double-insert on
+     * re-approve, surfacing as a 409 via the existing DataIntegrityViolation handler.
+     */
+    private void enterIntoRace(TournamentRegistration registration) {
+        Race race = registration.getRace();
+
+        if (race.getStatus() != RaceStatus.SCHEDULED && race.getStatus() != RaceStatus.OPEN) {
+            throw new AppException(ErrorCode.RACE_NOT_OPEN_FOR_ENTRY);
+        }
+        if (race.getMaxParticipants() != null
+                && raceEntryRepository.countByRace_RaceId(race.getRaceId()) >= race.getMaxParticipants()) {
+            throw new AppException(ErrorCode.RACE_FULL);
+        }
+
+        RaceEntry entry = RaceEntry.builder()
+                .registration(registration)
+                .race(race)
+                .entryCode(generateEntryCode())
+                .status(RaceEntryStatus.ENTERED)
+                .build();
+        raceEntryRepository.save(entry);
+    }
+
+    /** Sequential code ENTnnnnn, skipping any already taken (the DB UNIQUE is the final guard). */
+    private String generateEntryCode() {
+        long n = raceEntryRepository.count() + 1;
+        String code;
+        do {
+            code = String.format("ENT%05d", n++);
+        } while (raceEntryRepository.existsByEntryCode(code));
+        return code;
     }
 
     private void requireSourceStatus(TournamentRegistration registration, RegistrationStatus... allowed) {
@@ -226,6 +290,7 @@ public class RegistrationServiceImpl implements RegistrationService {
         User owner = r.getOwner();
         Tournament tournament = r.getTournament();
         Horse horse = r.getHorse();
+        Race race = r.getRace();
         User approvedBy = r.getApprovedBy();
 
         return RegistrationResponse.builder()
@@ -239,6 +304,8 @@ public class RegistrationServiceImpl implements RegistrationService {
                 .horseId(horse != null ? horse.getHorseId() : null)
                 .horseName(horse != null ? horse.getName() : null)
                 .horseCode(horse != null ? horse.getHorseCode() : null)
+                .raceId(race != null ? race.getRaceId() : null)
+                .raceName(race != null ? race.getName() : null)
                 .submittedAt(r.getSubmittedAt())
                 .reviewedAt(r.getReviewedAt())
                 .approvedByUserId(approvedBy != null ? approvedBy.getUserId() : null)
