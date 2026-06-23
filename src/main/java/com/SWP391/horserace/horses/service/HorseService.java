@@ -4,7 +4,9 @@ import com.SWP391.horserace.horses.dto.AssignHorseToRaceRequest;
 import com.SWP391.horserace.horses.dto.HorseFilterRequest;
 import com.SWP391.horserace.horses.dto.HorseRequest;
 import com.SWP391.horserace.horses.dto.HorseResponse;
+import com.SWP391.horserace.horses.dto.HorseStatsResponse;
 import com.SWP391.horserace.horses.dto.MedicalStatusResponse;
+import com.SWP391.horserace.horses.dto.PedigreeResponse;
 import com.SWP391.horserace.horses.dto.RaceHistoryItemResponse;
 import com.SWP391.horserace.horses.dto.UpdateMedicalStatusRequest;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
@@ -32,6 +34,12 @@ public interface HorseService {
 
     /** Upload/replace the horse photo; only the horse's owner (or admin) may do this. */
     HorseResponse updateHorseImage(UUID currentUserId, UUID horseId, MultipartFile file);
+
+    /** Career statistics of a horse (read-only): earnings, starts, wins, top3, grade, characteristics. */
+    HorseStatsResponse getStats(UUID horseId);
+
+    /** Pedigree of a horse (read-only): sire, dam, trainer. */
+    PedigreeResponse getPedigree(UUID horseId);
 
     /** Current medical status of a horse (read-only). */
     MedicalStatusResponse getMedicalStatus(UUID horseId);

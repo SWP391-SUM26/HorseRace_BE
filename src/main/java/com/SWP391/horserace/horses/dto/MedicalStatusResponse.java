@@ -16,4 +16,8 @@ public class MedicalStatusResponse {
     private HorseHealthStatus healthStatus;
     private OffsetDateTime lastHealthCheckAt;
     private String medicalNote;
+    /** FE-v2 Horse Profile (mục 1): whether vaccinations are current. */
+    private boolean vaccinationsUpToDate;
+    /** FE-v2 Horse Profile (mục 1): recovery progress 0–100, null if not recovering. */
+    private Integer recoveryPercent;
 }

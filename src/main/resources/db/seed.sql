@@ -185,6 +185,51 @@ INSERT INTO race_entry (entry_id, registration_id, race_id, entry_code, entry_no
         'cccc1111-cccc-1111-cccc-111111111111',
         'ENT-004', 4, 4, 'ENTERED');
 
+-- =========================================================
+-- FE-v2 Horse Profile (mục 1) — enrich a few horses so the profile page shows real data.
+-- =========================================================
+
+-- Career stats + grade + pedigree + medical extras for Midnight Thunder (HRS0001) and Silver Bullet (HRS0002).
+UPDATE horse SET
+    grade = 'GRADE_1',
+    lifetime_earnings = 1842500.00,
+    sire_name = 'Storm King', sire_wins = 24, sire_earnings = 4200000.00,
+    dam_name = 'Ebony Queen', dam_wins = 12, dam_note = 'Grade 1 Winner',
+    trainer_name = 'Marcus Sterling', trainer_license_no = '992',
+    vaccinations_up_to_date = TRUE, recovery_percent = NULL
+  WHERE horse_id = 'aaaa1111-aaaa-1111-aaaa-111111111111';
+
+UPDATE horse SET
+    grade = 'GRADE_2',
+    lifetime_earnings = 760000.00,
+    sire_name = 'Desert Mirage', sire_wins = 18, sire_earnings = 2100000.00,
+    dam_name = 'Silver Lining', dam_wins = 7, dam_note = 'Multiple stakes placed',
+    trainer_name = 'Aisha Rahman', trainer_license_no = '1187',
+    vaccinations_up_to_date = TRUE, recovery_percent = 80
+  WHERE horse_id = 'aaaa2222-aaaa-2222-aaaa-222222222222';
+
+-- Characteristic tags (@ElementCollection)
+INSERT INTO horse_characteristic (horse_id, tag) VALUES
+    ('aaaa1111-aaaa-1111-aaaa-111111111111', 'EARLY_SPRINTER'),
+    ('aaaa1111-aaaa-1111-aaaa-111111111111', 'FIRM_TURF'),
+    ('aaaa1111-aaaa-1111-aaaa-111111111111', 'CALM'),
+    ('aaaa2222-aaaa-2222-aaaa-222222222222', 'CLOSER'),
+    ('aaaa2222-aaaa-2222-aaaa-222222222222', 'SOFT_GROUND');
+
+-- Prize earned per race entry (drives lifetimeEarnings + race-history.prizeEarned)
+UPDATE race_entry SET prize_earned = 1200000.00 WHERE entry_id = 'eeee1111-eeee-1111-eeee-111111111111'; -- ENT-001 Midnight Thunder
+UPDATE race_entry SET prize_earned =  450000.00 WHERE entry_id = 'eeee2222-eeee-2222-eeee-222222222222'; -- ENT-002 Silver Bullet
+UPDATE race_entry SET prize_earned =  150000.00 WHERE entry_id = 'eeee3333-eeee-3333-eeee-333333333333'; -- ENT-003 Sapphire Wind
+
+-- Race results (drive starts/wins/top3 in GET /horses/{id}/stats)
+INSERT INTO race_result (result_id, race_id, entry_id, finish_position, current_version_no, officiality_status, published_at) VALUES
+    ('a0a0a0a0-0000-0000-0000-000000000001',
+        'cccc1111-cccc-1111-cccc-111111111111', 'eeee1111-eeee-1111-eeee-111111111111', 1, 1, 'OFFICIAL', CURRENT_TIMESTAMP), -- Midnight Thunder: win
+    ('a0a0a0a0-0000-0000-0000-000000000002',
+        'cccc2222-cccc-2222-cccc-222222222222', 'eeee2222-eeee-2222-eeee-222222222222', 2, 1, 'OFFICIAL', CURRENT_TIMESTAMP), -- Silver Bullet: top3
+    ('a0a0a0a0-0000-0000-0000-000000000003',
+        'cccc1111-cccc-1111-cccc-111111111111', 'eeee3333-eeee-3333-eeee-333333333333', 5, 1, 'OFFICIAL', CURRENT_TIMESTAMP); -- Sapphire Wind: out of top3
+
 -- Seed Jockey Assignments (invitations in various statuses for testing)
 INSERT INTO jockey_assignment (assignment_id, entry_id, jockey_user_id, status, invited_at, responded_at, assigned_by_user_id) VALUES
     -- Midnight Thunder → Alex Mercer (ACCEPTED for Race 1)

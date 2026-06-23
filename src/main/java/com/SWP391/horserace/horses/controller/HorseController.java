@@ -4,7 +4,9 @@ import com.SWP391.horserace.horses.dto.AssignHorseToRaceRequest;
 import com.SWP391.horserace.horses.dto.HorseFilterRequest;
 import com.SWP391.horserace.horses.dto.HorseRequest;
 import com.SWP391.horserace.horses.dto.HorseResponse;
+import com.SWP391.horserace.horses.dto.HorseStatsResponse;
 import com.SWP391.horserace.horses.dto.MedicalStatusResponse;
+import com.SWP391.horserace.horses.dto.PedigreeResponse;
 import com.SWP391.horserace.horses.dto.RaceHistoryItemResponse;
 import com.SWP391.horserace.horses.dto.UpdateMedicalStatusRequest;
 import com.SWP391.horserace.horses.service.HorseService;
@@ -102,6 +104,26 @@ public class HorseController {
                 .success(true)
                 .message("Horse image updated")
                 .data(horseService.updateHorseImage(userId, id, file))
+                .build();
+    }
+
+    /** GET /api/v1/horses/{id}/stats — career statistics (earnings, starts, wins, top3, grade, characteristics). */
+    @GetMapping("/{id}/stats")
+    public ApiResponse<HorseStatsResponse> getStats(@PathVariable UUID id) {
+        return ApiResponse.<HorseStatsResponse>builder()
+                .success(true)
+                .message("Fetched horse stats")
+                .data(horseService.getStats(id))
+                .build();
+    }
+
+    /** GET /api/v1/horses/{id}/pedigree — sire, dam and trainer. */
+    @GetMapping("/{id}/pedigree")
+    public ApiResponse<PedigreeResponse> getPedigree(@PathVariable UUID id) {
+        return ApiResponse.<PedigreeResponse>builder()
+                .success(true)
+                .message("Fetched horse pedigree")
+                .data(horseService.getPedigree(id))
                 .build();
     }
 

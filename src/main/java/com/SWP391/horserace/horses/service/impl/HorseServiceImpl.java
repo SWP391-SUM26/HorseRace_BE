@@ -4,7 +4,9 @@ import com.SWP391.horserace.horses.dto.AssignHorseToRaceRequest;
 import com.SWP391.horserace.horses.dto.HorseFilterRequest;
 import com.SWP391.horserace.horses.dto.HorseRequest;
 import com.SWP391.horserace.horses.dto.HorseResponse;
+import com.SWP391.horserace.horses.dto.HorseStatsResponse;
 import com.SWP391.horserace.horses.dto.MedicalStatusResponse;
+import com.SWP391.horserace.horses.dto.PedigreeResponse;
 import com.SWP391.horserace.horses.dto.RaceHistoryItemResponse;
 import com.SWP391.horserace.horses.dto.UpdateMedicalStatusRequest;
 import com.SWP391.horserace.horses.entity.Horse;
@@ -39,6 +41,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -159,6 +162,70 @@ public class HorseServiceImpl implements HorseService {
         HorseResponse response = mapToResponse(horseRepository.save(horse));
         imageUploadService.deleteByUrl(oldImageUrl); // best-effort cleanup of the replaced file
         return response;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public HorseStatsResponse getStats(UUID horseId) {
+        Horse horse = loadHorse(horseId);
+
+        // The horse's race entries; finish positions come from race_result rows for those entries.
+        List<RaceEntry> entries = raceEntryRepository.findHistoryByHorseId(horseId);
+
+        // lifetimeEarnings = SUM of prize_earned across the horse's entries.
+        BigDecimal lifetimeEarnings = entries.stream()
+                .map(RaceEntry::getPrizeEarned)
+                .filter(p -> p != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        long starts = 0;
+        int wins = 0;
+        int top3 = 0;
+        if (!entries.isEmpty()) {
+            List<UUID> entryIds = entries.stream().map(RaceEntry::getEntryId).toList();
+            List<RaceResult> results = raceResultRepository.findByEntry_EntryIdIn(entryIds).stream()
+                    .filter(r -> r.getFinishPosition() != null)
+                    .toList();
+            starts = results.size();
+            for (RaceResult r : results) {
+                int pos = r.getFinishPosition();
+                if (pos == 1) wins++;
+                if (pos <= 3) top3++;
+            }
+        }
+
+        return HorseStatsResponse.builder()
+                .lifetimeEarnings(lifetimeEarnings)
+                .starts(starts)
+                .wins(wins)
+                .top3(top3)
+                .grade(horse.getGrade())
+                .characteristics(horse.getCharacteristics() == null
+                        ? List.of()
+                        : horse.getCharacteristics().stream().sorted().toList())
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PedigreeResponse getPedigree(UUID horseId) {
+        Horse h = loadHorse(horseId);
+        return PedigreeResponse.builder()
+                .sire(PedigreeResponse.Sire.builder()
+                        .name(h.getSireName())
+                        .wins(h.getSireWins())
+                        .earnings(h.getSireEarnings())
+                        .build())
+                .dam(PedigreeResponse.Dam.builder()
+                        .name(h.getDamName())
+                        .wins(h.getDamWins())
+                        .note(h.getDamNote())
+                        .build())
+                .trainer(PedigreeResponse.Trainer.builder()
+                        .name(h.getTrainerName())
+                        .licenseNo(h.getTrainerLicenseNo())
+                        .build())
+                .build();
     }
 
     @Override
@@ -315,6 +382,8 @@ public class HorseServiceImpl implements HorseService {
                 .healthStatus(h.getHealthStatus())
                 .lastHealthCheckAt(h.getLastHealthCheckAt())
                 .medicalNote(h.getMedicalNote())
+                .vaccinationsUpToDate(h.isVaccinationsUpToDate())
+                .recoveryPercent(h.getRecoveryPercent())
                 .build();
     }
 
@@ -331,6 +400,8 @@ public class HorseServiceImpl implements HorseService {
                 .entryStatus(e.getStatus() != null ? e.getStatus().name() : null)
                 .finishPosition(finishPosition)
                 .entryCode(e.getEntryCode())
+                .venue(t != null ? t.getLocation() : null)
+                .prizeEarned(e.getPrizeEarned())
                 .build();
     }
 
