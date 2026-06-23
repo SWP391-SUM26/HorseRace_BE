@@ -1,12 +1,17 @@
 package com.SWP391.horserace.races.service.impl;
 
+import com.SWP391.horserace.assignments.entity.JockeyAssignment;
+import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.races.dto.AssignParticipantRequest;
+import com.SWP391.horserace.races.dto.MyEntryResponse;
+import com.SWP391.horserace.races.dto.PrizeDistributionDto;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
 import com.SWP391.horserace.races.dto.RaceFilterRequest;
 import com.SWP391.horserace.races.dto.RaceRequest;
 import com.SWP391.horserace.races.dto.RaceResponse;
 import com.SWP391.horserace.races.dto.ScheduleRaceRequest;
+import com.SWP391.horserace.races.entity.PrizeDistributionItem;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
 import com.SWP391.horserace.races.entity.RaceEntryStatus;
@@ -36,7 +41,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -49,6 +56,7 @@ public class RaceServiceImpl implements RaceService {
     private final RegistrationRepository registrationRepository;
     private final TournamentRepository tournamentRepository;
     private final UserRepository userRepository;
+    private final JockeyAssignmentRepository jockeyAssignmentRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -259,9 +267,48 @@ public class RaceServiceImpl implements RaceService {
     @Transactional(readOnly = true)
     public List<RaceEntryResponse> listEntries(UUID raceId) {
         loadRace(raceId);
-        return raceEntryRepository.findByRace_RaceId(raceId).stream()
-                .map(this::mapToEntryResponse)
+        List<RaceEntry> entries = raceEntryRepository.findByRace_RaceId(raceId);
+
+        // Batch-fetch the ACCEPTED jockey for every entry in one query (avoids N+1).
+        List<UUID> entryIds = entries.stream().map(RaceEntry::getEntryId).toList();
+        Map<UUID, String> jockeyNameByEntryId = entryIds.isEmpty()
+                ? Map.of()
+                : jockeyAssignmentRepository.findAcceptedByEntryIds(entryIds).stream()
+                        .filter(ja -> ja.getEntry() != null && ja.getJockey() != null)
+                        .collect(Collectors.toMap(
+                                ja -> ja.getEntry().getEntryId(),
+                                ja -> ja.getJockey().getFullName(),
+                                (a, b) -> a));
+
+        return entries.stream()
+                .map(e -> mapToEntryResponse(e, jockeyNameByEntryId.get(e.getEntryId())))
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public MyEntryResponse getMyEntry(UUID raceId, UUID ownerUserId) {
+        if (ownerUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        loadRace(raceId);
+
+        RaceEntry entry = raceEntryRepository.findByRaceIdAndOwnerUserId(raceId, ownerUserId)
+                .orElseThrow(() -> new AppException(ErrorCode.ENTRY_NOT_FOUND));
+
+        Horse horse = entry.getRegistration() != null ? entry.getRegistration().getHorse() : null;
+        String jockeyName = jockeyAssignmentRepository.findAcceptedByEntryId(entry.getEntryId())
+                .map(JockeyAssignment::getJockey)
+                .map(u -> u.getFullName())
+                .orElse(null);
+
+        return MyEntryResponse.builder()
+                .horseName(horse != null ? horse.getName() : null)
+                .drawStall(toDrawStall(entry.getLaneNo()))
+                .jockeyName(jockeyName)
+                .weightCarriedLbs(entry.getWeightCarriedLbs())
+                .entryStatus(entry.getStatus())
+                .build();
     }
 
     // ── helpers ──
@@ -321,6 +368,10 @@ public class RaceServiceImpl implements RaceService {
                 .actualEndAt(r.getActualEndAt())
                 .predictionCutoffAt(r.getPredictionCutoffAt())
                 .maxParticipants(r.getMaxParticipants())
+                .venue(r.getVenue())
+                .goingMoisturePct(r.getGoingMoisturePct())
+                .totalPurse(r.getTotalPurse())
+                .prizeDistribution(mapPrizeDistribution(r.getPrizeDistribution()))
                 .status(r.getStatus())
                 .tournamentId(t != null ? t.getTournamentId() : null)
                 .tournamentName(t != null ? t.getName() : null)
@@ -329,7 +380,21 @@ public class RaceServiceImpl implements RaceService {
                 .build();
     }
 
+    private List<PrizeDistributionDto> mapPrizeDistribution(List<PrizeDistributionItem> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        return items.stream()
+                .map(i -> new PrizeDistributionDto(i.getPlace(), i.getAmount()))
+                .toList();
+    }
+
+    /** Map an entry whose riding jockey has not been resolved (e.g. just after creation). */
     private RaceEntryResponse mapToEntryResponse(RaceEntry e) {
+        return mapToEntryResponse(e, null);
+    }
+
+    private RaceEntryResponse mapToEntryResponse(RaceEntry e, String jockeyName) {
         TournamentRegistration reg = e.getRegistration();
         Horse horse = reg != null ? reg.getHorse() : null;
         User owner = reg != null ? reg.getOwner() : null;
@@ -338,6 +403,7 @@ public class RaceServiceImpl implements RaceService {
                 .entryCode(e.getEntryCode())
                 .entryNo(e.getEntryNo())
                 .laneNo(e.getLaneNo())
+                .drawStall(toDrawStall(e.getLaneNo()))
                 .status(e.getStatus())
                 .raceId(e.getRace() != null ? e.getRace().getRaceId() : null)
                 .registrationId(reg != null ? reg.getRegistrationId() : null)
@@ -345,7 +411,16 @@ public class RaceServiceImpl implements RaceService {
                 .horseName(horse != null ? horse.getName() : null)
                 .ownerUserId(owner != null ? owner.getUserId() : null)
                 .ownerName(owner != null ? owner.getFullName() : null)
+                .jockeyName(jockeyName)
+                .weightCarriedLbs(e.getWeightCarriedLbs())
+                .recentForm(e.getRecentForm())
+                .odds(e.getOdds())
                 .createdAt(e.getCreatedAt())
                 .build();
+    }
+
+    /** Draw stall is the rendered lane number; null lane -> null stall. */
+    private String toDrawStall(Integer laneNo) {
+        return laneNo != null ? String.valueOf(laneNo) : null;
     }
 }

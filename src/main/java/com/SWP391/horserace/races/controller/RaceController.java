@@ -1,6 +1,7 @@
 package com.SWP391.horserace.races.controller;
 
 import com.SWP391.horserace.races.dto.AssignParticipantRequest;
+import com.SWP391.horserace.races.dto.MyEntryResponse;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
 import com.SWP391.horserace.races.dto.RaceFilterRequest;
 import com.SWP391.horserace.races.dto.RaceRequest;
@@ -139,6 +140,18 @@ public class RaceController {
                 .success(true)
                 .message("Fetched race entries")
                 .data(raceService.listEntries(id))
+                .build();
+    }
+
+    /** GET /api/v1/races/{raceId}/my-entry — the caller-owner's own entry in this race. */
+    @GetMapping("/{raceId}/my-entry")
+    public ApiResponse<MyEntryResponse> getMyEntry(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID raceId) {
+        return ApiResponse.<MyEntryResponse>builder()
+                .success(true)
+                .message("Fetched your race entry")
+                .data(raceService.getMyEntry(raceId, userId))
                 .build();
     }
 }

@@ -46,6 +46,7 @@ DROP TABLE IF EXISTS referee_assignment       CASCADE;
 DROP TABLE IF EXISTS jockey_assignment        CASCADE;
 DROP TABLE IF EXISTS race_entry               CASCADE;
 DROP TABLE IF EXISTS tournament_registration  CASCADE;
+DROP TABLE IF EXISTS race_prize_distribution   CASCADE;
 DROP TABLE IF EXISTS race                     CASCADE;
 DROP TABLE IF EXISTS tournament_round         CASCADE;
 DROP TABLE IF EXISTS tournament               CASCADE;
@@ -302,6 +303,9 @@ CREATE TABLE race (
     actual_end_at        TIMESTAMPTZ,
     prediction_cutoff_at TIMESTAMPTZ,
     max_participants     INT CHECK (max_participants IS NULL OR max_participants > 0),
+    venue                VARCHAR(255),
+    going_moisture_pct   INT CHECK (going_moisture_pct IS NULL OR (going_moisture_pct BETWEEN 0 AND 100)),
+    total_purse          NUMERIC(18,2),
     status               VARCHAR(50) NOT NULL DEFAULT 'SCHEDULED'
                          CHECK (status IN ('SCHEDULED', 'OPEN', 'CLOSED', 'RUNNING',
                                            'FINISHED', 'OFFICIAL', 'CANCELLED')),
@@ -310,6 +314,13 @@ CREATE TABLE race (
     is_deleted           BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at           TIMESTAMPTZ,
     CHECK (actual_end_at IS NULL OR actual_start_at IS NULL OR actual_end_at >= actual_start_at)
+);
+
+-- Prize distribution per race (1st/2nd/3rd/...). @ElementCollection child of race.
+CREATE TABLE race_prize_distribution (
+    race_id  UUID NOT NULL REFERENCES race(race_id),
+    place    VARCHAR(20) NOT NULL,
+    amount   NUMERIC(18,2) NOT NULL
 );
 
 -- =========================================================
@@ -345,6 +356,9 @@ CREATE TABLE race_entry (
     entry_code      VARCHAR(50) UNIQUE NOT NULL,
     entry_no        INT CHECK (entry_no IS NULL OR entry_no > 0),
     lane_no         INT CHECK (lane_no IS NULL OR lane_no > 0),
+    weight_carried_lbs INT,
+    recent_form     VARCHAR(50),
+    odds            VARCHAR(20),
     status          VARCHAR(50) NOT NULL DEFAULT 'ENTERED'
                     CHECK (status IN ('ENTERED', 'CHECKED_IN', 'SCRATCHED', 'DISQUALIFIED', 'FINISHED')),
     checked_in_at   TIMESTAMPTZ,

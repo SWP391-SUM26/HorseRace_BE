@@ -1,6 +1,7 @@
 package com.SWP391.horserace.races.service;
 
 import com.SWP391.horserace.races.dto.AssignParticipantRequest;
+import com.SWP391.horserace.races.dto.MyEntryResponse;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
 import com.SWP391.horserace.races.dto.RaceFilterRequest;
 import com.SWP391.horserace.races.dto.RaceRequest;
@@ -30,4 +31,6 @@ public interface RaceService {
     RaceEntryResponse assignParticipant(UUID currentUserId, UUID raceId, AssignParticipantRequest request);
 
     List<RaceEntryResponse> listEntries(UUID raceId);
+
+    MyEntryResponse getMyEntry(UUID raceId, UUID ownerUserId);
 }
