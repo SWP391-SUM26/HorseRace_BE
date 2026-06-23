@@ -123,6 +123,14 @@ CREATE TABLE jockey_profile (
     experience_yrs INT CHECK (experience_yrs IS NULL OR experience_yrs >= 0),
     win_count      INT NOT NULL DEFAULT 0 CHECK (win_count >= 0),  -- cache thành tích, cập nhật khi chốt kết quả
     bio            TEXT,
+    -- Jockey Market (FE-v2 §2): marketing/stat fields surfaced by GET /jockeys
+    rating         NUMERIC(3,1) CHECK (rating IS NULL OR (rating BETWEEN 0 AND 5)),     -- ★ rating, e.g. 4.9
+    riding_style   VARCHAR(50),                                                          -- e.g. Stalker / Closer
+    win_rate       NUMERIC(5,2) CHECK (win_rate IS NULL OR (win_rate BETWEEN 0 AND 100)),-- win % e.g. 62.50
+    recent_form    VARCHAR(50),                                                          -- comma-joined form, e.g. "W,L,W,W,L"
+    base_fee       NUMERIC(18,2),                                                        -- hire fee
+    prize_percent  NUMERIC(5,2),                                                         -- % of prize taken
+    last_trophy    VARCHAR(255),                                                         -- most recent trophy
     created_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
