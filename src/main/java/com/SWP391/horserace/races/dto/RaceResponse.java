@@ -4,7 +4,9 @@ import com.SWP391.horserace.races.entity.RaceStatus;
 import lombok.Builder;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -22,6 +24,10 @@ public class RaceResponse {
     private OffsetDateTime actualEndAt;
     private OffsetDateTime predictionCutoffAt;
     private Integer maxParticipants;
+    private String venue;
+    private Integer goingMoisturePct;
+    private BigDecimal totalPurse;
+    private List<PrizeDistributionDto> prizeDistribution;
     private RaceStatus status;
     private UUID tournamentId;
     private String tournamentName;

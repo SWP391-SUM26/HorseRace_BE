@@ -136,15 +136,22 @@ INSERT INTO tournament (tournament_id, tournament_code, name, description, start
         '2024-10-15 09:00:00+07', '2024-11-15 18:00:00+07', 'Dubai', 'ONGOING');
 
 -- Seed Races (belonging to the tournament)
-INSERT INTO race (race_id, tournament_id, race_code, name, race_type, distance_meter, track_condition, scheduled_start_at, status) VALUES
+INSERT INTO race (race_id, tournament_id, race_code, name, race_type, distance_meter, track_condition, scheduled_start_at, venue, going_moisture_pct, total_purse, status) VALUES
     ('cccc1111-cccc-1111-cccc-111111111111',
         'bbbb1111-bbbb-1111-bbbb-111111111111',
         'RACE-001', 'Belmont Autumn Stakes', 'FLAT', 2000, 'GOOD',
-        '2024-10-24 14:30:00+07', 'SCHEDULED'),
+        '2024-10-24 14:30:00+07', 'Ascot Racecourse, UK', 14, 600000.00, 'SCHEDULED'),
     ('cccc2222-cccc-2222-cccc-222222222222',
         'bbbb1111-bbbb-1111-bbbb-111111111111',
         'RACE-002', 'Epsom Derby Qualifier', 'FLAT', 1600, 'GOOD',
-        '2024-11-02 13:00:00+07', 'SCHEDULED');
+        '2024-11-02 13:00:00+07', NULL, NULL, NULL, 'SCHEDULED');
+
+-- Prize distribution for RACE-001 (1st–4th).
+INSERT INTO race_prize_distribution (race_id, place, amount) VALUES
+    ('cccc1111-cccc-1111-cccc-111111111111', '1st', 340260.00),
+    ('cccc1111-cccc-1111-cccc-111111111111', '2nd', 132000.00),
+    ('cccc1111-cccc-1111-cccc-111111111111', '3rd',  78000.00),
+    ('cccc1111-cccc-1111-cccc-111111111111', '4th',  49740.00);
 
 -- Seed Tournament Registrations (owner registers horses into tournament)
 INSERT INTO tournament_registration (registration_id, owner_user_id, tournament_id, horse_id, registration_code, status, submitted_at) VALUES
@@ -170,23 +177,23 @@ INSERT INTO tournament_registration (registration_id, owner_user_id, tournament_
         'REG-004', 'APPROVED', CURRENT_TIMESTAMP);
 
 -- Seed Race Entries (horses enter specific races)
-INSERT INTO race_entry (entry_id, registration_id, race_id, entry_code, entry_no, lane_no, status) VALUES
+INSERT INTO race_entry (entry_id, registration_id, race_id, entry_code, entry_no, lane_no, weight_carried_lbs, recent_form, odds, status) VALUES
     ('eeee1111-eeee-1111-eeee-111111111111',
         'dddd1111-dddd-1111-dddd-111111111111',
         'cccc1111-cccc-1111-cccc-111111111111',
-        'ENT-001', 1, 1, 'ENTERED'),
+        'ENT-001', 1, 1, 126, '1-2-1-1-3', '5-2', 'ENTERED'),
     ('eeee2222-eeee-2222-eeee-222222222222',
         'dddd2222-dddd-2222-dddd-222222222222',
         'cccc2222-cccc-2222-cccc-222222222222',
-        'ENT-002', 2, 2, 'ENTERED'),
+        'ENT-002', 2, 2, NULL, NULL, NULL, 'ENTERED'),
     ('eeee3333-eeee-3333-eeee-333333333333',
         'dddd3333-dddd-3333-dddd-333333333333',
         'cccc1111-cccc-1111-cccc-111111111111',
-        'ENT-003', 3, 3, 'ENTERED'),
+        'ENT-003', 3, 3, 122, '3-1-2-4-1', '7-2', 'ENTERED'),
     ('eeee4444-eeee-4444-eeee-444444444444',
         'dddd4444-dddd-4444-dddd-444444444444',
         'cccc1111-cccc-1111-cccc-111111111111',
-        'ENT-004', 4, 4, 'ENTERED');
+        'ENT-004', 4, 4, NULL, NULL, NULL, 'ENTERED');
 
 -- =========================================================
 -- FE-v2 Horse Profile (mục 1) — enrich a few horses so the profile page shows real data.

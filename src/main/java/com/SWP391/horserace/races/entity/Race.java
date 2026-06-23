@@ -10,7 +10,10 @@ import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /** Maps the {@code race} table. */
@@ -64,6 +67,20 @@ public class Race {
 
     @Column(name = "max_participants")
     private Integer maxParticipants;
+
+    @Column(name = "venue")
+    private String venue;
+
+    @Column(name = "going_moisture_pct")
+    private Integer goingMoisturePct;
+
+    @Column(name = "total_purse")
+    private BigDecimal totalPurse;
+
+    @ElementCollection
+    @CollectionTable(name = "race_prize_distribution", joinColumns = @JoinColumn(name = "race_id"))
+    @Builder.Default
+    private List<PrizeDistributionItem> prizeDistribution = new ArrayList<>();
 
     /** SCHEDULED | OPEN | CLOSED | RUNNING | FINISHED | OFFICIAL | CANCELLED */
     @Enumerated(EnumType.STRING)

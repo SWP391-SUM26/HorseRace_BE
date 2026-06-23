@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,6 +26,30 @@ public interface JockeyAssignmentRepository extends JpaRepository<JockeyAssignme
            AND ja.status <> com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus.DECLINED
         """)
     boolean existsActiveByEntryId(@Param("entryId") UUID entryId);
+
+    /**
+     * The ACCEPTED jockey assignment for a single entry (if any), jockey eagerly fetched.
+     * Used to resolve the riding jockey's name for one race entry.
+     */
+    @Query("""
+        SELECT ja FROM JockeyAssignment ja
+          JOIN FETCH ja.jockey j
+         WHERE ja.entry.entryId = :entryId
+           AND ja.status = com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus.ACCEPTED
+        """)
+    Optional<JockeyAssignment> findAcceptedByEntryId(@Param("entryId") UUID entryId);
+
+    /**
+     * All ACCEPTED jockey assignments for a set of entries, jockey eagerly fetched.
+     * Used to resolve riding jockey names for a whole race's entries in one query (avoids N+1).
+     */
+    @Query("""
+        SELECT ja FROM JockeyAssignment ja
+          JOIN FETCH ja.jockey j
+         WHERE ja.entry.entryId IN :entryIds
+           AND ja.status = com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus.ACCEPTED
+        """)
+    List<JockeyAssignment> findAcceptedByEntryIds(@Param("entryIds") Collection<UUID> entryIds);
 
     /** Find assignment by id with all associations eagerly fetched (avoids N+1). */
     @Query("""
