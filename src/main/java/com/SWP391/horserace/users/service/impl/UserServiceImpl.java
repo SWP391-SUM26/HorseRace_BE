@@ -138,6 +138,8 @@ public class UserServiceImpl implements UserService {
                 .avatarUrl(user.getAvatarUrl())
                 .status(user.getStatus() != null ? user.getStatus().name() : null)
                 .kycStatus(user.getKycStatus() != null ? user.getKycStatus().name() : null)
+                .emailVerified(user.isEmailVerified())
+                .googleId(user.getGoogleId())
                 .roleCode(role != null ? role.getRoleCode() : null)
                 .roleName(role != null ? role.getRoleName() : null)
                 .createdAt(user.getCreatedAt())

@@ -106,6 +106,7 @@ CREATE TABLE app_user (
     kyc_status    VARCHAR(30) NOT NULL DEFAULT 'PENDING'
                   CHECK (kyc_status IN ('PENDING', 'VERIFIED', 'REJECTED')),
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    google_id     VARCHAR(255) UNIQUE,                         -- Google subject (sub) when linked via Google sign-in
     last_login_at TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
