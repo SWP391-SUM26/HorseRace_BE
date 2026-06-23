@@ -98,10 +98,13 @@ INSERT INTO app_user (user_id, role_id, user_code, full_name, email, phone, pass
         'USR0005', 'Irad Ortiz Jr.', 'irad.ortiz@horserace.local', '0900000005',
         'jockey123', 'ACTIVE', 'VERIFIED');
 
--- Seed Jockey Profiles
-INSERT INTO jockey_profile (jockey_user_id, license_no, body_weight, height_cm, experience_yrs, win_count, bio) VALUES
-    ('11111111-1111-1111-1111-111111111111', 'LIC-ALEX-001', 54.50, 165.00, 8, 142, 'Top jockey in the regional division, highly skilled in turf courses.'),
-    ('22222222-2222-2222-2222-222222222222', 'LIC-IRAD-002', 52.00, 162.00, 10, 230, 'Elite class jockey, multiple champion in various stakes.');
+-- Seed Jockey Profiles (with Jockey Market fields: rating, riding_style, win_rate, recent_form, base_fee, prize_percent, last_trophy)
+INSERT INTO jockey_profile (jockey_user_id, license_no, body_weight, height_cm, experience_yrs, win_count, bio,
+                            rating, riding_style, win_rate, recent_form, base_fee, prize_percent, last_trophy) VALUES
+    ('11111111-1111-1111-1111-111111111111', 'LIC-ALEX-001', 54.50, 165.00, 8, 142, 'Top jockey in the regional division, highly skilled in turf courses.',
+        4.7, 'Stalker', 58.50, 'W,L,W,W,L', 12000.00, 10.00, 'Spring Cup 2024'),
+    ('22222222-2222-2222-2222-222222222222', 'LIC-IRAD-002', 52.00, 162.00, 10, 230, 'Elite class jockey, multiple champion in various stakes.',
+        4.9, 'Closer', 62.50, 'W,W,W,L,W', 18000.00, 12.50, 'Dubai World Cup 2025');
 
 -- =========================================================
 -- SEED DATA FOR JOCKEY ASSIGNMENT MODULE
