@@ -2,6 +2,7 @@ package com.SWP391.horserace.assignments.repository;
 
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
 import com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus;
+import com.SWP391.horserace.races.entity.RaceEntry;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -156,4 +157,27 @@ public interface JockeyAssignmentRepository extends JpaRepository<JockeyAssignme
         """,
         countQuery = "SELECT COUNT(ja) FROM JockeyAssignment ja")
     Page<JockeyAssignment> findAllWithDetails(Pageable pageable);
+
+    /**
+     * An owner's race entries that have NO accepted jockey yet (Jockey Market, FE-v2 §2).
+     *
+     * <p>Walks {@code tournament_registration[owner] → race_entry → race}, eagerly fetching
+     * the horse and race, and excludes any entry that already has a
+     * {@link JockeyAssignmentStatus#ACCEPTED} assignment.
+     */
+    @Query("""
+        SELECT e FROM RaceEntry e
+          JOIN FETCH e.registration r
+          JOIN FETCH r.horse h
+          JOIN FETCH e.race race
+         WHERE r.owner.userId = :ownerUserId
+           AND race.deleted = false
+           AND NOT EXISTS (
+                SELECT 1 FROM JockeyAssignment ja
+                 WHERE ja.entry = e
+                   AND ja.status = com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus.ACCEPTED
+           )
+         ORDER BY race.scheduledStartAt ASC
+        """)
+    List<RaceEntry> findUnassignedEntriesByOwner(@Param("ownerUserId") UUID ownerUserId);
 }

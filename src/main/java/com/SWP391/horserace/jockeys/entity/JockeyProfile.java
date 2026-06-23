@@ -60,6 +60,36 @@ public class JockeyProfile {
     @Column(name = "bio", columnDefinition = "text")
     private String bio;
 
+    // -- Jockey Market (FE-v2 §2) marketing/stat fields --
+
+    /** Star rating, 0–5 (e.g. 4.9). */
+    @Column(name = "rating", precision = 3, scale = 1)
+    private BigDecimal rating;
+
+    /** Riding style label (e.g. Stalker, Closer, Front-runner). */
+    @Column(name = "riding_style", length = 50)
+    private String ridingStyle;
+
+    /** Win rate as a percentage, 0–100 (e.g. 62.50). */
+    @Column(name = "win_rate", precision = 5, scale = 2)
+    private BigDecimal winRate;
+
+    /** Recent form stored comma-joined, e.g. {@code "W,L,W,W,L"}; exposed as a list. */
+    @Column(name = "recent_form", length = 50)
+    private String recentForm;
+
+    /** Base hire fee. */
+    @Column(name = "base_fee", precision = 18, scale = 2)
+    private BigDecimal baseFee;
+
+    /** Percentage of prize taken by the jockey. */
+    @Column(name = "prize_percent", precision = 5, scale = 2)
+    private BigDecimal prizePercent;
+
+    /** Name of the most recent trophy won. */
+    @Column(name = "last_trophy", length = 255)
+    private String lastTrophy;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private OffsetDateTime createdAt;

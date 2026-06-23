@@ -1,11 +1,20 @@
 package com.SWP391.horserace.jockeys.service.impl;
 
+import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
+import com.SWP391.horserace.horses.entity.Horse;
+import com.SWP391.horserace.horses.repository.HorseRepository;
 import com.SWP391.horserace.jockeys.dto.JockeyFilterRequest;
 import com.SWP391.horserace.jockeys.dto.JockeyResponse;
+import com.SWP391.horserace.jockeys.dto.JockeySuggestionResponse;
+import com.SWP391.horserace.jockeys.dto.UnassignedEntryResponse;
 import com.SWP391.horserace.jockeys.entity.JockeyProfile;
 import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
 import com.SWP391.horserace.jockeys.repository.JockeyProfileSpecification;
 import com.SWP391.horserace.jockeys.service.JockeyService;
+import com.SWP391.horserace.races.entity.Race;
+import com.SWP391.horserace.races.entity.RaceEntry;
+import com.SWP391.horserace.races.repository.RaceRepository;
+import com.SWP391.horserace.registrations.entity.TournamentRegistration;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.users.entity.User;
@@ -17,6 +26,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -26,6 +36,9 @@ import java.util.stream.Collectors;
 public class JockeyServiceImpl implements JockeyService {
 
     private final JockeyProfileRepository jockeyProfileRepository;
+    private final JockeyAssignmentRepository jockeyAssignmentRepository;
+    private final RaceRepository raceRepository;
+    private final HorseRepository horseRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -105,7 +118,95 @@ public class JockeyServiceImpl implements JockeyService {
                 .winCount(profile.getWinCount())
                 .bio(profile.getBio())
                 .createdAt(profile.getCreatedAt())
+                // -- Jockey Market (FE-v2 §2) --
+                .rating(profile.getRating())
+                .ridingStyle(profile.getRidingStyle())
+                .winRate(profile.getWinRate())
+                .recentForm(splitRecentForm(profile.getRecentForm()))
+                .baseFee(profile.getBaseFee())
+                .prizePercent(profile.getPrizePercent())
+                .lastTrophy(profile.getLastTrophy())
                 .build();
+    }
+
+    /** Split the comma-joined recent_form CSV into a list; empty list when null/blank. */
+    private List<String> splitRecentForm(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UnassignedEntryResponse> getUnassignedEntries(UUID ownerUserId) {
+        if (ownerUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        return jockeyAssignmentRepository.findUnassignedEntriesByOwner(ownerUserId).stream()
+                .map(this::mapToUnassignedEntry)
+                .collect(Collectors.toList());
+    }
+
+    private UnassignedEntryResponse mapToUnassignedEntry(RaceEntry entry) {
+        TournamentRegistration reg = entry.getRegistration();
+        Race race = entry.getRace();
+        return UnassignedEntryResponse.builder()
+                .registrationId(reg.getRegistrationId())
+                .horseId(reg.getHorse().getHorseId())
+                .horseName(reg.getHorse().getName())
+                .raceId(race.getRaceId())
+                .raceName(race.getName())
+                .raceDate(race.getScheduledStartAt())
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<JockeySuggestionResponse> getJockeySuggestions(UUID raceId, UUID horseId) {
+        raceRepository.findByRaceIdAndDeletedFalse(raceId)
+                .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
+        horseRepository.findByHorseIdAndDeletedFalse(horseId)
+                .orElseThrow(() -> new AppException(ErrorCode.HORSE_NOT_FOUND));
+
+        return jockeyProfileRepository.findAllActiveJockeys().stream()
+                .map(jp -> JockeySuggestionResponse.builder()
+                        .jockeyUserId(jp.getJockeyUserId())
+                        .compatibility(computeCompatibility(jp, horseId))
+                        .build())
+                .sorted((a, b) -> Integer.compare(b.getCompatibility(), a.getCompatibility()))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Deterministic compatibility score in the inclusive range 50–99 (no ML model exists).
+     *
+     * <p>It blends a stat-based component (the jockey's win rate, or rating scaled to a
+     * percentage when win rate is absent) with a stable pseudo-random jitter derived from
+     * {@code hash(jockeyUserId, horseId)}. The same (jockey, horse) pair always yields the
+     * same score, and better stats trend toward higher scores.
+     */
+    private int computeCompatibility(JockeyProfile profile, UUID horseId) {
+        // Stat component, normalised to 0–100.
+        double statScore;
+        if (profile.getWinRate() != null) {
+            statScore = profile.getWinRate().doubleValue();
+        } else if (profile.getRating() != null) {
+            statScore = profile.getRating().doubleValue() / 5.0 * 100.0;
+        } else {
+            statScore = 50.0;
+        }
+
+        // Stable jitter (0..14) from the (jockey, horse) pair hash so the score is repeatable.
+        int hash = (profile.getJockeyUserId().hashCode() * 31) ^ horseId.hashCode();
+        int jitter = Math.floorMod(hash, 15);
+
+        // Weight stats 70%, base 50 for the floor, plus jitter; then clamp to 50..99.
+        int raw = (int) Math.round(50 + statScore * 0.35) + jitter - 7;
+        return Math.max(50, Math.min(99, raw));
     }
 }
 
