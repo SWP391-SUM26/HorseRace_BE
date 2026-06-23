@@ -1,7 +1,11 @@
 package com.SWP391.horserace.races.service.impl;
 
+import com.SWP391.horserace.assignments.entity.JockeyAssignment;
+import com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus;
+import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.races.dto.AssignParticipantRequest;
+import com.SWP391.horserace.races.dto.MyEntryResponse;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
 import com.SWP391.horserace.races.dto.RaceFilterRequest;
 import com.SWP391.horserace.races.dto.RaceRequest;
@@ -52,6 +56,7 @@ class RaceServiceImplTest {
     @Mock RegistrationRepository registrationRepository;
     @Mock TournamentRepository tournamentRepository;
     @Mock UserRepository userRepository;
+    @Mock JockeyAssignmentRepository jockeyAssignmentRepository;
 
     private RaceServiceImpl service;
 
@@ -63,7 +68,8 @@ class RaceServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new RaceServiceImpl(
-                raceRepository, raceEntryRepository, registrationRepository, tournamentRepository, userRepository);
+                raceRepository, raceEntryRepository, registrationRepository, tournamentRepository,
+                userRepository, jockeyAssignmentRepository);
         tournament = Tournament.builder().tournamentId(tournamentId).name("Spring Cup").build();
     }
 
@@ -339,10 +345,105 @@ class RaceServiceImplTest {
         assertThat(res.getStatus()).isEqualTo(RaceEntryStatus.ENTERED);
         assertThat(res.getEntryCode()).isEqualTo("ENT00005");
         assertThat(res.getLaneNo()).isEqualTo(3);
+        assertThat(res.getDrawStall()).isEqualTo("3");
         assertThat(res.getEntryNo()).isEqualTo(7);
         assertThat(res.getRaceId()).isEqualTo(id);
         assertThat(res.getRegistrationId()).isEqualTo(regId);
         assertThat(res.getHorseName()).isEqualTo("Thunder");
         assertThat(res.getOwnerName()).isEqualTo("Owen Owner");
+    }
+
+    // ── listEntries (mapping: drawStall + jockeyName) ──
+
+    @Test
+    void listEntries_mapsDrawStallFromLaneAndAcceptedJockeyName() {
+        UUID raceId = UUID.randomUUID();
+        UUID entryId = UUID.randomUUID();
+
+        TournamentRegistration reg = approvedReg(UUID.randomUUID(), tournamentId);
+        Race race = openRace(raceId);
+        RaceEntry entry = RaceEntry.builder()
+                .entryId(entryId).registration(reg).race(race)
+                .entryCode("ENT00001").entryNo(1).laneNo(5)
+                .weightCarriedLbs(126).recentForm("1-2-1-1-3").odds("5-2")
+                .status(RaceEntryStatus.ENTERED).build();
+
+        User jockey = User.builder().userId(UUID.randomUUID()).fullName("D. Oliver").build();
+        JockeyAssignment ja = JockeyAssignment.builder()
+                .assignmentId(UUID.randomUUID()).entry(entry).jockey(jockey)
+                .status(JockeyAssignmentStatus.ACCEPTED).build();
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(raceEntryRepository.findByRace_RaceId(raceId)).thenReturn(List.of(entry));
+        when(jockeyAssignmentRepository.findAcceptedByEntryIds(List.of(entryId)))
+                .thenReturn(List.of(ja));
+
+        List<RaceEntryResponse> result = service.listEntries(raceId);
+
+        assertThat(result).hasSize(1);
+        RaceEntryResponse res = result.get(0);
+        assertThat(res.getDrawStall()).isEqualTo("5");
+        assertThat(res.getJockeyName()).isEqualTo("D. Oliver");
+        assertThat(res.getWeightCarriedLbs()).isEqualTo(126);
+        assertThat(res.getRecentForm()).isEqualTo("1-2-1-1-3");
+        assertThat(res.getOdds()).isEqualTo("5-2");
+    }
+
+    // ── getMyEntry ──
+
+    @Test
+    void getMyEntry_happyPath_mapsOwnerEntry() {
+        UUID raceId = UUID.randomUUID();
+        UUID entryId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+
+        User owner = User.builder().userId(ownerId).fullName("Owen Owner").build();
+        Horse horse = Horse.builder().horseId(UUID.randomUUID()).owner(owner).name("Storm Weaver").build();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(UUID.randomUUID()).owner(owner).horse(horse).tournament(tournament)
+                .status(RegistrationStatus.APPROVED).build();
+        RaceEntry entry = RaceEntry.builder()
+                .entryId(entryId).registration(reg).race(openRace(raceId))
+                .entryCode("ENT00001").entryNo(1).laneNo(4)
+                .weightCarriedLbs(126).status(RaceEntryStatus.CHECKED_IN).build();
+
+        User jockey = User.builder().userId(UUID.randomUUID()).fullName("D. Oliver").build();
+        JockeyAssignment ja = JockeyAssignment.builder()
+                .assignmentId(UUID.randomUUID()).entry(entry).jockey(jockey)
+                .status(JockeyAssignmentStatus.ACCEPTED).build();
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(openRace(raceId)));
+        when(raceEntryRepository.findByRaceIdAndOwnerUserId(raceId, ownerId)).thenReturn(Optional.of(entry));
+        when(jockeyAssignmentRepository.findAcceptedByEntryId(entryId)).thenReturn(Optional.of(ja));
+
+        MyEntryResponse res = service.getMyEntry(raceId, ownerId);
+
+        assertThat(res.getHorseName()).isEqualTo("Storm Weaver");
+        assertThat(res.getDrawStall()).isEqualTo("4");
+        assertThat(res.getJockeyName()).isEqualTo("D. Oliver");
+        assertThat(res.getWeightCarriedLbs()).isEqualTo(126);
+        assertThat(res.getEntryStatus()).isEqualTo(RaceEntryStatus.CHECKED_IN);
+    }
+
+    @Test
+    void getMyEntry_raceNotFound_throws() {
+        UUID raceId = UUID.randomUUID();
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getMyEntry(raceId, UUID.randomUUID()))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_FOUND);
+    }
+
+    @Test
+    void getMyEntry_noEntryForOwner_throwsEntryNotFound() {
+        UUID raceId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(openRace(raceId)));
+        when(raceEntryRepository.findByRaceIdAndOwnerUserId(raceId, ownerId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getMyEntry(raceId, ownerId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ENTRY_NOT_FOUND);
     }
 }
