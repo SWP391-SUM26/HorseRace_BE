@@ -49,6 +49,7 @@ DROP TABLE IF EXISTS tournament_registration  CASCADE;
 DROP TABLE IF EXISTS race                     CASCADE;
 DROP TABLE IF EXISTS tournament_round         CASCADE;
 DROP TABLE IF EXISTS tournament               CASCADE;
+DROP TABLE IF EXISTS horse_characteristic     CASCADE;
 DROP TABLE IF EXISTS horse                    CASCADE;
 DROP TABLE IF EXISTS jockey_profile           CASCADE;
 DROP TABLE IF EXISTS app_user                 CASCADE;
@@ -206,10 +207,30 @@ CREATE TABLE horse (
     image_url           TEXT,                                         -- V4: ảnh ngựa (served via /api/v1/files)
     last_health_check_at TIMESTAMPTZ,
     medical_note         TEXT,
+    -- FE-v2 Horse Profile (mục 1): career stats + pedigree + medical extras
+    grade                   VARCHAR(50),
+    lifetime_earnings       NUMERIC(18,2) NOT NULL DEFAULT 0,
+    sire_name               VARCHAR(255),
+    sire_wins               INT,
+    sire_earnings           NUMERIC(18,2),
+    dam_name                VARCHAR(255),
+    dam_wins                INT,
+    dam_note                VARCHAR(255),
+    trainer_name            VARCHAR(255),
+    trainer_license_no      VARCHAR(100),
+    vaccinations_up_to_date BOOLEAN NOT NULL DEFAULT FALSE,
+    recovery_percent        INT CHECK (recovery_percent IS NULL OR (recovery_percent BETWEEN 0 AND 100)),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_deleted          BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at          TIMESTAMPTZ
+);
+
+-- FE-v2 Horse Profile (mục 1): horse characteristics tags (@ElementCollection)
+CREATE TABLE horse_characteristic (
+    horse_id UUID NOT NULL REFERENCES horse(horse_id),
+    tag      VARCHAR(100) NOT NULL,
+    PRIMARY KEY (horse_id, tag)
 );
 
 -- =========================================================
@@ -320,6 +341,7 @@ CREATE TABLE race_entry (
     status          VARCHAR(50) NOT NULL DEFAULT 'ENTERED'
                     CHECK (status IN ('ENTERED', 'CHECKED_IN', 'SCRATCHED', 'DISQUALIFIED', 'FINISHED')),
     checked_in_at   TIMESTAMPTZ,
+    prize_earned    NUMERIC(18,2) NOT NULL DEFAULT 0,  -- FE-v2 Horse Profile (mục 1): tiền thưởng mỗi race
     created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (race_id, registration_id),  -- 1 đăng ký vào 1 cuộc đua chỉ 1 lần
