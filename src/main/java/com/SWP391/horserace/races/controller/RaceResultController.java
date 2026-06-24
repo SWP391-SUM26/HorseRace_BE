@@ -46,9 +46,11 @@ public class RaceResultController {
                 .build();
     }
 
-    /** GET — the full result sheet for a race, ordered by finish position. */
+    /**
+     * GET — the full result sheet for a race, ordered by finish position. Readable by anyone
+     * (owners, jockeys, spectators all view results) — only recording/editing/certifying is gated.
+     */
     @GetMapping
-    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<RaceResultsResponse> getResults(@PathVariable UUID raceId) {
         return ApiResponse.<RaceResultsResponse>builder()
                 .success(true)

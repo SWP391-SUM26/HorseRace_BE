@@ -8,6 +8,7 @@ import com.SWP391.horserace.horses.dto.HorseStatsResponse;
 import com.SWP391.horserace.horses.dto.MedicalStatusResponse;
 import com.SWP391.horserace.horses.dto.PedigreeResponse;
 import com.SWP391.horserace.horses.dto.RaceHistoryItemResponse;
+import com.SWP391.horserace.horses.dto.RideIntelligenceResponse;
 import com.SWP391.horserace.horses.dto.UpdateMedicalStatusRequest;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.entity.HorseStatus;
@@ -65,10 +66,33 @@ public class HorseServiceImpl implements HorseService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<HorseResponse> listHorses(HorseFilterRequest filter) {
+    public Page<HorseResponse> listHorses(HorseFilterRequest filter, UUID currentUserId) {
+        UUID ownerFilter = resolveOwnerFilter(filter.getOwnerUserId(), currentUserId);
         return horseRepository
-                .findAll(HorseSpecification.withFilters(filter), buildPageable(filter))
+                .findAll(HorseSpecification.withFilters(filter, ownerFilter), buildPageable(filter))
                 .map(this::mapToResponse);
+    }
+
+    /**
+     * Resolves the {@code ownerUserId} query value: the literal {@code "me"} → the caller's id
+     * (requires authentication), a UUID string → that id, blank/null → no owner filter. An
+     * unparseable value is a 400 rather than a 500.
+     */
+    private UUID resolveOwnerFilter(String raw, UUID currentUserId) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        if (raw.equalsIgnoreCase("me")) {
+            if (currentUserId == null) {
+                throw new AppException(ErrorCode.UNAUTHENTICATED);
+            }
+            return currentUserId;
+        }
+        try {
+            return UUID.fromString(raw.trim());
+        } catch (IllegalArgumentException e) {
+            throw new AppException(ErrorCode.INVALID_KEY);
+        }
     }
 
     @Override
@@ -271,6 +295,76 @@ public class HorseServiceImpl implements HorseService {
         return entries.stream()
                 .map(e -> mapToHistoryItem(e, finishByEntry.get(e.getEntryId())))
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public RideIntelligenceResponse getRideIntelligence(UUID horseId) {
+        Horse horse = loadHorse(horseId); // 404 HORSE_NOT_FOUND if missing
+
+        // entries are newest-scheduled first
+        List<RaceEntry> entries = raceEntryRepository.findHistoryByHorseId(horseId);
+
+        // recentForm: up-to-3 most-recent finish positions joined "-", e.g. "1-2-1"
+        String recentForm = null;
+        OffsetDateTime postTime = null;
+        if (!entries.isEmpty()) {
+            List<UUID> entryIds = entries.stream().map(RaceEntry::getEntryId).toList();
+            Map<UUID, Integer> finishByEntry = raceResultRepository.findByEntry_EntryIdIn(entryIds).stream()
+                    .filter(r -> r.getEntry() != null && r.getFinishPosition() != null)
+                    .collect(Collectors.toMap(r -> r.getEntry().getEntryId(), RaceResult::getFinishPosition,
+                            (a, b) -> a));
+
+            String form = entries.stream()
+                    .map(e -> finishByEntry.get(e.getEntryId()))
+                    .filter(java.util.Objects::nonNull)
+                    .limit(3)
+                    .map(String::valueOf)
+                    .collect(Collectors.joining("-"));
+            if (!form.isEmpty()) {
+                recentForm = form;
+            }
+
+            // postTime: the horse's next SCHEDULED/OPEN race start (earliest upcoming).
+            postTime = entries.stream()
+                    .map(RaceEntry::getRace)
+                    .filter(r -> r != null
+                            && (r.getStatus() == RaceStatus.SCHEDULED || r.getStatus() == RaceStatus.OPEN)
+                            && r.getScheduledStartAt() != null)
+                    .map(Race::getScheduledStartAt)
+                    .min(OffsetDateTime::compareTo)
+                    .orElse(null);
+        }
+
+        return RideIntelligenceResponse.builder()
+                .preferredSurface(derivePreferredSurface(horse.getCharacteristics()))
+                .postTime(postTime)
+                .trainer(horse.getTrainerName())
+                .owner(horse.getOwner() != null ? horse.getOwner().getFullName() : null)
+                .recentForm(recentForm)
+                .formNotes(null)
+                .build();
+    }
+
+    /**
+     * Derive a preferred surface from the horse's characteristic tags.
+     * A tag containing "TURF" → "TURF"; "DIRT" → "DIRT"; otherwise null.
+     */
+    private String derivePreferredSurface(java.util.Set<String> characteristics) {
+        if (characteristics == null) {
+            return null;
+        }
+        for (String tag : characteristics) {
+            if (tag == null) continue;
+            String upper = tag.toUpperCase();
+            if (upper.contains("TURF")) {
+                return "TURF";
+            }
+            if (upper.contains("DIRT")) {
+                return "DIRT";
+            }
+        }
+        return null;
     }
 
     @Override

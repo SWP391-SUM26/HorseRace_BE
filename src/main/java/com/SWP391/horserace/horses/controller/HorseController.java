@@ -8,6 +8,7 @@ import com.SWP391.horserace.horses.dto.HorseStatsResponse;
 import com.SWP391.horserace.horses.dto.MedicalStatusResponse;
 import com.SWP391.horserace.horses.dto.PedigreeResponse;
 import com.SWP391.horserace.horses.dto.RaceHistoryItemResponse;
+import com.SWP391.horserace.horses.dto.RideIntelligenceResponse;
 import com.SWP391.horserace.horses.dto.UpdateMedicalStatusRequest;
 import com.SWP391.horserace.horses.service.HorseService;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
@@ -44,11 +45,12 @@ public class HorseController {
 
     /** GET /api/v1/horses — list with search (q), filters, sort and pagination. */
     @GetMapping
-    public ApiResponse<Page<HorseResponse>> listHorses(@ModelAttribute HorseFilterRequest filter) {
+    public ApiResponse<Page<HorseResponse>> listHorses(@ModelAttribute HorseFilterRequest filter,
+                                                       @AuthenticationPrincipal UUID userId) {
         return ApiResponse.<Page<HorseResponse>>builder()
                 .success(true)
                 .message("Fetched horses")
-                .data(horseService.listHorses(filter))
+                .data(horseService.listHorses(filter, userId))
                 .build();
     }
 
@@ -156,6 +158,16 @@ public class HorseController {
                 .success(true)
                 .message("Fetched race history")
                 .data(horseService.getRaceHistory(id))
+                .build();
+    }
+
+    /** GET /api/v1/horses/{id}/ride-intelligence — surface, post time, trainer, owner, recent form (FE-v2 jockey #7). */
+    @GetMapping("/{id}/ride-intelligence")
+    public ApiResponse<RideIntelligenceResponse> getRideIntelligence(@PathVariable UUID id) {
+        return ApiResponse.<RideIntelligenceResponse>builder()
+                .success(true)
+                .message("Fetched ride intelligence")
+                .data(horseService.getRideIntelligence(id))
                 .build();
     }
 

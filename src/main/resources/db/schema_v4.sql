@@ -58,6 +58,7 @@ DROP TABLE IF EXISTS horse                    CASCADE;
 DROP TABLE IF EXISTS jockey_profile           CASCADE;
 DROP TABLE IF EXISTS app_user                 CASCADE;
 DROP TABLE IF EXISTS role                     CASCADE;
+DROP TABLE IF EXISTS reward                   CASCADE;
 
 -- =========================================================
 -- ROLE  (Horse Owner / Jockey / Race Referee / Spectator / Admin)
@@ -625,7 +626,7 @@ CREATE TABLE wallet_transaction (
     entry_type          VARCHAR(20) NOT NULL CHECK (entry_type IN ('DEBIT', 'CREDIT')),
     txn_category        VARCHAR(50)
                         CHECK (txn_category IN ('DEPOSIT', 'WITHDRAWAL', 'BET_STAKE',
-                                                'BET_PAYOUT', 'PRIZE', 'REFUND', 'ADJUSTMENT')),
+                                                'BET_PAYOUT', 'PRIZE', 'REFUND', 'ADJUSTMENT', 'REWARD')),
     amount              NUMERIC(18,2) NOT NULL CHECK (amount >= 0),
     balance_after       NUMERIC(18,2) NOT NULL CHECK (balance_after >= 0),
     related_entity_type VARCHAR(50),
@@ -817,3 +818,26 @@ CREATE INDEX idx_notification_recipient_unread ON notification(recipient_user_id
 -- =========================================================
 -- END  --  V4 (complete)
 -- =========================================================
+
+-- =========================================================
+-- REWARD  (NEW) -- Hệ thống điểm thưởng
+-- =========================================================
+CREATE TABLE reward (
+    reward_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       UUID NOT NULL REFERENCES app_user(user_id),
+    reward_type   VARCHAR(50) NOT NULL
+                  CHECK (reward_type IN ('DAILY_LOGIN', 'MILESTONE', 'PROMOTION', 'REFERRAL', 'COMPENSATION')),
+    amount        NUMERIC(18,2) NOT NULL CHECK (amount >= 0),
+    title         VARCHAR(255) NOT NULL,
+    description   TEXT,
+    status        VARCHAR(50) NOT NULL DEFAULT 'PENDING'
+                  CHECK (status IN ('PENDING', 'CLAIMED', 'EXPIRED')),
+    expires_at    TIMESTAMPTZ,
+    claimed_at    TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_reward_user_id ON reward(user_id);
+CREATE INDEX idx_reward_status ON reward(status);
+

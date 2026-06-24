@@ -8,5 +8,6 @@ public enum TxnCategory {
     BET_PAYOUT,
     PRIZE,
     REFUND,
-    ADJUSTMENT
+    ADJUSTMENT,
+    REWARD
 }

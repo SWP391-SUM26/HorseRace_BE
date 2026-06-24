@@ -8,6 +8,7 @@ import com.SWP391.horserace.horses.dto.HorseStatsResponse;
 import com.SWP391.horserace.horses.dto.MedicalStatusResponse;
 import com.SWP391.horserace.horses.dto.PedigreeResponse;
 import com.SWP391.horserace.horses.dto.RaceHistoryItemResponse;
+import com.SWP391.horserace.horses.dto.RideIntelligenceResponse;
 import com.SWP391.horserace.horses.dto.UpdateMedicalStatusRequest;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
 import org.springframework.data.domain.Page;
@@ -18,8 +19,13 @@ import java.util.UUID;
 
 public interface HorseService {
 
-    /** List horses with search + filter + sort + pagination. */
-    Page<HorseResponse> listHorses(HorseFilterRequest filter);
+    /**
+     * List horses with search + filter + sort + pagination.
+     *
+     * @param currentUserId the authenticated caller — used to resolve {@code ?ownerUserId=me}
+     *                      (the "My Stable" filter); may be null for anonymous/public calls.
+     */
+    Page<HorseResponse> listHorses(HorseFilterRequest filter, UUID currentUserId);
 
     HorseResponse getHorseById(UUID horseId);
 
@@ -52,4 +58,7 @@ public interface HorseService {
 
     /** Assign a horse to a race via its approved registration; only the owner (or admin) may do this. */
     RaceEntryResponse assignHorseToRace(UUID currentUserId, UUID horseId, AssignHorseToRaceRequest request);
+
+    /** Ride intelligence for a horse (FE-v2 jockey contract #7): surface, post time, trainer, owner, recent form. */
+    RideIntelligenceResponse getRideIntelligence(UUID horseId);
 }

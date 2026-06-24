@@ -140,11 +140,11 @@ INSERT INTO race (race_id, tournament_id, race_code, name, race_type, distance_m
     ('cccc1111-cccc-1111-cccc-111111111111',
         'bbbb1111-bbbb-1111-bbbb-111111111111',
         'RACE-001', 'Belmont Autumn Stakes', 'FLAT', 2000, 'GOOD',
-        '2024-10-24 14:30:00+07', 'Ascot Racecourse, UK', 14, 600000.00, 'SCHEDULED'),
+        CURRENT_TIMESTAMP - INTERVAL '30 days', 'Ascot Racecourse, UK', 14, 600000.00, 'SCHEDULED'),
     ('cccc2222-cccc-2222-cccc-222222222222',
         'bbbb1111-bbbb-1111-bbbb-111111111111',
         'RACE-002', 'Epsom Derby Qualifier', 'FLAT', 1600, 'GOOD',
-        '2024-11-02 13:00:00+07', NULL, NULL, NULL, 'SCHEDULED');
+        CURRENT_TIMESTAMP - INTERVAL '25 days', NULL, NULL, NULL, 'SCHEDULED');
 
 -- Prize distribution for RACE-001 (1st–4th).
 INSERT INTO race_prize_distribution (race_id, place, amount) VALUES
@@ -278,11 +278,46 @@ INSERT INTO jockey_assignment (assignment_id, entry_id, jockey_user_id, status, 
         '22222222-2222-2222-2222-222222222222',
         'INVITED', CURRENT_TIMESTAMP - INTERVAL '1 day', NULL,
         (SELECT user_id FROM app_user WHERE email = 'owner@horserace.local')),
-    -- Sapphire Wind → Alex Mercer (INVITED/PENDING for Race 1)
+    -- Sapphire Wind → Alex Mercer (DECLINED — Race 1 is now in the past; also gives the Declined tab data)
     ('ffff3333-ffff-3333-ffff-333333333333',
         'eeee3333-eeee-3333-eeee-333333333333',
         '11111111-1111-1111-1111-111111111111',
-        'INVITED', CURRENT_TIMESTAMP, NULL,
+        'DECLINED', CURRENT_TIMESTAMP - INTERVAL '28 days', CURRENT_TIMESTAMP - INTERVAL '27 days',
+        (SELECT user_id FROM app_user WHERE email = 'owner@horserace.local'));
+
+-- =========================================================
+-- FE-v2 Jockey schedule — a FUTURE race so the jockey's Upcoming + Pending tabs
+-- populate (the races above are all in the past and only feed Past Results / Trophy).
+-- Relative date so it stays in the future on every re-seed.
+-- =========================================================
+INSERT INTO race (race_id, tournament_id, race_code, name, race_type, distance_meter, track_condition, scheduled_start_at, venue, going_moisture_pct, total_purse, status) VALUES
+    ('cccc3333-cccc-3333-cccc-333333333333',
+        'bbbb1111-bbbb-1111-bbbb-111111111111',
+        'RACE-009', 'Kingsway Mile', 'FLAT', 1600, 'GOOD',
+        CURRENT_TIMESTAMP + INTERVAL '14 days', 'Kingsway Park, UK', 12, 800000.00, 'SCHEDULED');
+
+-- Entries for the future race (reuse the owner's existing tournament registrations).
+INSERT INTO race_entry (entry_id, registration_id, race_id, entry_code, entry_no, lane_no, weight_carried_lbs, recent_form, odds, status) VALUES
+    ('eeee7777-eeee-7777-eeee-777777777777',
+        'dddd1111-dddd-1111-dddd-111111111111',   -- Midnight Thunder
+        'cccc3333-cccc-3333-cccc-333333333333',
+        'ENT-009', 1, 1, 126, '1-2-1-1-3', '3-1', 'ENTERED'),
+    ('eeee8888-eeee-8888-eeee-888888888888',
+        'dddd2222-dddd-2222-dddd-222222222222',   -- Silver Bullet
+        'cccc3333-cccc-3333-cccc-333333333333',
+        'ENT-010', 2, 2, 120, '2-1-3', '9-2', 'ENTERED');
+
+-- Alex Mercer on the future race: ACCEPTED ride (→ Upcoming) + INVITED invitation (→ Pending).
+INSERT INTO jockey_assignment (assignment_id, entry_id, jockey_user_id, status, invited_at, responded_at, assigned_by_user_id) VALUES
+    ('ffff4444-ffff-4444-ffff-444444444444',
+        'eeee7777-eeee-7777-eeee-777777777777',
+        '11111111-1111-1111-1111-111111111111',
+        'ACCEPTED', CURRENT_TIMESTAMP - INTERVAL '2 days', CURRENT_TIMESTAMP - INTERVAL '1 day',
+        (SELECT user_id FROM app_user WHERE email = 'owner@horserace.local')),
+    ('ffff5555-ffff-5555-ffff-555555555555',
+        'eeee8888-eeee-8888-eeee-888888888888',
+        '11111111-1111-1111-1111-111111111111',
+        'INVITED', CURRENT_TIMESTAMP - INTERVAL '6 hours', NULL,
         (SELECT user_id FROM app_user WHERE email = 'owner@horserace.local'));
 
 -- =========================================================
@@ -352,9 +387,9 @@ INSERT INTO tournament (tournament_id, tournament_code, name, description, start
 
 -- More races (varied statuses across tournaments)
 INSERT INTO race (race_id, tournament_id, race_code, name, race_type, distance_meter, track_condition, scheduled_start_at, actual_start_at, actual_end_at, status) VALUES
-    ('cccc0000-0000-0000-0000-000000000003', 'bbbb0000-0000-0000-0000-000000000002', 'RACE-003', 'Ascot Gold Cup', 'FLAT', 4000, 'GOOD', '2025-06-19 15:30:00+07', NULL, NULL, 'OPEN'),
-    ('cccc0000-0000-0000-0000-000000000004', 'bbbb0000-0000-0000-0000-000000000002', 'RACE-004', 'Queen Anne Stakes', 'FLAT', 1600, 'FIRM', '2025-06-17 14:30:00+07', NULL, NULL, 'SCHEDULED'),
-    ('cccc0000-0000-0000-0000-000000000005', 'bbbb0000-0000-0000-0000-000000000003', 'RACE-005', 'Derby Trial', 'FLAT', 2000, 'GOOD', '2025-04-15 03:00:00+07', NULL, NULL, 'SCHEDULED'),
+    ('cccc0000-0000-0000-0000-000000000003', 'bbbb0000-0000-0000-0000-000000000002', 'RACE-003', 'Ascot Gold Cup', 'FLAT', 4000, 'GOOD', CURRENT_TIMESTAMP + INTERVAL '10 days', NULL, NULL, 'OPEN'),
+    ('cccc0000-0000-0000-0000-000000000004', 'bbbb0000-0000-0000-0000-000000000002', 'RACE-004', 'Queen Anne Stakes', 'FLAT', 1600, 'FIRM', CURRENT_TIMESTAMP + INTERVAL '7 days', NULL, NULL, 'SCHEDULED'),
+    ('cccc0000-0000-0000-0000-000000000005', 'bbbb0000-0000-0000-0000-000000000003', 'RACE-005', 'Derby Trial', 'FLAT', 2000, 'GOOD', CURRENT_TIMESTAMP + INTERVAL '21 days', NULL, NULL, 'SCHEDULED'),
     ('cccc0000-0000-0000-0000-000000000006', 'bbbb0000-0000-0000-0000-000000000004', 'RACE-006', 'Melbourne Cup Final', 'FLAT', 3200, 'SOFT', '2024-11-05 11:00:00+07', '2024-11-05 11:02:00+07', '2024-11-05 11:05:30+07', 'FINISHED'),
     ('cccc0000-0000-0000-0000-000000000007', 'bbbb0000-0000-0000-0000-000000000004', 'RACE-007', 'Lightning Stakes', 'FLAT', 1000, 'GOOD', '2024-11-05 10:00:00+07', '2024-11-05 10:01:00+07', '2024-11-05 10:02:10+07', 'OFFICIAL'),
     ('cccc0000-0000-0000-0000-000000000008', 'bbbb1111-bbbb-1111-bbbb-111111111111', 'RACE-008', 'Dubai Sprint', 'FLAT', 1200, 'GOOD', '2024-10-30 15:00:00+07', NULL, NULL, 'CANCELLED');
@@ -396,3 +431,61 @@ INSERT INTO referee_assignment (ref_assignment_id, race_id, referee_user_id, pan
         (SELECT user_id FROM app_user WHERE email='admin@horserace.local')),
     ('ffff0000-0000-0000-0000-000000000003', 'cccc0000-0000-0000-0000-000000000006', '55555555-5555-5555-5555-555555555555', 'CHIEF', 'CONFIRMED', CURRENT_TIMESTAMP - INTERVAL '21 days',
         (SELECT user_id FROM app_user WHERE email='admin@horserace.local'));
+
+-- =========================================================
+-- SEED DATA FOR WALLET SYSTEM
+-- =========================================================
+INSERT INTO wallet (wallet_id, user_id, balance, locked_balance, currency_code, status) VALUES
+    ('20000000-0000-0000-0000-000000000001', (SELECT user_id FROM app_user WHERE email='admin@horserace.local'), 0.00, 0.00, 'VND', 'ACTIVE'),
+    ('20000000-0000-0000-0000-000000000002', (SELECT user_id FROM app_user WHERE email='owner@horserace.local'), 10000000.00, 0.00, 'VND', 'ACTIVE'),
+    ('20000000-0000-0000-0000-000000000003', (SELECT user_id FROM app_user WHERE email='jane@horserace.local'), 500000.00, 0.00, 'VND', 'ACTIVE'),
+    ('20000000-0000-0000-0000-000000000004', (SELECT user_id FROM app_user WHERE email='maria@horserace.local'), 20000000.00, 0.00, 'VND', 'ACTIVE'),
+    ('20000000-0000-0000-0000-000000000005', (SELECT user_id FROM app_user WHERE email='khalid@horserace.local'), 30000000.00, 0.00, 'VND', 'ACTIVE');
+
+-- =========================================================
+-- SEED DATA FOR REWARD SYSTEM
+-- =========================================================
+INSERT INTO reward (reward_id, user_id, reward_type, amount, title, description, status) VALUES
+    ('10000000-0000-0000-0000-000000000001', (SELECT user_id FROM app_user WHERE email='jane@horserace.local'),
+        'DAILY_LOGIN', 50000.00, 'Daily Login Reward', 'Reward for logging in today.', 'PENDING'),
+    ('10000000-0000-0000-0000-000000000002', (SELECT user_id FROM app_user WHERE email='jane@horserace.local'),
+        'MILESTONE', 200000.00, '10th Prediction Milestone', 'Reward for placing 10 predictions.', 'CLAIMED');
+
+-- =========================================================
+-- FE-v2 Referee demo data — inspections, violations, result times + race telemetry
+-- so the Referee portal pages render rich content. Belmont Autumn Stakes = cccc1111
+-- (entries: eeee1111 Midnight Thunder, eeee3333 Sapphire Wind, eeee4444 Golden Arrow).
+-- =========================================================
+
+-- Pre-race inspections for Belmont's runners (varied states: CLEARED / VET_CHECK / PENDING).
+INSERT INTO race_entry_inspection (inspection_id, entry_id, race_id, health_cert_passed, weight_verified, weight_carried_lbs, coggins_test_passed, pre_race_exam_passed, inspection_status, steward_note, inspected_by_user_id, inspected_at) VALUES
+    ('a1a1a1a1-0000-0000-0000-000000000001', 'eeee1111-eeee-1111-eeee-111111111111', 'cccc1111-cccc-1111-cccc-111111111111',
+        TRUE, TRUE, 126, TRUE, TRUE, 'CLEARED', 'Sound on the trot-up. Cleared to race.', '55555555-5555-5555-5555-555555555555', CURRENT_TIMESTAMP - INTERVAL '40 minutes'),
+    ('a1a1a1a1-0000-0000-0000-000000000002', 'eeee3333-eeee-3333-eeee-333333333333', 'cccc1111-cccc-1111-cccc-111111111111',
+        FALSE, TRUE, 122, TRUE, FALSE, 'VET_CHECK', 'Acting fractious in the paddock — vet review requested.', '55555555-5555-5555-5555-555555555555', CURRENT_TIMESTAMP - INTERVAL '30 minutes'),
+    ('a1a1a1a1-0000-0000-0000-000000000003', 'eeee4444-eeee-4444-eeee-444444444444', 'cccc1111-cccc-1111-cccc-111111111111',
+        TRUE, FALSE, NULL, FALSE, FALSE, 'PENDING', NULL, NULL, NULL);
+
+-- Violations for Belmont (Violation Log + Inquiry Details): 2 pending + 1 resolved.
+INSERT INTO race_violation (violation_id, race_id, entry_id, jockey_user_id, infraction_type, severity, turn_no, race_time_offset_ms, remarks, regulatory_ref, status, reported_by_user_id) VALUES
+    ('b1b1b1b1-0000-0000-0000-000000000001', 'cccc1111-cccc-1111-cccc-111111111111', 'eeee3333-eeee-3333-eeee-333333333333', '11111111-1111-1111-1111-111111111111',
+        'WHIP_USAGE', 'CRITICAL', 3, 72040, 'Jockey appeared to strike the horse aggressively and repeatedly entering Turn 3, exceeding the operational limit.', 'Rule 4.2.1 - Whip Limitations', 'PENDING', '55555555-5555-5555-5555-555555555555'),
+    ('b1b1b1b1-0000-0000-0000-000000000002', 'cccc1111-cccc-1111-cccc-111111111111', 'eeee4444-eeee-4444-eeee-444444444444', NULL,
+        'INTERFERENCE', 'MEDIUM', 5, 105220, 'Impeded progress of a rival on the home stretch.', 'Rule 6.1 - Interference', 'PENDING', '55555555-5555-5555-5555-555555555555');
+INSERT INTO race_violation (violation_id, race_id, entry_id, jockey_user_id, infraction_type, severity, turn_no, race_time_offset_ms, remarks, regulatory_ref, status, reported_by_user_id, decision_type, ruling_notes, ruled_by_user_id, ruled_at) VALUES
+    ('b1b1b1b1-0000-0000-0000-000000000003', 'cccc1111-cccc-1111-cccc-111111111111', 'eeee1111-eeee-1111-eeee-111111111111', '22222222-2222-2222-2222-222222222222',
+        'BUMPING', 'LOW', 2, 40000, 'Minor contact at the start, no material effect.', 'Rule 6.3 - Bumping', 'RESOLVED', '55555555-5555-5555-5555-555555555555', 'WARNING', 'Warning issued; no change to the result.', '55555555-5555-5555-5555-555555555555', CURRENT_TIMESTAMP - INTERVAL '10 minutes');
+
+-- Finish times + margins for Belmont results (Results page shows real times instead of —).
+UPDATE race_result SET finish_time_ms = 94200, lengths_behind = 0.00 WHERE result_id = 'a0a0a0a0-0000-0000-0000-000000000001';
+UPDATE race_result SET finish_time_ms = 95050, lengths_behind = 6.50 WHERE result_id = 'a0a0a0a0-0000-0000-0000-000000000003';
+
+-- Race telemetry / photofinish for Belmont (Results conditions + Live monitor).
+UPDATE race SET wind_speed_kph = 12.40, wind_direction = 'NW', track_bias = 'Inside Rail Advantage',
+    photofinish_url = '/api/v1/files/photofinish-belmont.jpg', video_feed_url = 'https://stream.example/belmont.m3u8'
+  WHERE race_id = 'cccc1111-cccc-1111-cccc-111111111111';
+
+-- Digital-passport fields for Belmont's runners (Pre-Race Inspection passport panel).
+UPDATE horse SET microchip_no = '981020012345678', trainer_name = COALESCE(trainer_name, 'T. Pletcher') WHERE horse_id = 'aaaa1111-aaaa-1111-aaaa-111111111111';
+UPDATE horse SET microchip_no = '985112003456789', trainer_name = COALESCE(trainer_name, 'A. O''Brien') WHERE horse_id = 'aaaa3333-aaaa-3333-aaaa-333333333333';
+UPDATE horse SET microchip_no = '981020087654321', trainer_name = COALESCE(trainer_name, 'C. Appleby') WHERE horse_id = 'aaaa4444-aaaa-4444-aaaa-444444444444';
