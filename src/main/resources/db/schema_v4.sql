@@ -56,6 +56,7 @@ DROP TABLE IF EXISTS tournament               CASCADE;
 DROP TABLE IF EXISTS horse_characteristic     CASCADE;
 DROP TABLE IF EXISTS horse                    CASCADE;
 DROP TABLE IF EXISTS jockey_profile           CASCADE;
+DROP TABLE IF EXISTS membership_application    CASCADE;  -- FKs app_user: drop child before app_user
 DROP TABLE IF EXISTS app_user                 CASCADE;
 DROP TABLE IF EXISTS role                     CASCADE;
 DROP TABLE IF EXISTS reward                   CASCADE;
@@ -840,4 +841,48 @@ CREATE TABLE reward (
 
 CREATE INDEX idx_reward_user_id ON reward(user_id);
 CREATE INDEX idx_reward_status ON reward(status);
+
+-- =========================================================
+-- MEMBERSHIP_APPLICATION  (Referee Applicant Onboarding — Registration Approval, FE-v2)
+-- Dedicated dossier entity: a person applies for a role; a RACE_REFEREE reviews and
+-- approves/rejects/requests-info. Approve creates/activates an app_user.
+-- =========================================================
+CREATE TABLE membership_application (
+    application_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    application_code        VARCHAR(50) UNIQUE NOT NULL,           -- display id e.g. APP-8832
+    requested_role          VARCHAR(30) NOT NULL
+                            CHECK (requested_role IN ('OWNER','TRAINER','VET','JOCKEY')),
+    status                  VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+                            CHECK (status IN ('PENDING','UNDER_REVIEW','INFO_REQUESTED','APPROVED','REJECTED')),
+    priority                VARCHAR(30)
+                            CHECK (priority IS NULL OR priority IN ('URGENT','NORMAL')),
+    full_name               VARCHAR(255) NOT NULL,
+    date_of_birth           DATE,
+    tax_id                  VARCHAR(100),                          -- PII: store plain in dev; TODO encrypt at rest (prod)
+    email                   VARCHAR(255) NOT NULL,
+    phone                   VARCHAR(30),
+    avatar_url              TEXT,
+    location                VARCHAR(255),
+    org_name                VARCHAR(255),
+    id_verification_status  VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+                            CHECK (id_verification_status IN ('VALID','PENDING','FAILED')),
+    id_document_ref         VARCHAR(255),                          -- PII: e.g. passport no.; TODO encrypt at rest (prod)
+    license_class           VARCHAR(100),
+    license_status          VARCHAR(30)
+                            CHECK (license_status IS NULL OR license_status IN ('ACTIVE','EXPIRED','NONE')),
+    license_valid_until     DATE,
+    background_check_status VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+                            CHECK (background_check_status IN ('PASSED','PENDING','FAILED')),
+    submitted_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at             TIMESTAMPTZ,
+    reviewed_by_user_id     UUID REFERENCES app_user(user_id),
+    rejection_reason        TEXT,
+    requested_info_note     TEXT,
+    created_user_id         UUID REFERENCES app_user(user_id),     -- set when Approve & Onboard creates the account
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_membership_application_status ON membership_application(status);
+CREATE INDEX idx_membership_application_email ON membership_application(email);
+CREATE INDEX idx_membership_application_reviewed_at ON membership_application(reviewed_at);
 

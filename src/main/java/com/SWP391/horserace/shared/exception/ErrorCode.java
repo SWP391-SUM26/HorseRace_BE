@@ -133,7 +133,13 @@ public enum ErrorCode {
 
     // ---- attachments (FE-v2 §6) ----
     ATTACHMENT_INVALID_OWNER_TYPE(9701, "Invalid ownerEntityType. Allowed: RACE_RESULT, VIOLATION, RACE", HttpStatus.BAD_REQUEST),
-    ATTACHMENT_INVALID_SENSITIVITY(9702, "Invalid sensitivityLevel. Allowed: PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED", HttpStatus.BAD_REQUEST);
+    ATTACHMENT_INVALID_SENSITIVITY(9702, "Invalid sensitivityLevel. Allowed: PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED", HttpStatus.BAD_REQUEST),
+
+    // ---- referee applicant onboarding (FE-v2 Registration Approval) ----
+    APPLICATION_NOT_FOUND(9301, "Membership application not found", HttpStatus.NOT_FOUND),
+    APPLICATION_ALREADY_DECIDED(9302, "Application has already been decided", HttpStatus.BAD_REQUEST),
+    APPLICATION_INVALID_STATUS(9303, "Invalid status transition for this application", HttpStatus.BAD_REQUEST),
+    APPLICATION_ROLE_NOT_FOUND(9304, "Target role for the requested role mapping was not found", HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final int code;
     private final String message;
