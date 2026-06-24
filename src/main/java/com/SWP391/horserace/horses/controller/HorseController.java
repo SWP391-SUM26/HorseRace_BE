@@ -45,11 +45,12 @@ public class HorseController {
 
     /** GET /api/v1/horses — list with search (q), filters, sort and pagination. */
     @GetMapping
-    public ApiResponse<Page<HorseResponse>> listHorses(@ModelAttribute HorseFilterRequest filter) {
+    public ApiResponse<Page<HorseResponse>> listHorses(@ModelAttribute HorseFilterRequest filter,
+                                                       @AuthenticationPrincipal UUID userId) {
         return ApiResponse.<Page<HorseResponse>>builder()
                 .success(true)
                 .message("Fetched horses")
-                .data(horseService.listHorses(filter))
+                .data(horseService.listHorses(filter, userId))
                 .build();
     }
 

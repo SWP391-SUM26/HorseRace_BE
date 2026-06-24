@@ -18,6 +18,7 @@ public class RegistrationFilterRequest {
     private UUID tournamentId;
     private UUID horseId;
     private UUID ownerUserId;
+    private String category; // FE-v2 Registration Management (mục 8): category filter
 
     private String sortBy; // submittedAt, reviewedAt, registrationCode, status, createdAt
     private String sortDir; // asc / desc

@@ -30,6 +30,13 @@ public class HorseResponse {
     private String registrationStatus;
     private HorseStatus status;
     private String imageUrl;
+
+    // ── FE-v2 Registration Management (mục 8): eligibility checklist ──
+    private boolean fitnessCertified;
+    private OffsetDateTime fitnessCertExpiresAt;
+    private String passportScanStatus;
+    private LocalDate cogginsTestDate;
+
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

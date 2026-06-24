@@ -119,7 +119,31 @@ public enum ErrorCode {
     REWARD_NOT_FOUND(9201, "Reward not found", HttpStatus.NOT_FOUND),
     REWARD_ALREADY_CLAIMED(9202, "Reward has already been claimed", HttpStatus.BAD_REQUEST),
     REWARD_EXPIRED(9203, "Reward has expired", HttpStatus.BAD_REQUEST),
-    NOT_REWARD_OWNER(9204, "You do not own this reward", HttpStatus.FORBIDDEN);
+    NOT_REWARD_OWNER(9204, "You do not own this reward", HttpStatus.FORBIDDEN),
+
+    // ---- pre-race inspection (FE-v2 §2) ----
+    INSPECTION_ENTRY_RACE_MISMATCH(9401, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+    INSPECTION_CONFIRM_REQUIRED(9402, "Submission must be confirmed", HttpStatus.BAD_REQUEST),
+
+    // ---- results record/read/edit/certify (FE-v2 §5) ----
+    RESULT_NOT_FOUND(9501, "Race result not found", HttpStatus.NOT_FOUND),
+    RESULT_INQUIRIES_UNRESOLVED(9502, "All inquiries must be resolved before certification", HttpStatus.BAD_REQUEST),
+    RESULT_ENTRY_RACE_MISMATCH(9503, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+
+    // ---- violations / inquiries (FE-v2 §3) ----
+    VIOLATION_NOT_FOUND(9601, "Violation not found", HttpStatus.NOT_FOUND),
+    VIOLATION_ENTRY_RACE_MISMATCH(9602, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+    VIOLATION_ALREADY_RULED(9603, "This violation has already been ruled on", HttpStatus.BAD_REQUEST),
+
+    // ---- attachments (FE-v2 §6) ----
+    ATTACHMENT_INVALID_OWNER_TYPE(9701, "Invalid ownerEntityType. Allowed: RACE_RESULT, VIOLATION, RACE", HttpStatus.BAD_REQUEST),
+    ATTACHMENT_INVALID_SENSITIVITY(9702, "Invalid sensitivityLevel. Allowed: PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED", HttpStatus.BAD_REQUEST),
+
+    // ---- referee applicant onboarding (FE-v2 Registration Approval) ----
+    APPLICATION_NOT_FOUND(9301, "Membership application not found", HttpStatus.NOT_FOUND),
+    APPLICATION_ALREADY_DECIDED(9302, "Application has already been decided", HttpStatus.BAD_REQUEST),
+    APPLICATION_INVALID_STATUS(9303, "Invalid status transition for this application", HttpStatus.BAD_REQUEST),
+    APPLICATION_ROLE_NOT_FOUND(9304, "Target role for the requested role mapping was not found", HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final int code;
     private final String message;

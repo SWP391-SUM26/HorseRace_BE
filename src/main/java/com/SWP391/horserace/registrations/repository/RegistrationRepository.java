@@ -31,15 +31,23 @@ public interface RegistrationRepository
             + "WHERE r.registrationId = :id")
     Optional<TournamentRegistration> findByIdWithDetails(@Param("id") UUID id);
 
-    /**
-     * Counts a tournament's registrations grouped by status.
-     * Returns rows of {@code [RegistrationStatus, Long]} for the tournament's non-empty status buckets.
-     */
-    @Query("SELECT r.status, COUNT(r) FROM TournamentRegistration r "
-            + "WHERE r.tournament.tournamentId = :tournamentId "
-            + "GROUP BY r.status")
-    List<Object[]> countGroupByStatusForTournament(@Param("tournamentId") UUID tournamentId);
-
-    /** Count of APPROVED (i.e. registered/confirmed) entries for a tournament — surfaced in TournamentResponse. */
+    /** Count of APPROVED (i.e. registered/confirmed) entries for a tournament — surfaced in TournamentResponse (§C4). */
     long countByTournament_TournamentIdAndStatus(UUID tournamentId, RegistrationStatus status);
+
+    // ---- KPI aggregate (FE-v2 §7 registration stats) ----
+
+    /** Status -> count over all registrations (used to build the KPI aggregate). */
+    @Query("SELECT r.status AS status, COUNT(r) AS cnt FROM TournamentRegistration r GROUP BY r.status")
+    List<StatusCount> countGroupByStatus();
+
+    /** Status -> count scoped to a single tournament. */
+    @Query("SELECT r.status AS status, COUNT(r) AS cnt FROM TournamentRegistration r "
+            + "WHERE r.tournament.tournamentId = :tournamentId GROUP BY r.status")
+    List<StatusCount> countGroupByStatusForTournament(@Param("tournamentId") UUID tournamentId);
+
+    /** Projection row for the group-by-status KPI query. */
+    interface StatusCount {
+        RegistrationStatus getStatus();
+        long getCnt();
+    }
 }

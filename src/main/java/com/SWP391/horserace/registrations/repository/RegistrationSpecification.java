@@ -44,6 +44,9 @@ public final class RegistrationSpecification {
             if (f.getOwnerUserId() != null) {
                 predicates.add(cb.equal(root.get("owner").get("userId"), f.getOwnerUserId()));
             }
+            if (f.getCategory() != null && !f.getCategory().isBlank()) {
+                predicates.add(cb.equal(root.get("category"), f.getCategory().trim()));
+            }
 
             return cb.and(predicates.toArray(new Predicate[0]));
         };

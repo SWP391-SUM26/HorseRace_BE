@@ -38,15 +38,18 @@ DROP TABLE IF EXISTS wallet_transaction       CASCADE;
 DROP TABLE IF EXISTS payment_transaction      CASCADE;
 DROP TABLE IF EXISTS wallet                   CASCADE;
 DROP TABLE IF EXISTS standing                 CASCADE;
+DROP TABLE IF EXISTS race_violation           CASCADE;
 DROP TABLE IF EXISTS penalty                  CASCADE;
 DROP TABLE IF EXISTS referee_report           CASCADE;
 DROP TABLE IF EXISTS race_result_version      CASCADE;
 DROP TABLE IF EXISTS race_result              CASCADE;
 DROP TABLE IF EXISTS referee_assignment       CASCADE;
 DROP TABLE IF EXISTS jockey_assignment        CASCADE;
+DROP TABLE IF EXISTS race_entry_inspection    CASCADE;
 DROP TABLE IF EXISTS race_entry               CASCADE;
 DROP TABLE IF EXISTS tournament_registration  CASCADE;
 DROP TABLE IF EXISTS race_prize_distribution   CASCADE;
+DROP TABLE IF EXISTS race_fraction            CASCADE;
 DROP TABLE IF EXISTS tournament_venue         CASCADE;  -- child of tournament + venue
 DROP TABLE IF EXISTS race                     CASCADE;  -- FKs venue -> drop before venue
 DROP TABLE IF EXISTS tournament_round         CASCADE;
@@ -55,6 +58,7 @@ DROP TABLE IF EXISTS venue                    CASCADE;  -- after race + tourname
 DROP TABLE IF EXISTS horse_characteristic     CASCADE;
 DROP TABLE IF EXISTS horse                    CASCADE;
 DROP TABLE IF EXISTS jockey_profile           CASCADE;
+DROP TABLE IF EXISTS membership_application    CASCADE;  -- FKs app_user: drop child before app_user
 DROP TABLE IF EXISTS app_user                 CASCADE;
 DROP TABLE IF EXISTS role                     CASCADE;
 DROP TABLE IF EXISTS reward                   CASCADE;
@@ -232,6 +236,12 @@ CREATE TABLE horse (
     trainer_license_no      VARCHAR(100),
     vaccinations_up_to_date BOOLEAN NOT NULL DEFAULT FALSE,
     recovery_percent        INT CHECK (recovery_percent IS NULL OR (recovery_percent BETWEEN 0 AND 100)),
+    -- FE-v2 Registration Management (mục 8): eligibility checklist (fitness / passport / Coggins)
+    fitness_certified       BOOLEAN NOT NULL DEFAULT FALSE,
+    fitness_cert_expires_at TIMESTAMPTZ,
+    passport_scan_status    VARCHAR(20)
+                            CHECK (passport_scan_status IS NULL OR passport_scan_status IN ('VALID', 'MISSING')),
+    coggins_test_date       DATE,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_deleted          BOOLEAN NOT NULL DEFAULT FALSE,
@@ -344,6 +354,15 @@ CREATE TABLE race (
     venue_id             UUID REFERENCES venue(venue_id),  -- §D1 structured venue FK (nullable)
     going_moisture_pct   INT CHECK (going_moisture_pct IS NULL OR (going_moisture_pct BETWEEN 0 AND 100)),
     total_purse          NUMERIC(18,2),
+    -- FE-v2 Results + Certify (mục 5): telemetry / photofinish / certification.
+    wind_speed_kph       NUMERIC(5,2),
+    wind_direction       VARCHAR(10),                                 -- FE-v2 Live monitor (mục 4)
+    track_bias           VARCHAR(50),
+    photofinish_url      TEXT,
+    video_feed_url       TEXT,
+    certified_by_user_id UUID REFERENCES app_user(user_id),
+    certified_at         TIMESTAMPTZ,
+    stewards_report      TEXT,
     status               VARCHAR(50) NOT NULL DEFAULT 'SCHEDULED'
                          CHECK (status IN ('SCHEDULED', 'OPEN', 'CLOSED', 'RUNNING',
                                            'FINISHED', 'OFFICIAL', 'CANCELLED')),
@@ -359,6 +378,14 @@ CREATE TABLE race_prize_distribution (
     race_id  UUID NOT NULL REFERENCES race(race_id),
     place    VARCHAR(20) NOT NULL,
     amount   NUMERIC(18,2) NOT NULL
+);
+
+-- Split (fraction) times per race — FE-v2 Results (mục 5). @ElementCollection child of race.
+CREATE TABLE race_fraction (
+    race_id  UUID NOT NULL REFERENCES race(race_id),
+    split_no INT NOT NULL,
+    time_ms  BIGINT NOT NULL,
+    PRIMARY KEY (race_id, split_no)
 );
 
 -- =========================================================
@@ -379,6 +406,7 @@ CREATE TABLE tournament_registration (
     approved_by_user_id UUID REFERENCES app_user(user_id),
     rejection_reason    TEXT,
     legal_basis_ref     VARCHAR(255),
+    category            VARCHAR(50),                            -- FE-v2 Registration Management (mục 8): category filter
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tournament_id, horse_id)   -- 1 ngựa đăng ký 1 giải chỉ 1 lần
@@ -406,6 +434,27 @@ CREATE TABLE race_entry (
     UNIQUE (race_id, registration_id),  -- 1 đăng ký vào 1 cuộc đua chỉ 1 lần
     UNIQUE (race_id, lane_no),          -- không trùng làn
     UNIQUE (race_id, entry_no)          -- không trùng số áo
+);
+
+-- =========================================================
+-- RACE ENTRY INSPECTION  (pre-race clearance per entry — FE-v2 §2)
+-- =========================================================
+CREATE TABLE race_entry_inspection (
+    inspection_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entry_id             UUID NOT NULL UNIQUE REFERENCES race_entry(entry_id),
+    race_id              UUID NOT NULL REFERENCES race(race_id),
+    health_cert_passed   BOOLEAN NOT NULL DEFAULT FALSE,
+    weight_verified      BOOLEAN NOT NULL DEFAULT FALSE,
+    weight_carried_lbs   INT,
+    coggins_test_passed  BOOLEAN NOT NULL DEFAULT FALSE,
+    pre_race_exam_passed BOOLEAN NOT NULL DEFAULT FALSE,
+    inspection_status    VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+                         CHECK (inspection_status IN ('CLEARED','PENDING','VET_CHECK')),
+    steward_note         TEXT,
+    inspected_by_user_id UUID REFERENCES app_user(user_id),
+    inspected_at         TIMESTAMPTZ,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
@@ -451,6 +500,7 @@ CREATE TABLE race_result (
     entry_id            UUID NOT NULL UNIQUE REFERENCES race_entry(entry_id),  -- 1 kết quả / entry
     finish_position     INT CHECK (finish_position IS NULL OR finish_position > 0),
     finish_time_ms      BIGINT CHECK (finish_time_ms IS NULL OR finish_time_ms >= 0),
+    lengths_behind      NUMERIC(6,2),  -- FE-v2 Results (mục 5): finish margin
     score               NUMERIC(10,2),
     current_version_no  INT NOT NULL DEFAULT 1 CHECK (current_version_no > 0),
     officiality_status  VARCHAR(50) NOT NULL DEFAULT 'PROVISIONAL'
@@ -517,6 +567,35 @@ CREATE TABLE penalty (
                    CHECK (status IN ('ISSUED', 'UPHELD', 'OVERTURNED', 'CANCELLED')),
     created_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================
+-- RACE VIOLATION  (FE-v2 §3) -- structured violations / inquiries + official ruling
+-- FKs penalty + race_entry + race, so it is dropped first and created after penalty.
+-- =========================================================
+CREATE TABLE race_violation (
+    violation_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    race_id             UUID NOT NULL REFERENCES race(race_id),
+    entry_id            UUID REFERENCES race_entry(entry_id),
+    jockey_user_id      UUID REFERENCES app_user(user_id),
+    infraction_type     VARCHAR(50) NOT NULL
+                        CHECK (infraction_type IN ('BUMPING','INTERFERENCE','WHIP_USAGE','CROWDING','OTHER')),
+    severity            VARCHAR(50) CHECK (severity IS NULL OR severity IN ('LOW','MEDIUM','HIGH','CRITICAL')),
+    turn_no             INT,
+    race_time_offset_ms BIGINT,
+    remarks             TEXT,
+    regulatory_ref      VARCHAR(255),
+    footage_attachment_id UUID,
+    status              VARCHAR(50) NOT NULL DEFAULT 'PENDING'
+                        CHECK (status IN ('PENDING','UNDER_REVIEW','RESOLVED','DISMISSED')),
+    reported_by_user_id UUID REFERENCES app_user(user_id),
+    penalty_id          UUID REFERENCES penalty(penalty_id),
+    decision_type       VARCHAR(50),
+    ruling_notes        TEXT,
+    ruled_by_user_id    UUID REFERENCES app_user(user_id),
+    ruled_at            TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
@@ -798,4 +877,48 @@ CREATE TABLE reward (
 
 CREATE INDEX idx_reward_user_id ON reward(user_id);
 CREATE INDEX idx_reward_status ON reward(status);
+
+-- =========================================================
+-- MEMBERSHIP_APPLICATION  (Referee Applicant Onboarding — Registration Approval, FE-v2)
+-- Dedicated dossier entity: a person applies for a role; a RACE_REFEREE reviews and
+-- approves/rejects/requests-info. Approve creates/activates an app_user.
+-- =========================================================
+CREATE TABLE membership_application (
+    application_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    application_code        VARCHAR(50) UNIQUE NOT NULL,           -- display id e.g. APP-8832
+    requested_role          VARCHAR(30) NOT NULL
+                            CHECK (requested_role IN ('OWNER','TRAINER','VET','JOCKEY')),
+    status                  VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+                            CHECK (status IN ('PENDING','UNDER_REVIEW','INFO_REQUESTED','APPROVED','REJECTED')),
+    priority                VARCHAR(30)
+                            CHECK (priority IS NULL OR priority IN ('URGENT','NORMAL')),
+    full_name               VARCHAR(255) NOT NULL,
+    date_of_birth           DATE,
+    tax_id                  VARCHAR(100),                          -- PII: store plain in dev; TODO encrypt at rest (prod)
+    email                   VARCHAR(255) NOT NULL,
+    phone                   VARCHAR(30),
+    avatar_url              TEXT,
+    location                VARCHAR(255),
+    org_name                VARCHAR(255),
+    id_verification_status  VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+                            CHECK (id_verification_status IN ('VALID','PENDING','FAILED')),
+    id_document_ref         VARCHAR(255),                          -- PII: e.g. passport no.; TODO encrypt at rest (prod)
+    license_class           VARCHAR(100),
+    license_status          VARCHAR(30)
+                            CHECK (license_status IS NULL OR license_status IN ('ACTIVE','EXPIRED','NONE')),
+    license_valid_until     DATE,
+    background_check_status VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+                            CHECK (background_check_status IN ('PASSED','PENDING','FAILED')),
+    submitted_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at             TIMESTAMPTZ,
+    reviewed_by_user_id     UUID REFERENCES app_user(user_id),
+    rejection_reason        TEXT,
+    requested_info_note     TEXT,
+    created_user_id         UUID REFERENCES app_user(user_id),     -- set when Approve & Onboard creates the account
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_membership_application_status ON membership_application(status);
+CREATE INDEX idx_membership_application_email ON membership_application(email);
+CREATE INDEX idx_membership_application_reviewed_at ON membership_application(reviewed_at);
 

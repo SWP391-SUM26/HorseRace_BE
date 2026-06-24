@@ -131,6 +131,22 @@ public class Horse {
     @Column(name = "recovery_percent")
     private Integer recoveryPercent;
 
+    // ── FE-v2 Registration Management (mục 8): eligibility checklist ──
+
+    @Column(name = "fitness_certified", nullable = false)
+    @Builder.Default
+    private boolean fitnessCertified = false;
+
+    @Column(name = "fitness_cert_expires_at")
+    private OffsetDateTime fitnessCertExpiresAt;
+
+    /** VALID | MISSING (null = unknown). */
+    @Column(name = "passport_scan_status", length = 20)
+    private String passportScanStatus;
+
+    @Column(name = "coggins_test_date")
+    private LocalDate cogginsTestDate;
+
     @ElementCollection
     @CollectionTable(name = "horse_characteristic", joinColumns = @JoinColumn(name = "horse_id"))
     @Column(name = "tag")

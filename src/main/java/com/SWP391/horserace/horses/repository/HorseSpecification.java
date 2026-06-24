@@ -7,6 +7,7 @@ import org.springframework.data.jpa.domain.Specification;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Builds a dynamic WHERE clause from {@link HorseFilterRequest}. Always restricts to non-deleted
@@ -17,7 +18,11 @@ public final class HorseSpecification {
 
     private HorseSpecification() { /* utility */ }
 
-    public static Specification<Horse> withFilters(HorseFilterRequest f) {
+    /**
+     * @param ownerUserId already-resolved owner id (the {@code ?ownerUserId=me} sentinel is
+     *                    resolved to the caller's id in the service before this is built); may be null.
+     */
+    public static Specification<Horse> withFilters(HorseFilterRequest f, UUID ownerUserId) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.isFalse(root.get("deleted")));
@@ -38,8 +43,8 @@ public final class HorseSpecification {
             if (f.getBreed() != null && !f.getBreed().isBlank()) {
                 predicates.add(cb.like(cb.lower(root.get("breed")), "%" + f.getBreed().trim().toLowerCase() + "%"));
             }
-            if (f.getOwnerUserId() != null) {
-                predicates.add(cb.equal(root.get("owner").get("userId"), f.getOwnerUserId()));
+            if (ownerUserId != null) {
+                predicates.add(cb.equal(root.get("owner").get("userId"), ownerUserId));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));
