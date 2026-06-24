@@ -206,7 +206,12 @@ UPDATE horse SET
     sire_name = 'Storm King', sire_wins = 24, sire_earnings = 4200000.00,
     dam_name = 'Ebony Queen', dam_wins = 12, dam_note = 'Grade 1 Winner',
     trainer_name = 'Marcus Sterling', trainer_license_no = '992',
-    vaccinations_up_to_date = TRUE, recovery_percent = NULL
+    vaccinations_up_to_date = TRUE, recovery_percent = NULL,
+    -- FE-v2 Registration Management (mục 8): eligibility checklist
+    fitness_certified = TRUE,
+    fitness_cert_expires_at = CURRENT_TIMESTAMP + INTERVAL '180 days',
+    passport_scan_status = 'VALID',
+    coggins_test_date = CURRENT_DATE - INTERVAL '90 days'
   WHERE horse_id = 'aaaa1111-aaaa-1111-aaaa-111111111111';
 
 UPDATE horse SET
@@ -215,7 +220,12 @@ UPDATE horse SET
     sire_name = 'Desert Mirage', sire_wins = 18, sire_earnings = 2100000.00,
     dam_name = 'Silver Lining', dam_wins = 7, dam_note = 'Multiple stakes placed',
     trainer_name = 'Aisha Rahman', trainer_license_no = '1187',
-    vaccinations_up_to_date = TRUE, recovery_percent = 80
+    vaccinations_up_to_date = TRUE, recovery_percent = 80,
+    -- FE-v2 Registration Management (mục 8): eligibility checklist (passport pending)
+    fitness_certified = FALSE,
+    fitness_cert_expires_at = NULL,
+    passport_scan_status = 'MISSING',
+    coggins_test_date = CURRENT_DATE - INTERVAL '200 days'
   WHERE horse_id = 'aaaa2222-aaaa-2222-aaaa-222222222222';
 
 -- Characteristic tags (@ElementCollection)
@@ -230,6 +240,20 @@ INSERT INTO horse_characteristic (horse_id, tag) VALUES
 UPDATE race_entry SET prize_earned = 1200000.00 WHERE entry_id = 'eeee1111-eeee-1111-eeee-111111111111'; -- ENT-001 Midnight Thunder
 UPDATE race_entry SET prize_earned =  450000.00 WHERE entry_id = 'eeee2222-eeee-2222-eeee-222222222222'; -- ENT-002 Silver Bullet
 UPDATE race_entry SET prize_earned =  150000.00 WHERE entry_id = 'eeee3333-eeee-3333-eeee-333333333333'; -- ENT-003 Sapphire Wind
+
+-- FE-v2 Registration Management (mục 8): registration category (drives the category filter)
+UPDATE tournament_registration SET category = 'GROUP_1' WHERE registration_id = 'dddd1111-dddd-1111-dddd-111111111111';
+UPDATE tournament_registration SET category = 'GROUP_2' WHERE registration_id = 'dddd2222-dddd-2222-dddd-222222222222';
+UPDATE tournament_registration SET category = 'GROUP_1' WHERE registration_id = 'dddd3333-dddd-3333-dddd-333333333333';
+UPDATE tournament_registration SET category = 'HANDICAP' WHERE registration_id = 'dddd4444-dddd-4444-dddd-444444444444';
+
+-- FE-v2 Live monitor (mục 4): telemetry + clock on Race 1 so GET /races/{id}/live shows real data.
+UPDATE race SET
+    actual_start_at = CURRENT_TIMESTAMP - INTERVAL '90 seconds',
+    wind_speed_kph  = 12.40,
+    wind_direction  = 'NW',
+    video_feed_url  = 'https://stream.example/race-1.m3u8'
+  WHERE race_id = 'cccc1111-cccc-1111-cccc-111111111111';
 
 -- Race results (drive starts/wins/top3 in GET /horses/{id}/stats)
 INSERT INTO race_result (result_id, race_id, entry_id, finish_position, current_version_no, officiality_status, published_at) VALUES

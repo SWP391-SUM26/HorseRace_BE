@@ -116,6 +116,28 @@ class HorseServiceImplTest {
     }
 
     @Test
+    void getById_mapsEligibilityFields() {
+        UUID id = UUID.randomUUID();
+        java.time.OffsetDateTime expires = java.time.OffsetDateTime.now().plusDays(180);
+        java.time.LocalDate coggins = java.time.LocalDate.now().minusDays(90);
+        Horse horse = Horse.builder()
+                .horseId(id).owner(owner).horseCode("HRS0001").name("Midnight Thunder")
+                .fitnessCertified(true)
+                .fitnessCertExpiresAt(expires)
+                .passportScanStatus("VALID")
+                .cogginsTestDate(coggins)
+                .build();
+        when(horseRepository.findByHorseIdAndDeletedFalse(id)).thenReturn(Optional.of(horse));
+
+        HorseResponse res = service.getHorseById(id);
+
+        assertThat(res.isFitnessCertified()).isTrue();
+        assertThat(res.getFitnessCertExpiresAt()).isEqualTo(expires);
+        assertThat(res.getPassportScanStatus()).isEqualTo("VALID");
+        assertThat(res.getCogginsTestDate()).isEqualTo(coggins);
+    }
+
+    @Test
     void update_byNonOwnerNonAdmin_rejected() {
         UUID id = UUID.randomUUID();
         Horse horse = Horse.builder().horseId(id).owner(owner).name("x").build();

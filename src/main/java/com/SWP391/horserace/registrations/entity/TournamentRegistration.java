@@ -73,6 +73,10 @@ public class TournamentRegistration {
     @Column(name = "legal_basis_ref")
     private String legalBasisRef;
 
+    /** FE-v2 Registration Management (mục 8): category filter, e.g. "GROUP_1". */
+    @Column(name = "category", length = 50)
+    private String category;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private OffsetDateTime createdAt;

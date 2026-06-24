@@ -108,7 +108,25 @@ public enum ErrorCode {
 
     // ---- referee management ----
     REPORT_NOT_FOUND(9101, "Referee report not found", HttpStatus.NOT_FOUND),
-    REPORT_INVALID_STATUS(9102, "Invalid status transition for this report", HttpStatus.BAD_REQUEST);
+    REPORT_INVALID_STATUS(9102, "Invalid status transition for this report", HttpStatus.BAD_REQUEST),
+
+    // ---- pre-race inspection (FE-v2 §2) ----
+    INSPECTION_ENTRY_RACE_MISMATCH(9401, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+    INSPECTION_CONFIRM_REQUIRED(9402, "Submission must be confirmed", HttpStatus.BAD_REQUEST),
+
+    // ---- results record/read/edit/certify (FE-v2 §5) ----
+    RESULT_NOT_FOUND(9501, "Race result not found", HttpStatus.NOT_FOUND),
+    RESULT_INQUIRIES_UNRESOLVED(9502, "All inquiries must be resolved before certification", HttpStatus.BAD_REQUEST),
+    RESULT_ENTRY_RACE_MISMATCH(9503, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+
+    // ---- violations / inquiries (FE-v2 §3) ----
+    VIOLATION_NOT_FOUND(9601, "Violation not found", HttpStatus.NOT_FOUND),
+    VIOLATION_ENTRY_RACE_MISMATCH(9602, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+    VIOLATION_ALREADY_RULED(9603, "This violation has already been ruled on", HttpStatus.BAD_REQUEST),
+
+    // ---- attachments (FE-v2 §6) ----
+    ATTACHMENT_INVALID_OWNER_TYPE(9701, "Invalid ownerEntityType. Allowed: RACE_RESULT, VIOLATION, RACE", HttpStatus.BAD_REQUEST),
+    ATTACHMENT_INVALID_SENSITIVITY(9702, "Invalid sensitivityLevel. Allowed: PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

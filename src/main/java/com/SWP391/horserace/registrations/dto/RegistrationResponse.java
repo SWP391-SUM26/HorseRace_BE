@@ -27,6 +27,9 @@ public class RegistrationResponse {
     private UUID raceId;
     private String raceName;
 
+    /** FE-v2 Registration Management (mục 8): category filter. */
+    private String category;
+
     private OffsetDateTime submittedAt;
     private OffsetDateTime reviewedAt;
     private UUID approvedByUserId;

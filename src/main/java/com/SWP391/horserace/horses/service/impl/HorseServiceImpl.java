@@ -444,6 +444,10 @@ public class HorseServiceImpl implements HorseService {
                 .registrationStatus(h.getRegistrationStatus())
                 .status(h.getStatus())
                 .imageUrl(h.getImageUrl())
+                .fitnessCertified(h.isFitnessCertified())
+                .fitnessCertExpiresAt(h.getFitnessCertExpiresAt())
+                .passportScanStatus(h.getPassportScanStatus())
+                .cogginsTestDate(h.getCogginsTestDate())
                 .createdAt(h.getCreatedAt())
                 .updatedAt(h.getUpdatedAt())
                 .build();

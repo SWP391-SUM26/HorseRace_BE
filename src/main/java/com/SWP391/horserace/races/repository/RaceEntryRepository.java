@@ -30,6 +30,18 @@ public interface RaceEntryRepository extends JpaRepository<RaceEntry, UUID> {
     java.util.List<RaceEntry> findByRace_RaceId(UUID raceId);
 
     /**
+     * All entries in a race with registration + horse eagerly fetched. Used by the pre-race
+     * inspection list to build horseId/horseName per entry without lazy-loading (FE-v2 §2).
+     */
+    @Query("""
+        SELECT re FROM RaceEntry re
+          JOIN FETCH re.registration r
+          JOIN FETCH r.horse h
+         WHERE re.race.raceId = :raceId
+        """)
+    java.util.List<RaceEntry> findByRaceIdWithHorse(@Param("raceId") UUID raceId);
+
+    /**
      * The entry in a race that belongs to a specific owner (via its registration), with
      * registration, horse, and owner eagerly fetched. Used for the owner's "Your Horse Status" card.
      */
