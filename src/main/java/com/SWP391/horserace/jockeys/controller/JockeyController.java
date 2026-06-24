@@ -1,14 +1,20 @@
 package com.SWP391.horserace.jockeys.controller;
 
+import com.SWP391.horserace.jockeys.dto.InvitationInsightsResponse;
 import com.SWP391.horserace.jockeys.dto.JockeyFilterRequest;
 import com.SWP391.horserace.jockeys.dto.JockeyResponse;
+import com.SWP391.horserace.jockeys.dto.JockeyStatsResponse;
+import com.SWP391.horserace.jockeys.dto.UpdateJockeyProfileRequest;
 import com.SWP391.horserace.jockeys.service.JockeyService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -91,6 +97,41 @@ public class JockeyController {
                 .success(true)
                 .message("Paginated jockeys")
                 .data(jockeyService.getJockeysPaginated(page, size, sortBy, sortDir))
+                .build();
+    }
+
+    /**
+     * PUT /api/v1/jockeys/me — partial update of the caller's own jockey profile
+     * (FE-v2 jockey contract #8). Caller resolved from the JWT principal.
+     */
+    @PutMapping("/me")
+    public ApiResponse<JockeyResponse> updateMyProfile(
+            @AuthenticationPrincipal UUID userId,
+            @RequestBody UpdateJockeyProfileRequest request) {
+        return ApiResponse.<JockeyResponse>builder()
+                .success(true)
+                .message("Profile updated")
+                .data(jockeyService.updateMyProfile(userId, request))
+                .build();
+    }
+
+    /** GET /api/v1/jockeys/me/stats — aggregated performance + earnings (FE-v2 jockey contract #1). */
+    @GetMapping("/me/stats")
+    public ApiResponse<JockeyStatsResponse> getMyStats(@AuthenticationPrincipal UUID userId) {
+        return ApiResponse.<JockeyStatsResponse>builder()
+                .success(true)
+                .message("Fetched jockey stats")
+                .data(jockeyService.getMyStats(userId))
+                .build();
+    }
+
+    /** GET /api/v1/jockeys/me/invitation-insights — invitation analytics (FE-v2 jockey contract #11). */
+    @GetMapping("/me/invitation-insights")
+    public ApiResponse<InvitationInsightsResponse> getMyInvitationInsights(@AuthenticationPrincipal UUID userId) {
+        return ApiResponse.<InvitationInsightsResponse>builder()
+                .success(true)
+                .message("Fetched invitation insights")
+                .data(jockeyService.getMyInvitationInsights(userId))
                 .build();
     }
 

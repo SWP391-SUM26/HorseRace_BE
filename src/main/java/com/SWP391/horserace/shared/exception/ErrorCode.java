@@ -52,6 +52,7 @@ public enum ErrorCode {
     NOT_INVITATION_OWNER(2008, "You are not the owner who sent this invitation", HttpStatus.FORBIDDEN),
     NOT_INVITED_JOCKEY(2009, "You are not the jockey invited for this assignment", HttpStatus.FORBIDDEN),
     OWNER_NOT_MATCH(2010, "You are not the owner of this horse entry", HttpStatus.FORBIDDEN),
+    INVITATION_NOT_ACCEPTED(2011, "Only ACCEPTED rides can be withdrawn", HttpStatus.BAD_REQUEST),
 
     // ---- tournament ----
     TOURNAMENT_NOT_FOUND(3001, "Tournament not found", HttpStatus.NOT_FOUND),
@@ -108,7 +109,13 @@ public enum ErrorCode {
 
     // ---- referee management ----
     REPORT_NOT_FOUND(9101, "Referee report not found", HttpStatus.NOT_FOUND),
-    REPORT_INVALID_STATUS(9102, "Invalid status transition for this report", HttpStatus.BAD_REQUEST);
+    REPORT_INVALID_STATUS(9102, "Invalid status transition for this report", HttpStatus.BAD_REQUEST),
+
+    // ---- reward system ----
+    REWARD_NOT_FOUND(9201, "Reward not found", HttpStatus.NOT_FOUND),
+    REWARD_ALREADY_CLAIMED(9202, "Reward has already been claimed", HttpStatus.BAD_REQUEST),
+    REWARD_EXPIRED(9203, "Reward has expired", HttpStatus.BAD_REQUEST),
+    NOT_REWARD_OWNER(9204, "You do not own this reward", HttpStatus.FORBIDDEN);
 
     private final int code;
     private final String message;
