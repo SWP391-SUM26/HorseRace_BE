@@ -1,6 +1,7 @@
 package com.SWP391.horserace.races.entity;
 
 import com.SWP391.horserace.tournaments.entity.Tournament;
+import com.SWP391.horserace.venues.entity.Venue;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -70,6 +71,11 @@ public class Race {
 
     @Column(name = "venue")
     private String venue;
+
+    /** §D1 — optional FK to a structured venue (track). The free-text {@code venue} column is kept too. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "venue_id")
+    private Venue venueRef;
 
     @Column(name = "going_moisture_pct")
     private Integer goingMoisturePct;

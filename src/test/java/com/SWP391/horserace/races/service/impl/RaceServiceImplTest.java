@@ -57,6 +57,7 @@ class RaceServiceImplTest {
     @Mock TournamentRepository tournamentRepository;
     @Mock UserRepository userRepository;
     @Mock JockeyAssignmentRepository jockeyAssignmentRepository;
+    @Mock com.SWP391.horserace.venues.repository.VenueRepository venueRepository;
 
     private RaceServiceImpl service;
 
@@ -69,13 +70,13 @@ class RaceServiceImplTest {
     void setUp() {
         service = new RaceServiceImpl(
                 raceRepository, raceEntryRepository, registrationRepository, tournamentRepository,
-                userRepository, jockeyAssignmentRepository);
+                userRepository, jockeyAssignmentRepository, venueRepository);
         tournament = Tournament.builder().tournamentId(tournamentId).name("Spring Cup").build();
     }
 
     private RaceRequest createReq() {
         return new RaceRequest(tournamentId, "Race 1", "FLAT", 1200, "GOOD", "SUNNY",
-                null, null, 8);
+                null, null, 8, null);
     }
 
     // ── create ──
@@ -210,6 +211,75 @@ class RaceServiceImplTest {
         assertThatThrownBy(() -> service.cancelRace(currentUserId, id))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_STATUS);
+    }
+
+    // ── §D1 venueId set on create / update ──
+
+    @Test
+    void create_withVenueId_setsVenueRefAndExposesName() {
+        UUID venueId = UUID.randomUUID();
+        com.SWP391.horserace.venues.entity.Venue venue =
+                com.SWP391.horserace.venues.entity.Venue.builder().venueId(venueId).name("Meydan").build();
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(venueRepository.findById(venueId)).thenReturn(Optional.of(venue));
+        when(raceRepository.count()).thenReturn(0L);
+        when(raceRepository.existsByRaceCode(any())).thenReturn(false);
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+
+        RaceRequest req = new RaceRequest(tournamentId, "Race 1", "FLAT", 1200, "GOOD", "SUNNY",
+                null, null, 8, venueId);
+        RaceResponse res = service.createRace(currentUserId, req);
+
+        assertThat(res.getVenueId()).isEqualTo(venueId);
+        assertThat(res.getVenueName()).isEqualTo("Meydan");
+    }
+
+    @Test
+    void create_unknownVenueId_throwsVenueNotFound() {
+        UUID venueId = UUID.randomUUID();
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(venueRepository.findById(venueId)).thenReturn(Optional.empty());
+
+        RaceRequest req = new RaceRequest(tournamentId, "Race 1", "FLAT", 1200, "GOOD", "SUNNY",
+                null, null, 8, venueId);
+
+        assertThatThrownBy(() -> service.createRace(currentUserId, req))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.VENUE_NOT_FOUND);
+    }
+
+    // ── §D2 entriesCount embed ──
+
+    @Test
+    void getRaceById_embedsEntriesCount() {
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.OPEN).maxParticipants(10).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+        when(raceEntryRepository.countByRace_RaceId(id)).thenReturn(3L);
+
+        RaceResponse res = service.getRaceById(id);
+
+        assertThat(res.getEntriesCount()).isEqualTo(3L);
+        assertThat(res.getMaxParticipants()).isEqualTo(10);
+    }
+
+    // ── §D3 race stats ──
+
+    @Test
+    void getRaceStats_mapsStatusBucketsAndTotal() {
+        when(raceRepository.countGroupByStatus(null)).thenReturn(List.of(
+                new Object[]{RaceStatus.SCHEDULED, 4L},
+                new Object[]{RaceStatus.OPEN, 2L},
+                new Object[]{RaceStatus.CANCELLED, 1L},
+                new Object[]{RaceStatus.FINISHED, 3L}));
+
+        com.SWP391.horserace.races.dto.RaceStatsResponse stats = service.getRaceStats(null);
+
+        assertThat(stats.getScheduled()).isEqualTo(4L);
+        assertThat(stats.getActive()).isEqualTo(2L);   // OPEN -> active
+        assertThat(stats.getCancelled()).isEqualTo(1L);
+        assertThat(stats.getTotal()).isEqualTo(10L);   // includes FINISHED in total only
     }
 
     // ── listRaces ──

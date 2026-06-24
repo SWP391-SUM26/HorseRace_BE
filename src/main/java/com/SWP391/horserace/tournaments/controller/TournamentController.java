@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,6 +24,7 @@ public class TournamentController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<TournamentResponse> createTournament(
             @Valid @RequestBody TournamentRequest request,
             @RequestParam(value = "currentUserId", required = false) UUID currentUserIdParam,
@@ -63,6 +65,7 @@ public class TournamentController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<TournamentResponse> updateTournament(
             @PathVariable UUID id,
             @Valid @RequestBody TournamentRequest request) {
@@ -77,6 +80,7 @@ public class TournamentController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<Void> deleteTournament(@PathVariable UUID id) {
         tournamentService.deleteTournament(id);
 
@@ -87,6 +91,7 @@ public class TournamentController {
     }
 
     @PatchMapping("/{id}/publish")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<TournamentResponse> publishTournament(@PathVariable UUID id) {
         TournamentResponse response = tournamentService.publishTournament(id);
 
@@ -98,6 +103,7 @@ public class TournamentController {
     }
 
     @PatchMapping("/{id}/close-registration")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<TournamentResponse> closeRegistration(@PathVariable UUID id) {
         TournamentResponse response = tournamentService.closeRegistration(id);
 
@@ -105,6 +111,36 @@ public class TournamentController {
                 .success(true)
                 .message("Tournament registration closed successfully")
                 .data(response)
+                .build();
+    }
+
+    @RequestMapping(value = "/{id}/open-registration", method = {RequestMethod.POST, RequestMethod.PATCH})
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<TournamentResponse> openRegistration(@PathVariable UUID id) {
+        return ApiResponse.<TournamentResponse>builder()
+                .success(true)
+                .message("Tournament registration opened successfully")
+                .data(tournamentService.openRegistration(id))
+                .build();
+    }
+
+    @RequestMapping(value = "/{id}/start", method = {RequestMethod.POST, RequestMethod.PATCH})
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<TournamentResponse> startTournament(@PathVariable UUID id) {
+        return ApiResponse.<TournamentResponse>builder()
+                .success(true)
+                .message("Tournament started successfully")
+                .data(tournamentService.startTournament(id))
+                .build();
+    }
+
+    @RequestMapping(value = "/{id}/complete", method = {RequestMethod.POST, RequestMethod.PATCH})
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<TournamentResponse> completeTournament(@PathVariable UUID id) {
+        return ApiResponse.<TournamentResponse>builder()
+                .success(true)
+                .message("Tournament completed successfully")
+                .data(tournamentService.completeTournament(id))
                 .build();
     }
 

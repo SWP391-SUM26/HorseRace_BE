@@ -129,22 +129,38 @@ INSERT INTO horse (horse_id, owner_user_id, horse_code, name, gender, breed, col
         (SELECT user_id FROM app_user WHERE email = 'owner@horserace.local'),
         'HRS0004', 'Golden Arrow', 'MALE', 'Arabian', 'Palomino', '2020-05-10', 460.00, 'USA', 'HEALTHY', 'ACTIVE');
 
--- Seed Tournament
-INSERT INTO tournament (tournament_id, tournament_code, name, description, start_date, end_date, location, status) VALUES
+-- Seed Venues (§C3 structured tracks, reused by tournaments and races)
+INSERT INTO venue (venue_id, name, track_name, city, country, capacity, surface) VALUES
+    ('77770000-0000-0000-0000-000000000001', 'Meydan Racecourse', 'Meydan Main Track', 'Dubai', 'UAE', 60000, 'Dirt'),
+    ('77770000-0000-0000-0000-000000000002', 'Ascot Racecourse', 'Ascot Straight Mile', 'Ascot', 'UK', 80000, 'Turf'),
+    ('77770000-0000-0000-0000-000000000003', 'Churchill Downs', 'Churchill Downs Oval', 'Louisville', 'USA', 170000, 'Dirt'),
+    ('77770000-0000-0000-0000-000000000004', 'Flemington Racecourse', 'Flemington Straight Six', 'Melbourne', 'AUS', 100000, 'Turf'),
+    ('77770000-0000-0000-0000-000000000005', 'King Abdulaziz Racetrack', 'KSA Main Dirt', 'Riyadh', 'KSA', 30000, 'Dirt');
+
+-- Seed Tournament (enriched with §C1 circuit_tier/total_purse/entry_cap + §C2 eligibility)
+INSERT INTO tournament (tournament_id, tournament_code, name, description, start_date, end_date, location,
+                        circuit_tier, total_purse, entry_cap,
+                        thoroughbreds_only, min_age_years, requires_previous_group_win, status) VALUES
     ('bbbb1111-bbbb-1111-bbbb-111111111111',
         'TOUR-2024-001', 'Dubai World Cup 2024', 'Premier international horse racing tournament',
-        '2024-10-15 09:00:00+07', '2024-11-15 18:00:00+07', 'Dubai', 'ONGOING');
+        '2024-10-15 09:00:00+07', '2024-11-15 18:00:00+07', 'Dubai',
+        'GROUP_1', 12000000.00, 16, TRUE, 3, TRUE, 'ONGOING');
 
--- Seed Races (belonging to the tournament)
-INSERT INTO race (race_id, tournament_id, race_code, name, race_type, distance_meter, track_condition, scheduled_start_at, venue, going_moisture_pct, total_purse, status) VALUES
+-- Link tournament(s) to structured venues (§C3)
+INSERT INTO tournament_venue (tournament_venue_id, tournament_id, venue_id) VALUES
+    ('88880000-0000-0000-0000-000000000001', 'bbbb1111-bbbb-1111-bbbb-111111111111', '77770000-0000-0000-0000-000000000001'),
+    ('88880000-0000-0000-0000-000000000002', 'bbbb1111-bbbb-1111-bbbb-111111111111', '77770000-0000-0000-0000-000000000002');
+
+-- Seed Races (belonging to the tournament; §D1 some link a structured venue_id)
+INSERT INTO race (race_id, tournament_id, race_code, name, race_type, distance_meter, track_condition, scheduled_start_at, venue, venue_id, going_moisture_pct, total_purse, status) VALUES
     ('cccc1111-cccc-1111-cccc-111111111111',
         'bbbb1111-bbbb-1111-bbbb-111111111111',
         'RACE-001', 'Belmont Autumn Stakes', 'FLAT', 2000, 'GOOD',
-        CURRENT_TIMESTAMP - INTERVAL '30 days', 'Ascot Racecourse, UK', 14, 600000.00, 'SCHEDULED'),
+        CURRENT_TIMESTAMP - INTERVAL '30 days', 'Ascot Racecourse, UK', '77770000-0000-0000-0000-000000000002', 14, 600000.00, 'SCHEDULED'),
     ('cccc2222-cccc-2222-cccc-222222222222',
         'bbbb1111-bbbb-1111-bbbb-111111111111',
         'RACE-002', 'Epsom Derby Qualifier', 'FLAT', 1600, 'GOOD',
-        CURRENT_TIMESTAMP - INTERVAL '25 days', NULL, NULL, NULL, 'SCHEDULED');
+        CURRENT_TIMESTAMP - INTERVAL '25 days', NULL, '77770000-0000-0000-0000-000000000001', NULL, NULL, 'SCHEDULED');
 
 -- Prize distribution for RACE-001 (1st–4th).
 INSERT INTO race_prize_distribution (race_id, place, amount) VALUES
@@ -346,29 +362,42 @@ INSERT INTO horse (horse_id, owner_user_id, horse_code, name, microchip_no, gend
     ('aaaa0000-0000-0000-0000-000000000012', (SELECT user_id FROM app_user WHERE email='khalid@horserace.local'),
         'HRS0012', 'Comet Tail', 'MC-0012', 'FEMALE', 'Arabian', 'Palomino', '2021-08-14', 445.00, 'UAE', 'UNFIT', 'ACTIVE');
 
--- More tournaments (varied statuses)
-INSERT INTO tournament (tournament_id, tournament_code, name, description, start_date, end_date, registration_open_at, registration_close_at, location, status, created_by_user_id) VALUES
+-- More tournaments (varied statuses; some §C1/§C2 enriched)
+INSERT INTO tournament (tournament_id, tournament_code, name, description, start_date, end_date, registration_open_at, registration_close_at, location,
+                        circuit_tier, total_purse, entry_cap, thoroughbreds_only, min_age_years, requires_previous_group_win,
+                        status, created_by_user_id) VALUES
     ('bbbb0000-0000-0000-0000-000000000002', 'TOUR-2025-002', 'Royal Ascot 2025', 'Prestigious British flat racing festival.',
-        '2025-06-17 13:00:00+07', '2025-06-21 19:00:00+07', NULL, NULL, 'Ascot, UK', 'PUBLISHED',
+        '2025-06-17 13:00:00+07', '2025-06-21 19:00:00+07', NULL, NULL, 'Ascot, UK',
+        'GROUP_2', 5000000.00, 20, TRUE, 3, FALSE, 'PUBLISHED',
         (SELECT user_id FROM app_user WHERE email='admin@horserace.local')),
     ('bbbb0000-0000-0000-0000-000000000003', 'TOUR-2025-003', 'Kentucky Derby 2025', 'The most exciting two minutes in sports.',
-        '2025-05-03 02:00:00+07', '2025-05-03 09:00:00+07', '2025-03-01 00:00:00+07', '2025-04-20 23:59:00+07', 'Louisville, USA', 'REGISTRATION_OPEN',
+        '2025-05-03 02:00:00+07', '2025-05-03 09:00:00+07', '2025-03-01 00:00:00+07', '2025-04-20 23:59:00+07', 'Louisville, USA',
+        'GROUP_1', 3000000.00, 20, TRUE, 3, TRUE, 'REGISTRATION_OPEN',
         (SELECT user_id FROM app_user WHERE email='admin@horserace.local')),
     ('bbbb0000-0000-0000-0000-000000000004', 'TOUR-2024-004', 'Melbourne Cup 2024', 'The race that stops a nation.',
-        '2024-11-05 10:00:00+07', '2024-11-05 16:00:00+07', NULL, NULL, 'Melbourne, AUS', 'COMPLETED',
+        '2024-11-05 10:00:00+07', '2024-11-05 16:00:00+07', NULL, NULL, 'Melbourne, AUS',
+        NULL, NULL, NULL, NULL, NULL, NULL, 'COMPLETED',
         (SELECT user_id FROM app_user WHERE email='admin@horserace.local')),
     ('bbbb0000-0000-0000-0000-000000000005', 'TOUR-2025-005', 'Saudi Cup 2025', 'The world''s richest horse race.',
-        '2025-02-22 20:00:00+07', '2025-02-22 23:30:00+07', NULL, NULL, 'Riyadh, KSA', 'DRAFT',
+        '2025-02-22 20:00:00+07', '2025-02-22 23:30:00+07', NULL, NULL, 'Riyadh, KSA',
+        'LISTED', 20000000.00, 14, FALSE, NULL, NULL, 'DRAFT',
         (SELECT user_id FROM app_user WHERE email='admin@horserace.local'));
 
--- More races (varied statuses across tournaments)
-INSERT INTO race (race_id, tournament_id, race_code, name, race_type, distance_meter, track_condition, scheduled_start_at, actual_start_at, actual_end_at, status) VALUES
-    ('cccc0000-0000-0000-0000-000000000003', 'bbbb0000-0000-0000-0000-000000000002', 'RACE-003', 'Ascot Gold Cup', 'FLAT', 4000, 'GOOD', CURRENT_TIMESTAMP + INTERVAL '10 days', NULL, NULL, 'OPEN'),
-    ('cccc0000-0000-0000-0000-000000000004', 'bbbb0000-0000-0000-0000-000000000002', 'RACE-004', 'Queen Anne Stakes', 'FLAT', 1600, 'FIRM', CURRENT_TIMESTAMP + INTERVAL '7 days', NULL, NULL, 'SCHEDULED'),
-    ('cccc0000-0000-0000-0000-000000000005', 'bbbb0000-0000-0000-0000-000000000003', 'RACE-005', 'Derby Trial', 'FLAT', 2000, 'GOOD', CURRENT_TIMESTAMP + INTERVAL '21 days', NULL, NULL, 'SCHEDULED'),
-    ('cccc0000-0000-0000-0000-000000000006', 'bbbb0000-0000-0000-0000-000000000004', 'RACE-006', 'Melbourne Cup Final', 'FLAT', 3200, 'SOFT', '2024-11-05 11:00:00+07', '2024-11-05 11:02:00+07', '2024-11-05 11:05:30+07', 'FINISHED'),
-    ('cccc0000-0000-0000-0000-000000000007', 'bbbb0000-0000-0000-0000-000000000004', 'RACE-007', 'Lightning Stakes', 'FLAT', 1000, 'GOOD', '2024-11-05 10:00:00+07', '2024-11-05 10:01:00+07', '2024-11-05 10:02:10+07', 'OFFICIAL'),
-    ('cccc0000-0000-0000-0000-000000000008', 'bbbb1111-bbbb-1111-bbbb-111111111111', 'RACE-008', 'Dubai Sprint', 'FLAT', 1200, 'GOOD', '2024-10-30 15:00:00+07', NULL, NULL, 'CANCELLED');
+-- Link the additional tournaments to structured venues (§C3)
+INSERT INTO tournament_venue (tournament_venue_id, tournament_id, venue_id) VALUES
+    ('88880000-0000-0000-0000-000000000003', 'bbbb0000-0000-0000-0000-000000000002', '77770000-0000-0000-0000-000000000002'),
+    ('88880000-0000-0000-0000-000000000004', 'bbbb0000-0000-0000-0000-000000000003', '77770000-0000-0000-0000-000000000003'),
+    ('88880000-0000-0000-0000-000000000005', 'bbbb0000-0000-0000-0000-000000000004', '77770000-0000-0000-0000-000000000004'),
+    ('88880000-0000-0000-0000-000000000006', 'bbbb0000-0000-0000-0000-000000000005', '77770000-0000-0000-0000-000000000005');
+
+-- More races (varied statuses across tournaments; §D1 a couple link a structured venue_id)
+INSERT INTO race (race_id, tournament_id, race_code, name, race_type, distance_meter, track_condition, scheduled_start_at, actual_start_at, actual_end_at, venue_id, status) VALUES
+    ('cccc0000-0000-0000-0000-000000000003', 'bbbb0000-0000-0000-0000-000000000002', 'RACE-003', 'Ascot Gold Cup', 'FLAT', 4000, 'GOOD', CURRENT_TIMESTAMP + INTERVAL '10 days', NULL, NULL, '77770000-0000-0000-0000-000000000002', 'OPEN'),
+    ('cccc0000-0000-0000-0000-000000000004', 'bbbb0000-0000-0000-0000-000000000002', 'RACE-004', 'Queen Anne Stakes', 'FLAT', 1600, 'FIRM', CURRENT_TIMESTAMP + INTERVAL '7 days', NULL, NULL, '77770000-0000-0000-0000-000000000002', 'SCHEDULED'),
+    ('cccc0000-0000-0000-0000-000000000005', 'bbbb0000-0000-0000-0000-000000000003', 'RACE-005', 'Derby Trial', 'FLAT', 2000, 'GOOD', CURRENT_TIMESTAMP + INTERVAL '21 days', NULL, NULL, '77770000-0000-0000-0000-000000000003', 'SCHEDULED'),
+    ('cccc0000-0000-0000-0000-000000000006', 'bbbb0000-0000-0000-0000-000000000004', 'RACE-006', 'Melbourne Cup Final', 'FLAT', 3200, 'SOFT', '2024-11-05 11:00:00+07', '2024-11-05 11:02:00+07', '2024-11-05 11:05:30+07', NULL, 'FINISHED'),
+    ('cccc0000-0000-0000-0000-000000000007', 'bbbb0000-0000-0000-0000-000000000004', 'RACE-007', 'Lightning Stakes', 'FLAT', 1000, 'GOOD', '2024-11-05 10:00:00+07', '2024-11-05 10:01:00+07', '2024-11-05 10:02:10+07', NULL, 'OFFICIAL'),
+    ('cccc0000-0000-0000-0000-000000000008', 'bbbb1111-bbbb-1111-bbbb-111111111111', 'RACE-008', 'Dubai Sprint', 'FLAT', 1200, 'GOOD', '2024-10-30 15:00:00+07', NULL, NULL, '77770000-0000-0000-0000-000000000001', 'CANCELLED');
 
 -- More registrations (varied statuses — drives the approval queue UI)
 INSERT INTO tournament_registration (registration_id, owner_user_id, tournament_id, horse_id, registration_code, status, submitted_at, reviewed_at, approved_by_user_id, rejection_reason) VALUES

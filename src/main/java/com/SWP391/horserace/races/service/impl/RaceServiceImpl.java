@@ -10,6 +10,7 @@ import com.SWP391.horserace.races.dto.RaceEntryResponse;
 import com.SWP391.horserace.races.dto.RaceFilterRequest;
 import com.SWP391.horserace.races.dto.RaceRequest;
 import com.SWP391.horserace.races.dto.RaceResponse;
+import com.SWP391.horserace.races.dto.RaceStatsResponse;
 import com.SWP391.horserace.races.dto.ScheduleRaceRequest;
 import com.SWP391.horserace.races.entity.PrizeDistributionItem;
 import com.SWP391.horserace.races.entity.Race;
@@ -28,6 +29,8 @@ import com.SWP391.horserace.tournaments.entity.Tournament;
 import com.SWP391.horserace.tournaments.repository.TournamentRepository;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.repository.UserRepository;
+import com.SWP391.horserace.venues.entity.Venue;
+import com.SWP391.horserace.venues.repository.VenueRepository;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -57,6 +60,7 @@ public class RaceServiceImpl implements RaceService {
     private final TournamentRepository tournamentRepository;
     private final UserRepository userRepository;
     private final JockeyAssignmentRepository jockeyAssignmentRepository;
+    private final VenueRepository venueRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -127,12 +131,36 @@ public class RaceServiceImpl implements RaceService {
                 .scheduledStartAt(request.scheduledStartAt())
                 .predictionCutoffAt(request.predictionCutoffAt())
                 .maxParticipants(request.maxParticipants())
+                .venueRef(resolveVenue(request.venueId()))
                 // Status is always SCHEDULED on create; lifecycle changes go through
                 // schedule()/cancel(), never a client-supplied status.
                 .status(RaceStatus.SCHEDULED)
                 .build();
 
         return mapToResponse(raceRepository.save(race));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public RaceStatsResponse getRaceStats(UUID tournamentId) {
+        long scheduled = 0, active = 0, cancelled = 0, total = 0;
+        for (Object[] row : raceRepository.countGroupByStatus(tournamentId)) {
+            RaceStatus status = (RaceStatus) row[0];
+            long count = ((Number) row[1]).longValue();
+            total += count;
+            switch (status) {
+                case SCHEDULED -> scheduled += count;
+                case OPEN -> active += count;       // "active" = the open/running state
+                case CANCELLED -> cancelled += count;
+                default -> { /* CLOSED/RUNNING/FINISHED/OFFICIAL counted only in total */ }
+            }
+        }
+        return RaceStatsResponse.builder()
+                .total(total)
+                .scheduled(scheduled)
+                .active(active)
+                .cancelled(cancelled)
+                .build();
     }
 
     @Override
@@ -158,6 +186,7 @@ public class RaceServiceImpl implements RaceService {
         if (request.scheduledStartAt() != null) race.setScheduledStartAt(request.scheduledStartAt());
         if (request.predictionCutoffAt() != null) race.setPredictionCutoffAt(request.predictionCutoffAt());
         if (request.maxParticipants() != null) race.setMaxParticipants(request.maxParticipants());
+        if (request.venueId() != null) race.setVenueRef(resolveVenue(request.venueId()));
         // Status is intentionally NOT updatable here — transitions go through schedule()/cancel().
 
         return mapToResponse(raceRepository.save(race));
@@ -318,6 +347,15 @@ public class RaceServiceImpl implements RaceService {
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
     }
 
+    /** Resolve a venue FK; null id = no venue. Throws VENUE_NOT_FOUND if the id is unknown. */
+    private Venue resolveVenue(UUID venueId) {
+        if (venueId == null) {
+            return null;
+        }
+        return venueRepository.findById(venueId)
+                .orElseThrow(() -> new AppException(ErrorCode.VENUE_NOT_FOUND));
+    }
+
     /** Sequential code RACEnnnnn, skipping any already taken (the DB UNIQUE is the final guard). */
     private String generateRaceCode() {
         long n = raceRepository.count() + 1;
@@ -355,6 +393,11 @@ public class RaceServiceImpl implements RaceService {
 
     private RaceResponse mapToResponse(Race r) {
         Tournament t = r.getTournament();
+        Venue v = r.getVenueRef();
+        // §D1 — surface the linked venue name (fall back to the free-text venue when no FK).
+        String venueName = v != null ? v.getName() : r.getVenue();
+        long entriesCount = r.getRaceId() == null ? 0L
+                : raceEntryRepository.countByRace_RaceId(r.getRaceId());
         return RaceResponse.builder()
                 .raceId(r.getRaceId())
                 .raceCode(r.getRaceCode())
@@ -369,6 +412,9 @@ public class RaceServiceImpl implements RaceService {
                 .predictionCutoffAt(r.getPredictionCutoffAt())
                 .maxParticipants(r.getMaxParticipants())
                 .venue(r.getVenue())
+                .venueId(v != null ? v.getVenueId() : null)
+                .venueName(venueName)
+                .entriesCount(entriesCount)
                 .goingMoisturePct(r.getGoingMoisturePct())
                 .totalPurse(r.getTotalPurse())
                 .prizeDistribution(mapPrizeDistribution(r.getPrizeDistribution()))

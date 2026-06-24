@@ -61,6 +61,7 @@ public enum ErrorCode {
     TOURNAMENT_NOT_FOUND(3001, "Tournament not found", HttpStatus.NOT_FOUND),
     TOURNAMENT_CODE_EXISTED(3002, "Tournament code already existed", HttpStatus.CONFLICT),
     TOURNAMENT_INVALID_STATUS(3003, "Invalid status transition for tournament", HttpStatus.BAD_REQUEST),
+    VENUE_NOT_FOUND(3004, "Venue not found", HttpStatus.NOT_FOUND),
 
     // ---- staffing / referee assignment ----
     STAFF_NOT_FOUND(4001, "Staff member not found", HttpStatus.NOT_FOUND),

@@ -6,6 +6,7 @@ import com.SWP391.horserace.races.dto.RaceEntryResponse;
 import com.SWP391.horserace.races.dto.RaceFilterRequest;
 import com.SWP391.horserace.races.dto.RaceRequest;
 import com.SWP391.horserace.races.dto.RaceResponse;
+import com.SWP391.horserace.races.dto.RaceStatsResponse;
 import com.SWP391.horserace.races.dto.ScheduleRaceRequest;
 import com.SWP391.horserace.races.service.RaceService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
@@ -13,6 +14,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -46,6 +49,17 @@ public class RaceController {
                 .build();
     }
 
+    /** GET /api/v1/races/stats — count-by-status KPIs, optionally scoped to ?tournamentId=. */
+    @GetMapping("/stats")
+    public ApiResponse<RaceStatsResponse> getRaceStats(
+            @RequestParam(value = "tournamentId", required = false) UUID tournamentId) {
+        return ApiResponse.<RaceStatsResponse>builder()
+                .success(true)
+                .message("Fetched race stats")
+                .data(raceService.getRaceStats(tournamentId))
+                .build();
+    }
+
     /** GET /api/v1/races/{id} — one race. */
     @GetMapping("/{id}")
     public ApiResponse<RaceResponse> getRace(@PathVariable UUID id) {
@@ -59,6 +73,7 @@ public class RaceController {
     /** POST /api/v1/races — create a race under a tournament. */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<RaceResponse> createRace(
             @AuthenticationPrincipal UUID userId,
             @Valid @RequestBody RaceRequest request) {
@@ -71,6 +86,7 @@ public class RaceController {
 
     /** PUT /api/v1/races/{id} — partial update of a race. */
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<RaceResponse> updateRace(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id,
@@ -84,6 +100,7 @@ public class RaceController {
 
     /** DELETE /api/v1/races/{id} — soft-delete a race. */
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<Void> deleteRace(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id) {
@@ -96,6 +113,7 @@ public class RaceController {
 
     /** PATCH /api/v1/races/{id}/schedule — set times and open the race. */
     @PatchMapping("/{id}/schedule")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<RaceResponse> scheduleRace(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id,
@@ -109,6 +127,7 @@ public class RaceController {
 
     /** PATCH /api/v1/races/{id}/cancel — cancel a race. */
     @PatchMapping("/{id}/cancel")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<RaceResponse> cancelRace(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id) {

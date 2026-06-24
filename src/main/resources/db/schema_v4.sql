@@ -47,9 +47,11 @@ DROP TABLE IF EXISTS jockey_assignment        CASCADE;
 DROP TABLE IF EXISTS race_entry               CASCADE;
 DROP TABLE IF EXISTS tournament_registration  CASCADE;
 DROP TABLE IF EXISTS race_prize_distribution   CASCADE;
-DROP TABLE IF EXISTS race                     CASCADE;
+DROP TABLE IF EXISTS tournament_venue         CASCADE;  -- child of tournament + venue
+DROP TABLE IF EXISTS race                     CASCADE;  -- FKs venue -> drop before venue
 DROP TABLE IF EXISTS tournament_round         CASCADE;
 DROP TABLE IF EXISTS tournament               CASCADE;
+DROP TABLE IF EXISTS venue                    CASCADE;  -- after race + tournament_venue
 DROP TABLE IF EXISTS horse_characteristic     CASCADE;
 DROP TABLE IF EXISTS horse                    CASCADE;
 DROP TABLE IF EXISTS jockey_profile           CASCADE;
@@ -244,6 +246,19 @@ CREATE TABLE horse_characteristic (
 );
 
 -- =========================================================
+-- VENUE  (§C3) -- structured racing venue (track), reusable by tournaments and races
+-- =========================================================
+CREATE TABLE venue (
+    venue_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name       VARCHAR(255) NOT NULL,
+    track_name VARCHAR(255),
+    city       VARCHAR(255),
+    country    VARCHAR(255),
+    capacity   INT CHECK (capacity IS NULL OR capacity >= 0),
+    surface    TEXT
+);
+
+-- =========================================================
 -- TOURNAMENT
 -- =========================================================
 CREATE TABLE tournament (
@@ -256,6 +271,16 @@ CREATE TABLE tournament (
     registration_open_at  TIMESTAMPTZ,
     registration_close_at TIMESTAMPTZ,
     location              VARCHAR(255),
+    -- §C1 enrichment (all nullable so existing inserts stay valid)
+    circuit_tier          VARCHAR(50)
+                          CHECK (circuit_tier IS NULL OR circuit_tier IN
+                                 ('GROUP_1', 'GROUP_2', 'GROUP_3', 'LISTED')),
+    total_purse           NUMERIC(18,2),
+    entry_cap             INT CHECK (entry_cap IS NULL OR entry_cap > 0),
+    -- §C2 eligibility criteria (3 nullable columns, exposed nested as `eligibility`)
+    thoroughbreds_only          BOOLEAN,
+    min_age_years               INT CHECK (min_age_years IS NULL OR min_age_years >= 0),
+    requires_previous_group_win BOOLEAN,
     status                VARCHAR(50) NOT NULL DEFAULT 'DRAFT'
                           CHECK (status IN ('DRAFT', 'PUBLISHED', 'REGISTRATION_OPEN',
                                             'REGISTRATION_CLOSED', 'ONGOING', 'COMPLETED', 'CANCELLED')),
@@ -267,6 +292,16 @@ CREATE TABLE tournament (
     CHECK (end_date IS NULL OR start_date IS NULL OR end_date >= start_date),
     CHECK (registration_close_at IS NULL OR registration_open_at IS NULL
            OR registration_close_at >= registration_open_at)
+);
+
+-- =========================================================
+-- TOURNAMENT_VENUE  (§C3) -- join: one tournament -> one-or-many venues
+-- =========================================================
+CREATE TABLE tournament_venue (
+    tournament_venue_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tournament_id       UUID NOT NULL REFERENCES tournament(tournament_id),
+    venue_id            UUID NOT NULL REFERENCES venue(venue_id),
+    UNIQUE (tournament_id, venue_id)
 );
 
 -- =========================================================
@@ -306,6 +341,7 @@ CREATE TABLE race (
     prediction_cutoff_at TIMESTAMPTZ,
     max_participants     INT CHECK (max_participants IS NULL OR max_participants > 0),
     venue                VARCHAR(255),
+    venue_id             UUID REFERENCES venue(venue_id),  -- §D1 structured venue FK (nullable)
     going_moisture_pct   INT CHECK (going_moisture_pct IS NULL OR (going_moisture_pct BETWEEN 0 AND 100)),
     total_purse          NUMERIC(18,2),
     status               VARCHAR(50) NOT NULL DEFAULT 'SCHEDULED'

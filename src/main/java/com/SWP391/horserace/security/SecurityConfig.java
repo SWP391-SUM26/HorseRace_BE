@@ -17,16 +17,16 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 /**
  * Security configuration.
  *
- * <p><b>DEV mode:</b> every endpoint is currently <b>permitAll()</b> — no authorization is
- * required to call any API. The JWT filter still runs, so a valid {@code Authorization: Bearer}
- * token is parsed and the user is populated into the SecurityContext (useful for
- * {@code @AuthenticationPrincipal}), but it is not enforced.
- *
- * <p>To re-enable protection later, replace {@code anyRequest().permitAll()} with the
- * permit-/auth/** + authenticated() rules.
+ * <p><b>Protected by default:</b> only the auth endpoints, the OpenAPI/Swagger docs and
+ * {@code /error} are public. <b>Every other endpoint requires a valid
+ * {@code Authorization: Bearer <accessToken>}</b> — calls without a token get a JSON 401
+ * (from {@link JwtAuthEntryPoint}); authenticated callers lacking the required role get a
+ * JSON 403 (from {@link RestAccessDeniedHandler}). The JWT filter runs first, parsing the
+ * token and populating the SecurityContext (so {@code @AuthenticationPrincipal} and
+ * {@code @PreAuthorize("hasRole('ADMIN')")} work).
  *
  * <p>No HTTP session, no CSRF (token-based API). {@code @EnableMethodSecurity} is on so
- * {@code @PreAuthorize} still works where you add it explicitly.
+ * {@code @PreAuthorize} works on controllers/services.
  */
 @Configuration
 @EnableWebSecurity
@@ -34,15 +34,29 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @RequiredArgsConstructor
 public class SecurityConfig {
 
+    private static final String[] PUBLIC_PATHS = {
+            "/api/v1/auth/**",
+            "/swagger-ui/**",
+            "/swagger-ui.html",
+            "/v3/api-docs/**",
+            "/error"
+    };
+
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final JwtAuthEntryPoint jwtAuthEntryPoint;
+    private final RestAccessDeniedHandler restAccessDeniedHandler;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                // DEV: permit everything — no endpoint requires authorization.
-                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(PUBLIC_PATHS).permitAll()
+                        .anyRequest().authenticated())
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(jwtAuthEntryPoint)
+                        .accessDeniedHandler(restAccessDeniedHandler))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

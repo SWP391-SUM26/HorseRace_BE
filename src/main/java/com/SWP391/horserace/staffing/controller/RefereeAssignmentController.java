@@ -14,6 +14,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -95,6 +96,7 @@ public class RefereeAssignmentController {
     // -------------------------------------------------------------------------
     @PostMapping("/assignments")
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<RefereeAssignmentResponse> assignReferee(
             @Valid @RequestBody AssignRefereeRequest request,
             @RequestParam(value = "currentUserId", required = false) UUID currentUserIdParam,
@@ -113,6 +115,7 @@ public class RefereeAssignmentController {
     // PUT /api/v1/staffing/assignments/{id} — Reassign Referee
     // -------------------------------------------------------------------------
     @PutMapping("/assignments/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<RefereeAssignmentResponse> reassignReferee(
             @PathVariable UUID id,
             @Valid @RequestBody ReassignRefereeRequest request,
@@ -132,6 +135,7 @@ public class RefereeAssignmentController {
     // DELETE /api/v1/staffing/assignments/{id} — Remove Assignment
     // -------------------------------------------------------------------------
     @DeleteMapping("/assignments/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<Void> removeAssignment(@PathVariable UUID id) {
         assignmentService.removeAssignment(id);
 

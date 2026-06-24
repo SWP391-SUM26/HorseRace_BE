@@ -10,7 +10,10 @@ import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /** Maps the {@code tournament} table. */
@@ -52,11 +55,36 @@ public class Tournament {
     @Column(name = "location")
     private String location;
 
-    /** DRAFT | PUBLISHED | REGISTRATION_OPEN | REGISTRATION_CLOSED | ONGOING | COMPLETED | CANCELLED */
+    /** Graded circuit tier (GROUP_1 | GROUP_2 | GROUP_3 | LISTED). Nullable. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "circuit_tier", length = 50)
+    private CircuitTier circuitTier;
+
+    @Column(name = "total_purse")
+    private BigDecimal totalPurse;
+
+    @Column(name = "entry_cap")
+    private Integer entryCap;
+
+    /** Eligibility criteria stored as 3 nullable columns (see {@link EligibilityCriteria}). */
+    @Embedded
+    private EligibilityCriteria eligibility;
+
+    /**
+     * CANONICAL TOURNAMENT STATUS SET (must match the schema CHECK on tournament.status):
+     * DRAFT → PUBLISHED → REGISTRATION_OPEN → REGISTRATION_CLOSED → ONGOING → COMPLETED, plus CANCELLED.
+     * Transitions: publish (DRAFT→PUBLISHED), open-registration (PUBLISHED→REGISTRATION_OPEN),
+     * close-registration (REGISTRATION_OPEN/PUBLISHED→REGISTRATION_CLOSED),
+     * start (REGISTRATION_CLOSED→ONGOING), complete (ONGOING→COMPLETED).
+     */
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
     private TournamentStatus status = TournamentStatus.DRAFT;
+
+    @OneToMany(mappedBy = "tournament", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<TournamentVenue> venues = new ArrayList<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by_user_id")
