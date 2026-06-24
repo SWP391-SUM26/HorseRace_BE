@@ -18,6 +18,9 @@ public interface HorseRepository
 
     boolean existsByHorseCode(String horseCode);
 
+    /** Count of non soft-deleted horses owned by the given user — used for onboarding dossier. */
+    long countByOwner_UserIdAndDeletedFalse(UUID ownerUserId);
+
     /** Table-wide check — matches the DB UNIQUE(microchip_no), which also covers soft-deleted rows. */
     boolean existsByMicrochipNo(String microchipNo);
 }
