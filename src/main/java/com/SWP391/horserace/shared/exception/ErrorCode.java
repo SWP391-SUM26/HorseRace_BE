@@ -109,7 +109,13 @@ public enum ErrorCode {
 
     // ---- referee management ----
     REPORT_NOT_FOUND(9101, "Referee report not found", HttpStatus.NOT_FOUND),
-    REPORT_INVALID_STATUS(9102, "Invalid status transition for this report", HttpStatus.BAD_REQUEST);
+    REPORT_INVALID_STATUS(9102, "Invalid status transition for this report", HttpStatus.BAD_REQUEST),
+
+    // ---- reward system ----
+    REWARD_NOT_FOUND(9201, "Reward not found", HttpStatus.NOT_FOUND),
+    REWARD_ALREADY_CLAIMED(9202, "Reward has already been claimed", HttpStatus.BAD_REQUEST),
+    REWARD_EXPIRED(9203, "Reward has expired", HttpStatus.BAD_REQUEST),
+    NOT_REWARD_OWNER(9204, "You do not own this reward", HttpStatus.FORBIDDEN);
 
     private final int code;
     private final String message;
