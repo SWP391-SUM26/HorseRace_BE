@@ -372,3 +372,22 @@ INSERT INTO referee_assignment (ref_assignment_id, race_id, referee_user_id, pan
         (SELECT user_id FROM app_user WHERE email='admin@horserace.local')),
     ('ffff0000-0000-0000-0000-000000000003', 'cccc0000-0000-0000-0000-000000000006', '55555555-5555-5555-5555-555555555555', 'CHIEF', 'CONFIRMED', CURRENT_TIMESTAMP - INTERVAL '21 days',
         (SELECT user_id FROM app_user WHERE email='admin@horserace.local'));
+
+-- =========================================================
+-- SEED DATA FOR WALLET SYSTEM
+-- =========================================================
+INSERT INTO wallet (wallet_id, user_id, balance, locked_balance, currency_code, status) VALUES
+    ('20000000-0000-0000-0000-000000000001', (SELECT user_id FROM app_user WHERE email='admin@horserace.local'), 0.00, 0.00, 'VND', 'ACTIVE'),
+    ('20000000-0000-0000-0000-000000000002', (SELECT user_id FROM app_user WHERE email='owner@horserace.local'), 10000000.00, 0.00, 'VND', 'ACTIVE'),
+    ('20000000-0000-0000-0000-000000000003', (SELECT user_id FROM app_user WHERE email='jane@horserace.local'), 500000.00, 0.00, 'VND', 'ACTIVE'),
+    ('20000000-0000-0000-0000-000000000004', (SELECT user_id FROM app_user WHERE email='maria@horserace.local'), 20000000.00, 0.00, 'VND', 'ACTIVE'),
+    ('20000000-0000-0000-0000-000000000005', (SELECT user_id FROM app_user WHERE email='khalid@horserace.local'), 30000000.00, 0.00, 'VND', 'ACTIVE');
+
+-- =========================================================
+-- SEED DATA FOR REWARD SYSTEM
+-- =========================================================
+INSERT INTO reward (reward_id, user_id, reward_type, amount, title, description, status) VALUES
+    ('10000000-0000-0000-0000-000000000001', (SELECT user_id FROM app_user WHERE email='jane@horserace.local'),
+        'DAILY_LOGIN', 50000.00, 'Daily Login Reward', 'Reward for logging in today.', 'PENDING'),
+    ('10000000-0000-0000-0000-000000000002', (SELECT user_id FROM app_user WHERE email='jane@horserace.local'),
+        'MILESTONE', 200000.00, '10th Prediction Milestone', 'Reward for placing 10 predictions.', 'CLAIMED');
