@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -205,4 +206,39 @@ public interface JockeyAssignmentRepository extends JpaRepository<JockeyAssignme
          ORDER BY race.scheduledStartAt ASC
         """)
     List<RaceEntry> findUnassignedEntriesByOwner(@Param("ownerUserId") UUID ownerUserId);
+
+    /**
+     * All ACCEPTED rides of a jockey, with entry → registration → horse and entry → race
+     * eagerly fetched. Used to compute jockey stats (#1) and the rides list (#6).
+     */
+    @Query("""
+        SELECT ja FROM JockeyAssignment ja
+          JOIN FETCH ja.entry e
+          JOIN FETCH e.registration r
+          JOIN FETCH r.horse h
+          JOIN FETCH e.race race
+         WHERE ja.jockey.userId = :jockeyUserId
+           AND ja.status = com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus.ACCEPTED
+         ORDER BY race.scheduledStartAt DESC NULLS LAST
+        """)
+    List<JockeyAssignment> findAcceptedRidesByJockey(@Param("jockeyUserId") UUID jockeyUserId);
+
+    /** All assignments invited to a jockey (any status), inviter eagerly fetched. Used for insights (#11). */
+    @Query("""
+        SELECT ja FROM JockeyAssignment ja
+          LEFT JOIN FETCH ja.assignedBy ab
+         WHERE ja.jockey.userId = :jockeyUserId
+        """)
+    List<JockeyAssignment> findAllByJockeyWithInviter(@Param("jockeyUserId") UUID jockeyUserId);
+
+    /** Count a jockey's invitations whose invitedAt falls within [from, to). */
+    @Query("""
+        SELECT COUNT(ja) FROM JockeyAssignment ja
+         WHERE ja.jockey.userId = :jockeyUserId
+           AND ja.invitedAt >= :from
+           AND ja.invitedAt < :to
+        """)
+    long countInvitedBetween(@Param("jockeyUserId") UUID jockeyUserId,
+                             @Param("from") OffsetDateTime from,
+                             @Param("to") OffsetDateTime to);
 }

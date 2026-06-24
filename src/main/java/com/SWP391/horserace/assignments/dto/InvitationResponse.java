@@ -4,6 +4,7 @@ import com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus;
 import lombok.Builder;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -55,4 +56,12 @@ public class InvitationResponse {
     private UUID entryId;
     private String entryCode;
     private Integer entryNo;
+
+    // -- prize / share info (FE-v2 jockey contract #5) --
+    /** race.totalPurse (null when the race has no purse set). */
+    private BigDecimal racePurse;
+    /** Invited jockey's jockey_profile.prizePercent (0 when unknown). */
+    private BigDecimal jockeySharePercent;
+    /** racePurse * jockeySharePercent / 100 (0 when either is missing). */
+    private BigDecimal estimatedShare;
 }

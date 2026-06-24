@@ -52,6 +52,7 @@ public enum ErrorCode {
     NOT_INVITATION_OWNER(2008, "You are not the owner who sent this invitation", HttpStatus.FORBIDDEN),
     NOT_INVITED_JOCKEY(2009, "You are not the jockey invited for this assignment", HttpStatus.FORBIDDEN),
     OWNER_NOT_MATCH(2010, "You are not the owner of this horse entry", HttpStatus.FORBIDDEN),
+    INVITATION_NOT_ACCEPTED(2011, "Only ACCEPTED rides can be withdrawn", HttpStatus.BAD_REQUEST),
 
     // ---- tournament ----
     TOURNAMENT_NOT_FOUND(3001, "Tournament not found", HttpStatus.NOT_FOUND),
