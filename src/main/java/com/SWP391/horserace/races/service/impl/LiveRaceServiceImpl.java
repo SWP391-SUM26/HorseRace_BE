@@ -4,6 +4,7 @@ import com.SWP391.horserace.assignments.entity.JockeyAssignment;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.races.dto.LiveRaceResponse;
+import com.SWP391.horserace.races.dto.UpdateLivePositionRequest;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
 import com.SWP391.horserace.races.entity.RaceResult;
@@ -24,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +35,19 @@ public class LiveRaceServiceImpl implements LiveRaceService {
     private final RaceResultRepository raceResultRepository;
     private final RaceEntryRepository raceEntryRepository;
     private final JockeyAssignmentRepository jockeyAssignmentRepository;
+
+    private final Map<UUID, Map<UUID, UpdateLivePositionRequest.RunnerTelemetry>> liveTelemetryCache = new ConcurrentHashMap<>();
+
+    @Override
+    public void updateLivePositions(UUID raceId, UpdateLivePositionRequest request) {
+        Race race = raceRepository.findByRaceIdAndDeletedFalse(raceId)
+                .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
+
+        Map<UUID, UpdateLivePositionRequest.RunnerTelemetry> raceTelemetry = liveTelemetryCache.computeIfAbsent(raceId, k -> new ConcurrentHashMap<>());
+        for (UpdateLivePositionRequest.RunnerTelemetry runner : request.getRunners()) {
+            raceTelemetry.put(runner.getEntryId(), runner);
+        }
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -60,10 +75,16 @@ public class LiveRaceServiceImpl implements LiveRaceService {
                 .build();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<LiveRaceResponse.RunnerRow> getLiveLeaderboard(UUID raceId) {
+        // Delegate to the same logic that builds the running order for the full live view
+        return buildRunningOrder(raceId);
+    }
+
     /**
      * Prefer the current results (ordered by finish position); if none recorded yet, fall back to
-     * the race's entries ordered by lane then entry number. {@code currentSpeedKph} has no live
-     * source, so it is always null.
+     * the race's entries ordered by live telemetry, then lane, then entry number. 
      */
     private List<LiveRaceResponse.RunnerRow> buildRunningOrder(UUID raceId) {
         List<RaceResult> results = raceResultRepository.findByRaceIdWithEntry(raceId);
@@ -72,42 +93,60 @@ public class LiveRaceServiceImpl implements LiveRaceService {
                     .map(r -> r.getEntry().getEntryId())
                     .toList();
             Map<UUID, String> jockeyByEntry = jockeyNamesByEntryIds(entryIds);
-            return results.stream()
+            List<LiveRaceResponse.RunnerRow> rows = results.stream()
                     .sorted(Comparator.comparing(RaceResult::getFinishPosition,
                             Comparator.nullsLast(Comparator.naturalOrder())))
                     .map(r -> {
                         RaceEntry e = r.getEntry();
                         Horse horse = e.getRegistration() != null ? e.getRegistration().getHorse() : null;
                         return LiveRaceResponse.RunnerRow.builder()
-                                .position(r.getFinishPosition())
                                 .entryNo(e.getEntryNo())
                                 .horseName(horse != null ? horse.getName() : null)
-                                .jockeyName(jockeyByEntry.get(e.getEntryId()))
-                                .currentSpeedKph(null)
+                                .jockeyName(jockeyByEntry.getOrDefault(e.getEntryId(), "TBD"))
+                                .currentSpeedKph(0.0)
                                 .build();
                     })
                     .toList();
+            
+            for (int i = 0; i < rows.size(); i++) {
+                rows.get(i).setPosition(i + 1);
+            }
+            return rows;
         }
 
-        // Fallback: no results yet — list the entries by lane, then entry number.
+        // Fallback: no results yet — list the entries by live position, then lane, then entry number.
         List<RaceEntry> entries = raceEntryRepository.findByRaceIdWithHorse(raceId);
         List<UUID> entryIds = entries.stream().map(RaceEntry::getEntryId).toList();
         Map<UUID, String> jockeyByEntry = jockeyNamesByEntryIds(entryIds);
-        return entries.stream()
+        Map<UUID, UpdateLivePositionRequest.RunnerTelemetry> telemetry = liveTelemetryCache.getOrDefault(raceId, Map.of());
+
+        List<LiveRaceResponse.RunnerRow> rows = entries.stream()
                 .sorted(Comparator
-                        .comparing(RaceEntry::getLaneNo, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .comparing((RaceEntry e) -> {
+                            UpdateLivePositionRequest.RunnerTelemetry t = telemetry.get(e.getEntryId());
+                            return t != null ? t.getPosition() : null;
+                        }, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(RaceEntry::getLaneNo, Comparator.nullsLast(Comparator.naturalOrder()))
                         .thenComparing(RaceEntry::getEntryNo, Comparator.nullsLast(Comparator.naturalOrder())))
                 .map(e -> {
                     Horse horse = e.getRegistration() != null ? e.getRegistration().getHorse() : null;
+                    UpdateLivePositionRequest.RunnerTelemetry t = telemetry.get(e.getEntryId());
+                    Double speed = t != null && t.getCurrentSpeedKph() != null 
+                            ? t.getCurrentSpeedKph() 
+                            : 0.0;
                     return LiveRaceResponse.RunnerRow.builder()
-                            .position(null)
                             .entryNo(e.getEntryNo())
                             .horseName(horse != null ? horse.getName() : null)
-                            .jockeyName(jockeyByEntry.get(e.getEntryId()))
-                            .currentSpeedKph(null)
+                            .jockeyName(jockeyByEntry.getOrDefault(e.getEntryId(), "TBD"))
+                            .currentSpeedKph(speed)
                             .build();
                 })
                 .toList();
+
+        for (int i = 0; i < rows.size(); i++) {
+            rows.get(i).setPosition(i + 1);
+        }
+        return rows;
     }
 
     /** Riding (ACCEPTED) jockey name per entry, resolved in one query (avoids N+1). */
