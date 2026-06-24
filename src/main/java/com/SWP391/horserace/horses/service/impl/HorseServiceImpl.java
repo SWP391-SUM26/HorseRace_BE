@@ -66,10 +66,33 @@ public class HorseServiceImpl implements HorseService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<HorseResponse> listHorses(HorseFilterRequest filter) {
+    public Page<HorseResponse> listHorses(HorseFilterRequest filter, UUID currentUserId) {
+        UUID ownerFilter = resolveOwnerFilter(filter.getOwnerUserId(), currentUserId);
         return horseRepository
-                .findAll(HorseSpecification.withFilters(filter), buildPageable(filter))
+                .findAll(HorseSpecification.withFilters(filter, ownerFilter), buildPageable(filter))
                 .map(this::mapToResponse);
+    }
+
+    /**
+     * Resolves the {@code ownerUserId} query value: the literal {@code "me"} → the caller's id
+     * (requires authentication), a UUID string → that id, blank/null → no owner filter. An
+     * unparseable value is a 400 rather than a 500.
+     */
+    private UUID resolveOwnerFilter(String raw, UUID currentUserId) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        if (raw.equalsIgnoreCase("me")) {
+            if (currentUserId == null) {
+                throw new AppException(ErrorCode.UNAUTHENTICATED);
+            }
+            return currentUserId;
+        }
+        try {
+            return UUID.fromString(raw.trim());
+        } catch (IllegalArgumentException e) {
+            throw new AppException(ErrorCode.INVALID_KEY);
+        }
     }
 
     @Override
@@ -515,6 +538,10 @@ public class HorseServiceImpl implements HorseService {
                 .registrationStatus(h.getRegistrationStatus())
                 .status(h.getStatus())
                 .imageUrl(h.getImageUrl())
+                .fitnessCertified(h.isFitnessCertified())
+                .fitnessCertExpiresAt(h.getFitnessCertExpiresAt())
+                .passportScanStatus(h.getPassportScanStatus())
+                .cogginsTestDate(h.getCogginsTestDate())
                 .createdAt(h.getCreatedAt())
                 .updatedAt(h.getUpdatedAt())
                 .build();

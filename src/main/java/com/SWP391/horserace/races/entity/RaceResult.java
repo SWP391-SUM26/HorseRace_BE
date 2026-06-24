@@ -44,6 +44,10 @@ public class RaceResult {
     @Column(name = "finish_time_ms")
     private Long finishTimeMs;
 
+    /** FE-v2 Results (mục 5): finish margin behind the winner. */
+    @Column(name = "lengths_behind", precision = 6, scale = 2)
+    private BigDecimal lengthsBehind;
+
     @Column(name = "score", precision = 10, scale = 2)
     private BigDecimal score;
 

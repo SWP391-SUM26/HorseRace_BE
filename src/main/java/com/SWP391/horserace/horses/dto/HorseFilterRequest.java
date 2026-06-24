@@ -4,8 +4,6 @@ import com.SWP391.horserace.horses.entity.HorseGender;
 import com.SWP391.horserace.horses.entity.HorseStatus;
 import lombok.Data;
 
-import java.util.UUID;
-
 /**
  * Query parameters for the horse list endpoint — combines search, filter, sort and pagination
  * (bound from the query string via {@code @ModelAttribute}). Enum filters are converted from the
@@ -20,7 +18,7 @@ public class HorseFilterRequest {
     private HorseStatus status;
     private HorseGender gender;
     private String breed;        // partial match
-    private UUID ownerUserId;    // exact owner
+    private String ownerUserId;  // exact owner — a UUID string, or the literal "me" (current user)
 
     private String sortBy;       // name | horseCode | createdAt | dateOfBirth | status (default createdAt)
     private String sortDir;      // asc | desc (default desc)

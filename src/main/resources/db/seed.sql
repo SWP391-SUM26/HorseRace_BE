@@ -206,7 +206,12 @@ UPDATE horse SET
     sire_name = 'Storm King', sire_wins = 24, sire_earnings = 4200000.00,
     dam_name = 'Ebony Queen', dam_wins = 12, dam_note = 'Grade 1 Winner',
     trainer_name = 'Marcus Sterling', trainer_license_no = '992',
-    vaccinations_up_to_date = TRUE, recovery_percent = NULL
+    vaccinations_up_to_date = TRUE, recovery_percent = NULL,
+    -- FE-v2 Registration Management (mục 8): eligibility checklist
+    fitness_certified = TRUE,
+    fitness_cert_expires_at = CURRENT_TIMESTAMP + INTERVAL '180 days',
+    passport_scan_status = 'VALID',
+    coggins_test_date = CURRENT_DATE - INTERVAL '90 days'
   WHERE horse_id = 'aaaa1111-aaaa-1111-aaaa-111111111111';
 
 UPDATE horse SET
@@ -215,7 +220,12 @@ UPDATE horse SET
     sire_name = 'Desert Mirage', sire_wins = 18, sire_earnings = 2100000.00,
     dam_name = 'Silver Lining', dam_wins = 7, dam_note = 'Multiple stakes placed',
     trainer_name = 'Aisha Rahman', trainer_license_no = '1187',
-    vaccinations_up_to_date = TRUE, recovery_percent = 80
+    vaccinations_up_to_date = TRUE, recovery_percent = 80,
+    -- FE-v2 Registration Management (mục 8): eligibility checklist (passport pending)
+    fitness_certified = FALSE,
+    fitness_cert_expires_at = NULL,
+    passport_scan_status = 'MISSING',
+    coggins_test_date = CURRENT_DATE - INTERVAL '200 days'
   WHERE horse_id = 'aaaa2222-aaaa-2222-aaaa-222222222222';
 
 -- Characteristic tags (@ElementCollection)
@@ -230,6 +240,20 @@ INSERT INTO horse_characteristic (horse_id, tag) VALUES
 UPDATE race_entry SET prize_earned = 1200000.00 WHERE entry_id = 'eeee1111-eeee-1111-eeee-111111111111'; -- ENT-001 Midnight Thunder
 UPDATE race_entry SET prize_earned =  450000.00 WHERE entry_id = 'eeee2222-eeee-2222-eeee-222222222222'; -- ENT-002 Silver Bullet
 UPDATE race_entry SET prize_earned =  150000.00 WHERE entry_id = 'eeee3333-eeee-3333-eeee-333333333333'; -- ENT-003 Sapphire Wind
+
+-- FE-v2 Registration Management (mục 8): registration category (drives the category filter)
+UPDATE tournament_registration SET category = 'GROUP_1' WHERE registration_id = 'dddd1111-dddd-1111-dddd-111111111111';
+UPDATE tournament_registration SET category = 'GROUP_2' WHERE registration_id = 'dddd2222-dddd-2222-dddd-222222222222';
+UPDATE tournament_registration SET category = 'GROUP_1' WHERE registration_id = 'dddd3333-dddd-3333-dddd-333333333333';
+UPDATE tournament_registration SET category = 'HANDICAP' WHERE registration_id = 'dddd4444-dddd-4444-dddd-444444444444';
+
+-- FE-v2 Live monitor (mục 4): telemetry + clock on Race 1 so GET /races/{id}/live shows real data.
+UPDATE race SET
+    actual_start_at = CURRENT_TIMESTAMP - INTERVAL '90 seconds',
+    wind_speed_kph  = 12.40,
+    wind_direction  = 'NW',
+    video_feed_url  = 'https://stream.example/race-1.m3u8'
+  WHERE race_id = 'cccc1111-cccc-1111-cccc-111111111111';
 
 -- Race results (drive starts/wins/top3 in GET /horses/{id}/stats)
 INSERT INTO race_result (result_id, race_id, entry_id, finish_position, current_version_no, officiality_status, published_at) VALUES
@@ -426,3 +450,42 @@ INSERT INTO reward (reward_id, user_id, reward_type, amount, title, description,
         'DAILY_LOGIN', 50000.00, 'Daily Login Reward', 'Reward for logging in today.', 'PENDING'),
     ('10000000-0000-0000-0000-000000000002', (SELECT user_id FROM app_user WHERE email='jane@horserace.local'),
         'MILESTONE', 200000.00, '10th Prediction Milestone', 'Reward for placing 10 predictions.', 'CLAIMED');
+
+-- =========================================================
+-- FE-v2 Referee demo data — inspections, violations, result times + race telemetry
+-- so the Referee portal pages render rich content. Belmont Autumn Stakes = cccc1111
+-- (entries: eeee1111 Midnight Thunder, eeee3333 Sapphire Wind, eeee4444 Golden Arrow).
+-- =========================================================
+
+-- Pre-race inspections for Belmont's runners (varied states: CLEARED / VET_CHECK / PENDING).
+INSERT INTO race_entry_inspection (inspection_id, entry_id, race_id, health_cert_passed, weight_verified, weight_carried_lbs, coggins_test_passed, pre_race_exam_passed, inspection_status, steward_note, inspected_by_user_id, inspected_at) VALUES
+    ('a1a1a1a1-0000-0000-0000-000000000001', 'eeee1111-eeee-1111-eeee-111111111111', 'cccc1111-cccc-1111-cccc-111111111111',
+        TRUE, TRUE, 126, TRUE, TRUE, 'CLEARED', 'Sound on the trot-up. Cleared to race.', '55555555-5555-5555-5555-555555555555', CURRENT_TIMESTAMP - INTERVAL '40 minutes'),
+    ('a1a1a1a1-0000-0000-0000-000000000002', 'eeee3333-eeee-3333-eeee-333333333333', 'cccc1111-cccc-1111-cccc-111111111111',
+        FALSE, TRUE, 122, TRUE, FALSE, 'VET_CHECK', 'Acting fractious in the paddock — vet review requested.', '55555555-5555-5555-5555-555555555555', CURRENT_TIMESTAMP - INTERVAL '30 minutes'),
+    ('a1a1a1a1-0000-0000-0000-000000000003', 'eeee4444-eeee-4444-eeee-444444444444', 'cccc1111-cccc-1111-cccc-111111111111',
+        TRUE, FALSE, NULL, FALSE, FALSE, 'PENDING', NULL, NULL, NULL);
+
+-- Violations for Belmont (Violation Log + Inquiry Details): 2 pending + 1 resolved.
+INSERT INTO race_violation (violation_id, race_id, entry_id, jockey_user_id, infraction_type, severity, turn_no, race_time_offset_ms, remarks, regulatory_ref, status, reported_by_user_id) VALUES
+    ('b1b1b1b1-0000-0000-0000-000000000001', 'cccc1111-cccc-1111-cccc-111111111111', 'eeee3333-eeee-3333-eeee-333333333333', '11111111-1111-1111-1111-111111111111',
+        'WHIP_USAGE', 'CRITICAL', 3, 72040, 'Jockey appeared to strike the horse aggressively and repeatedly entering Turn 3, exceeding the operational limit.', 'Rule 4.2.1 - Whip Limitations', 'PENDING', '55555555-5555-5555-5555-555555555555'),
+    ('b1b1b1b1-0000-0000-0000-000000000002', 'cccc1111-cccc-1111-cccc-111111111111', 'eeee4444-eeee-4444-eeee-444444444444', NULL,
+        'INTERFERENCE', 'MEDIUM', 5, 105220, 'Impeded progress of a rival on the home stretch.', 'Rule 6.1 - Interference', 'PENDING', '55555555-5555-5555-5555-555555555555');
+INSERT INTO race_violation (violation_id, race_id, entry_id, jockey_user_id, infraction_type, severity, turn_no, race_time_offset_ms, remarks, regulatory_ref, status, reported_by_user_id, decision_type, ruling_notes, ruled_by_user_id, ruled_at) VALUES
+    ('b1b1b1b1-0000-0000-0000-000000000003', 'cccc1111-cccc-1111-cccc-111111111111', 'eeee1111-eeee-1111-eeee-111111111111', '22222222-2222-2222-2222-222222222222',
+        'BUMPING', 'LOW', 2, 40000, 'Minor contact at the start, no material effect.', 'Rule 6.3 - Bumping', 'RESOLVED', '55555555-5555-5555-5555-555555555555', 'WARNING', 'Warning issued; no change to the result.', '55555555-5555-5555-5555-555555555555', CURRENT_TIMESTAMP - INTERVAL '10 minutes');
+
+-- Finish times + margins for Belmont results (Results page shows real times instead of —).
+UPDATE race_result SET finish_time_ms = 94200, lengths_behind = 0.00 WHERE result_id = 'a0a0a0a0-0000-0000-0000-000000000001';
+UPDATE race_result SET finish_time_ms = 95050, lengths_behind = 6.50 WHERE result_id = 'a0a0a0a0-0000-0000-0000-000000000003';
+
+-- Race telemetry / photofinish for Belmont (Results conditions + Live monitor).
+UPDATE race SET wind_speed_kph = 12.40, wind_direction = 'NW', track_bias = 'Inside Rail Advantage',
+    photofinish_url = '/api/v1/files/photofinish-belmont.jpg', video_feed_url = 'https://stream.example/belmont.m3u8'
+  WHERE race_id = 'cccc1111-cccc-1111-cccc-111111111111';
+
+-- Digital-passport fields for Belmont's runners (Pre-Race Inspection passport panel).
+UPDATE horse SET microchip_no = '981020012345678', trainer_name = COALESCE(trainer_name, 'T. Pletcher') WHERE horse_id = 'aaaa1111-aaaa-1111-aaaa-111111111111';
+UPDATE horse SET microchip_no = '985112003456789', trainer_name = COALESCE(trainer_name, 'A. O''Brien') WHERE horse_id = 'aaaa3333-aaaa-3333-aaaa-333333333333';
+UPDATE horse SET microchip_no = '981020087654321', trainer_name = COALESCE(trainer_name, 'C. Appleby') WHERE horse_id = 'aaaa4444-aaaa-4444-aaaa-444444444444';

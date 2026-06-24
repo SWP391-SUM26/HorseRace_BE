@@ -19,8 +19,13 @@ import java.util.UUID;
 
 public interface HorseService {
 
-    /** List horses with search + filter + sort + pagination. */
-    Page<HorseResponse> listHorses(HorseFilterRequest filter);
+    /**
+     * List horses with search + filter + sort + pagination.
+     *
+     * @param currentUserId the authenticated caller — used to resolve {@code ?ownerUserId=me}
+     *                      (the "My Stable" filter); may be null for anonymous/public calls.
+     */
+    Page<HorseResponse> listHorses(HorseFilterRequest filter, UUID currentUserId);
 
     HorseResponse getHorseById(UUID horseId);
 

@@ -4,14 +4,17 @@ import com.SWP391.horserace.horses.dto.MedicalStatusResponse;
 import com.SWP391.horserace.referee.dto.CreateReportRequest;
 import com.SWP391.horserace.referee.dto.HealthCheckRequest;
 import com.SWP391.horserace.referee.dto.ReportFilterRequest;
+import com.SWP391.horserace.referee.dto.RefereeDashboardResponse;
 import com.SWP391.horserace.referee.dto.ReportResponse;
 import com.SWP391.horserace.referee.dto.UpdateReportRequest;
+import com.SWP391.horserace.referee.service.RefereeDashboardService;
 import com.SWP391.horserace.referee.service.RefereeService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -21,6 +24,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -32,10 +36,25 @@ import java.util.UUID;
 public class RefereeController {
 
     private final RefereeService refereeService;
+    private final RefereeDashboardService refereeDashboardService;
+
+    /** GET /api/v1/referee/dashboard — aggregate for screen 1 (optional {@code ?raceId=}). */
+    @GetMapping("/dashboard")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
+    public ApiResponse<RefereeDashboardResponse> getDashboard(
+            @AuthenticationPrincipal UUID userId,
+            @RequestParam(value = "raceId", required = false) UUID raceId) {
+        return ApiResponse.<RefereeDashboardResponse>builder()
+                .success(true)
+                .message("Fetched referee dashboard")
+                .data(refereeDashboardService.getDashboard(userId, raceId))
+                .build();
+    }
 
     /** POST /api/v1/referee/horses/{horseId}/health-check — record a horse health check. */
     @PostMapping("/horses/{horseId}/health-check")
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<MedicalStatusResponse> recordHealthCheck(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID horseId,
@@ -50,6 +69,7 @@ public class RefereeController {
     /** POST /api/v1/referee/reports — file a referee report (incident / violation / objection / general). */
     @PostMapping("/reports")
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<ReportResponse> createReport(
             @AuthenticationPrincipal UUID userId,
             @Valid @RequestBody CreateReportRequest request) {
@@ -62,6 +82,7 @@ public class RefereeController {
 
     /** GET /api/v1/referee/reports — list reports with filters, sort and pagination. */
     @GetMapping("/reports")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<Page<ReportResponse>> listReports(@ModelAttribute ReportFilterRequest filter) {
         return ApiResponse.<Page<ReportResponse>>builder()
                 .success(true)
@@ -72,6 +93,7 @@ public class RefereeController {
 
     /** PUT /api/v1/referee/reports/{id} — partial update of a DRAFT report. */
     @PutMapping("/reports/{id}")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<ReportResponse> updateReport(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id,
@@ -85,6 +107,7 @@ public class RefereeController {
 
     /** PATCH /api/v1/referee/reports/{id}/submit — submit a DRAFT report officially. */
     @PatchMapping("/reports/{id}/submit")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<ReportResponse> submitReport(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id) {

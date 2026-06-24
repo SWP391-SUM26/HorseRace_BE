@@ -11,6 +11,7 @@ import com.SWP391.horserace.races.repository.RaceRepository;
 import com.SWP391.horserace.registrations.dto.RegistrationFilterRequest;
 import com.SWP391.horserace.registrations.dto.RegistrationRequest;
 import com.SWP391.horserace.registrations.dto.RegistrationResponse;
+import com.SWP391.horserace.registrations.dto.RegistrationStatsResponse;
 import com.SWP391.horserace.registrations.dto.RejectRegistrationRequest;
 import com.SWP391.horserace.registrations.entity.RegistrationStatus;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
@@ -33,6 +34,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -123,6 +125,33 @@ public class RegistrationServiceImpl implements RegistrationService {
         TournamentRegistration registration = registrationRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new AppException(ErrorCode.REGISTRATION_NOT_FOUND));
         return mapToResponse(registration);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public RegistrationStatsResponse getStats(UUID tournamentId) {
+        List<RegistrationRepository.StatusCount> rows = (tournamentId == null)
+                ? registrationRepository.countGroupByStatus()
+                : registrationRepository.countGroupByStatusForTournament(tournamentId);
+
+        long total = 0, pending = 0, approved = 0, rejected = 0;
+        for (RegistrationRepository.StatusCount row : rows) {
+            long cnt = row.getCnt();
+            total += cnt;
+            switch (row.getStatus()) {
+                case SUBMITTED, UNDER_REVIEW -> pending += cnt;
+                case APPROVED -> approved += cnt;
+                case REJECTED -> rejected += cnt;
+                default -> { /* DRAFT / WITHDRAWN count toward total only */ }
+            }
+        }
+
+        return RegistrationStatsResponse.builder()
+                .total(total)
+                .pending(pending)
+                .approved(approved)
+                .rejected(rejected)
+                .build();
     }
 
     @Override
@@ -306,6 +335,7 @@ public class RegistrationServiceImpl implements RegistrationService {
                 .horseCode(horse != null ? horse.getHorseCode() : null)
                 .raceId(race != null ? race.getRaceId() : null)
                 .raceName(race != null ? race.getName() : null)
+                .category(r.getCategory())
                 .submittedAt(r.getSubmittedAt())
                 .reviewedAt(r.getReviewedAt())
                 .approvedByUserId(approvedBy != null ? approvedBy.getUserId() : null)
