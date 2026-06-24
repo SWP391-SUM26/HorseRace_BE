@@ -22,6 +22,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Service
@@ -53,6 +54,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AppException(ErrorCode.INVALID_CREDENTIALS);
         }
         ensureActive(user);
+        recordLogin(user);
         return issueTokens(user, userAgent);
     }
 
@@ -79,6 +81,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         ensureActive(user);
+        recordLogin(user);
         return issueTokens(user, userAgent);
     }
 
@@ -208,6 +211,15 @@ public class AuthServiceImpl implements AuthService {
     // =========================================================
     // Private helpers
     // =========================================================
+
+    /**
+     * Stamps {@code last_login_at} on a successful interactive login (password / Google) and
+     * persists it. Not called on token refresh or registration — only genuine login events.
+     */
+    private void recordLogin(User user) {
+        user.setLastLoginAt(OffsetDateTime.now());
+        userRepository.save(user);
+    }
 
     private AuthResponse issueTokens(User user, String userAgent) {
         String accessToken = jwtService.generateAccessToken(user);

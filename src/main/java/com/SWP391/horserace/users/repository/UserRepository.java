@@ -3,6 +3,7 @@ package com.SWP391.horserace.users.repository;
 import com.SWP391.horserace.users.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -25,4 +26,24 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     Optional<User> findByEmailAndDeletedFalse(String email);
 
     boolean existsByEmail(String email);
+
+    /** Total non soft-deleted users (powers the Total Users KPI). */
+    long countByDeletedFalse();
+
+    /**
+     * Non-deleted user counts grouped by role code. Each row is {@code [roleCode, count]}.
+     * Users without a role are excluded (their {@code role.roleCode} is null).
+     */
+    @Query("SELECT u.role.roleCode, COUNT(u) FROM User u "
+            + "WHERE u.deleted = false AND u.role IS NOT NULL "
+            + "GROUP BY u.role.roleCode")
+    List<Object[]> countByRoleCodeGrouped();
+
+    /**
+     * Non-deleted user counts grouped by status. Each row is {@code [UserStatus, count]}.
+     */
+    @Query("SELECT u.status, COUNT(u) FROM User u "
+            + "WHERE u.deleted = false "
+            + "GROUP BY u.status")
+    List<Object[]> countByStatusGrouped();
 }

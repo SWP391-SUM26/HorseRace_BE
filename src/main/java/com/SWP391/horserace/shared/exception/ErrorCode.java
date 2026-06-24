@@ -39,6 +39,9 @@ public enum ErrorCode {
     EMAIL_SEND_FAILED(1021, "Failed to send email", HttpStatus.INTERNAL_SERVER_ERROR),
     PASSWORD_TOO_WEAK(1022, "Password must be at least 8 characters and contain 1 number and 1 symbol", HttpStatus.BAD_REQUEST),
 
+    // ---- admin user management ----
+    INVALID_USER_STATUS(1023, "Invalid user status. Allowed: ACTIVE, INACTIVE, SUSPENDED, BANNED", HttpStatus.BAD_REQUEST),
+
     // ---- jockey ----
     JOCKEY_NOT_FOUND(2001, "Jockey profile not found", HttpStatus.NOT_FOUND),
 

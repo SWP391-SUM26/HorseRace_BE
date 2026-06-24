@@ -24,5 +24,6 @@ public class UserResponse {
     private String googleId;
     private String roleCode;
     private String roleName;
+    private OffsetDateTime lastLoginAt;
     private OffsetDateTime createdAt;
 }
