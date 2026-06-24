@@ -10,4 +10,6 @@ public interface LiveRaceService {
     LiveRaceResponse getLive(UUID raceId);
 
     void updateLivePositions(UUID raceId, com.SWP391.horserace.races.dto.UpdateLivePositionRequest request);
+
+    java.util.List<LiveRaceResponse.RunnerRow> getLiveLeaderboard(UUID raceId);
 }

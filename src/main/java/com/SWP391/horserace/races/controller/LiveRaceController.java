@@ -49,4 +49,14 @@ public class LiveRaceController {
                 .message("Live positions updated successfully")
                 .build();
     }
+
+    /** GET — current live leaderboard (running order) for one race. */
+    @GetMapping("/leaderboard")
+    public ApiResponse<java.util.List<LiveRaceResponse.RunnerRow>> getLiveLeaderboard(@PathVariable UUID raceId) {
+        return ApiResponse.<java.util.List<LiveRaceResponse.RunnerRow>>builder()
+                .success(true)
+                .message("Fetched live leaderboard")
+                .data(liveRaceService.getLiveLeaderboard(raceId))
+                .build();
+    }
 }
