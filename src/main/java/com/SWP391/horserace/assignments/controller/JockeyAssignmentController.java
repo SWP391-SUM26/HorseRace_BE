@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -130,6 +131,27 @@ public class JockeyAssignmentController {
         return ApiResponse.<InvitationResponse>builder()
                 .success(true)
                 .message("Invitation rejected")
+                .data(response)
+                .build();
+    }
+
+    // -------------------------------------------------------------------------
+    // PATCH /api/v1/assignments/invitations/{id}/withdraw — Withdraw (Jockey)
+    // -------------------------------------------------------------------------
+    /**
+     * Jockey withdraws from a ride they previously ACCEPTED (status → CANCELLED).
+     * FE-v2 jockey contract #9. Only the invited jockey, only from ACCEPTED.
+     */
+    @PatchMapping("/{id}/withdraw")
+    public ApiResponse<InvitationResponse> withdrawInvitation(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UUID userId) {
+
+        InvitationResponse response = assignmentService.withdrawInvitation(id, userId);
+
+        return ApiResponse.<InvitationResponse>builder()
+                .success(true)
+                .message("Ride withdrawn")
                 .data(response)
                 .build();
     }

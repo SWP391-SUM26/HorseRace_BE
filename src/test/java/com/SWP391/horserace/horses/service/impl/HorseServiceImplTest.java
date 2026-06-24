@@ -15,6 +15,7 @@ import com.SWP391.horserace.races.dto.RaceEntryResponse;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
 import com.SWP391.horserace.races.entity.RaceEntryStatus;
+import com.SWP391.horserace.races.entity.RaceResult;
 import com.SWP391.horserace.races.entity.RaceStatus;
 import com.SWP391.horserace.races.repository.RaceEntryRepository;
 import com.SWP391.horserace.races.repository.RaceRepository;
@@ -37,6 +38,7 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -234,6 +236,60 @@ class HorseServiceImplTest {
         assertThat(item.getEntryStatus()).isEqualTo("ENTERED");
         assertThat(item.getEntryCode()).isEqualTo("ENT00001");
         assertThat(item.getFinishPosition()).isNull();
+    }
+
+    // ── ride intelligence (#7) ──
+
+    @Test
+    void getRideIntelligence_horseNotFound_throws() {
+        UUID id = UUID.randomUUID();
+        when(horseRepository.findByHorseIdAndDeletedFalse(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getRideIntelligence(id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.HORSE_NOT_FOUND);
+    }
+
+    @Test
+    void getRideIntelligence_buildsTrainerOwnerSurfaceRecentFormAndPostTime() {
+        UUID id = UUID.randomUUID();
+        Horse horse = Horse.builder()
+                .horseId(id).owner(owner).name("Midnight Thunder")
+                .trainerName("Sarah Jenkins")
+                .characteristics(new java.util.HashSet<>(List.of("FIRM_TURF", "STRONG_CLOSER")))
+                .build();
+        when(horseRepository.findByHorseIdAndDeletedFalse(id)).thenReturn(Optional.of(horse));
+
+        OffsetDateTime now = OffsetDateTime.now();
+        // newest-first: a finished race, then an upcoming SCHEDULED race
+        Race finished = Race.builder().raceId(UUID.randomUUID()).status(RaceStatus.FINISHED)
+                .scheduledStartAt(now.minusDays(5)).build();
+        Race finished2 = Race.builder().raceId(UUID.randomUUID()).status(RaceStatus.FINISHED)
+                .scheduledStartAt(now.minusDays(10)).build();
+        Race upcoming = Race.builder().raceId(UUID.randomUUID()).status(RaceStatus.SCHEDULED)
+                .scheduledStartAt(now.plusDays(3)).build();
+
+        UUID e1 = UUID.randomUUID(), e2 = UUID.randomUUID(), e3 = UUID.randomUUID();
+        RaceEntry en1 = RaceEntry.builder().entryId(e1).race(finished).build();   // most recent result
+        RaceEntry en2 = RaceEntry.builder().entryId(e2).race(finished2).build();
+        RaceEntry en3 = RaceEntry.builder().entryId(e3).race(upcoming).build();   // no result
+
+        // history returned newest scheduled first
+        when(raceEntryRepository.findHistoryByHorseId(id))
+                .thenReturn(List.of(en3, en1, en2));
+        when(raceResultRepository.findByEntry_EntryIdIn(anyCollection())).thenReturn(List.of(
+                RaceResult.builder().entry(en1).finishPosition(1).build(),
+                RaceResult.builder().entry(en2).finishPosition(2).build()));
+
+        var intel = service.getRideIntelligence(id);
+
+        assertThat(intel.getTrainer()).isEqualTo("Sarah Jenkins");
+        assertThat(intel.getOwner()).isEqualTo("Owen Owner");
+        assertThat(intel.getPreferredSurface()).isEqualTo("TURF");
+        // recentForm: ordered by history (en3 no result skipped, en1=1, en2=2)
+        assertThat(intel.getRecentForm()).isEqualTo("1-2");
+        assertThat(intel.getPostTime()).isEqualTo(upcoming.getScheduledStartAt());
+        assertThat(intel.getFormNotes()).isNull();
     }
 
     // ── assign to race ──
