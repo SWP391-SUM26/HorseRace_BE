@@ -98,17 +98,22 @@ public class LiveRaceServiceImpl implements LiveRaceService {
                     .map(r -> r.getEntry().getEntryId())
                     .toList();
             Map<UUID, String> jockeyByEntry = jockeyNamesByEntryIds(entryIds);
+            Map<UUID, UpdateLivePositionRequest.RunnerTelemetry> telemetry = liveTelemetryCache.getOrDefault(raceId, Map.of());
             List<LiveRaceResponse.RunnerRow> rows = results.stream()
                     .sorted(Comparator.comparing(RaceResult::getFinishPosition,
                             Comparator.nullsLast(Comparator.naturalOrder())))
                     .map(r -> {
                         RaceEntry e = r.getEntry();
                         Horse horse = e.getRegistration() != null ? e.getRegistration().getHorse() : null;
+                        UpdateLivePositionRequest.RunnerTelemetry t = telemetry.get(e.getEntryId());
+                        BigDecimal speed = t != null && t.getCurrentSpeedKph() != null
+                                ? t.getCurrentSpeedKph()
+                                : BigDecimal.ZERO;
                         return LiveRaceResponse.RunnerRow.builder()
                                 .entryNo(e.getEntryNo())
                                 .horseName(horse != null ? horse.getName() : null)
                                 .jockeyName(jockeyByEntry.getOrDefault(e.getEntryId(), "TBD"))
-                                .currentSpeedKph(BigDecimal.ZERO)
+                                .currentSpeedKph(speed)
                                 .build();
                     })
                     .toList();
