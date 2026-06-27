@@ -44,7 +44,8 @@ public class LiveRaceServiceImpl implements LiveRaceService {
         Race race = raceRepository.findByRaceIdAndDeletedFalse(raceId)
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
 
-        Map<UUID, UpdateLivePositionRequest.RunnerTelemetry> raceTelemetry = liveTelemetryCache.computeIfAbsent(raceId, k -> new ConcurrentHashMap<>());
+        Map<UUID, UpdateLivePositionRequest.RunnerTelemetry> raceTelemetry = liveTelemetryCache.computeIfAbsent(raceId,
+                k -> new ConcurrentHashMap<>());
         for (UpdateLivePositionRequest.RunnerTelemetry runner : request.getRunners()) {
             raceTelemetry.put(runner.getEntryId(), runner);
         }
@@ -53,7 +54,8 @@ public class LiveRaceServiceImpl implements LiveRaceService {
     @Override
     @Transactional(readOnly = true)
     public LiveRaceResponse getLive(UUID raceId) {
-        // TODO(realtime): WebSocket /topic/races/{id}/live for push; this is the poll fallback.
+        // TODO(realtime): WebSocket /topic/races/{id}/live for push; this is the poll
+        // fallback.
         Race race = raceRepository.findByRaceIdAndDeletedFalse(raceId)
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
 
@@ -79,13 +81,15 @@ public class LiveRaceServiceImpl implements LiveRaceService {
     @Override
     @Transactional(readOnly = true)
     public List<LiveRaceResponse.RunnerRow> getLiveLeaderboard(UUID raceId) {
-        // Delegate to the same logic that builds the running order for the full live view
+        // Delegate to the same logic that builds the running order for the full live
+        // view
         return buildRunningOrder(raceId);
     }
 
     /**
-     * Prefer the current results (ordered by finish position); if none recorded yet, fall back to
-     * the race's entries ordered by live telemetry, then lane, then entry number. 
+     * Prefer the current results (ordered by finish position); if none recorded
+     * yet, fall back to
+     * the race's entries ordered by live telemetry, then lane, then entry number.
      */
     private List<LiveRaceResponse.RunnerRow> buildRunningOrder(UUID raceId) {
         List<RaceResult> results = raceResultRepository.findByRaceIdWithEntry(raceId);
@@ -94,32 +98,39 @@ public class LiveRaceServiceImpl implements LiveRaceService {
                     .map(r -> r.getEntry().getEntryId())
                     .toList();
             Map<UUID, String> jockeyByEntry = jockeyNamesByEntryIds(entryIds);
+            Map<UUID, UpdateLivePositionRequest.RunnerTelemetry> telemetry = liveTelemetryCache.getOrDefault(raceId, Map.of());
             List<LiveRaceResponse.RunnerRow> rows = results.stream()
                     .sorted(Comparator.comparing(RaceResult::getFinishPosition,
                             Comparator.nullsLast(Comparator.naturalOrder())))
                     .map(r -> {
                         RaceEntry e = r.getEntry();
                         Horse horse = e.getRegistration() != null ? e.getRegistration().getHorse() : null;
+                        UpdateLivePositionRequest.RunnerTelemetry t = telemetry.get(e.getEntryId());
+                        BigDecimal speed = t != null && t.getCurrentSpeedKph() != null
+                                ? t.getCurrentSpeedKph()
+                                : BigDecimal.ZERO;
                         return LiveRaceResponse.RunnerRow.builder()
                                 .entryNo(e.getEntryNo())
                                 .horseName(horse != null ? horse.getName() : null)
                                 .jockeyName(jockeyByEntry.getOrDefault(e.getEntryId(), "TBD"))
-                                .currentSpeedKph(null) // results sheet has no live speed source
+                                .currentSpeedKph(speed)
                                 .build();
                     })
                     .toList();
-            
+
             for (int i = 0; i < rows.size(); i++) {
                 rows.get(i).setPosition(i + 1);
             }
             return rows;
         }
 
-        // Fallback: no results yet — list the entries by live position, then lane, then entry number.
+        // Fallback: no results yet — list the entries by live position, then lane, then
+        // entry number.
         List<RaceEntry> entries = raceEntryRepository.findByRaceIdWithHorse(raceId);
         List<UUID> entryIds = entries.stream().map(RaceEntry::getEntryId).toList();
         Map<UUID, String> jockeyByEntry = jockeyNamesByEntryIds(entryIds);
-        Map<UUID, UpdateLivePositionRequest.RunnerTelemetry> telemetry = liveTelemetryCache.getOrDefault(raceId, Map.of());
+        Map<UUID, UpdateLivePositionRequest.RunnerTelemetry> telemetry = liveTelemetryCache.getOrDefault(raceId,
+                Map.of());
 
         List<LiveRaceResponse.RunnerRow> rows = entries.stream()
                 .sorted(Comparator
@@ -134,7 +145,7 @@ public class LiveRaceServiceImpl implements LiveRaceService {
                     UpdateLivePositionRequest.RunnerTelemetry t = telemetry.get(e.getEntryId());
                     BigDecimal speed = t != null && t.getCurrentSpeedKph() != null
                             ? t.getCurrentSpeedKph()
-                            : null; // no telemetry yet -> null (not zero)
+                            : BigDecimal.ZERO;
                     return LiveRaceResponse.RunnerRow.builder()
                             .entryNo(e.getEntryNo())
                             .horseName(horse != null ? horse.getName() : null)
@@ -148,7 +159,9 @@ public class LiveRaceServiceImpl implements LiveRaceService {
         return rows;
     }
 
-    /** Riding (ACCEPTED) jockey name per entry, resolved in one query (avoids N+1). */
+    /**
+     * Riding (ACCEPTED) jockey name per entry, resolved in one query (avoids N+1).
+     */
     private Map<UUID, String> jockeyNamesByEntryIds(List<UUID> entryIds) {
         if (entryIds.isEmpty()) {
             return Map.of();
