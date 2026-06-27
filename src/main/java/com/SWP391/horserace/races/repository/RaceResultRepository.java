@@ -11,8 +11,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+
 @Repository
-public interface RaceResultRepository extends JpaRepository<RaceResult, UUID> {
+public interface RaceResultRepository extends JpaRepository<RaceResult, UUID>, JpaSpecificationExecutor<RaceResult> {
 
     /** Results for a set of entries — used to fill finishPosition into a horse's race history. */
     List<RaceResult> findByEntry_EntryIdIn(Collection<UUID> entryIds);
