@@ -15,6 +15,8 @@ public record CreateViolationRequest(
         Long raceTimeOffsetMs,
         String remarks,
         String regulatoryRef,
-        UUID footageAttachmentId
+        UUID footageAttachmentId,
+        /** The referee's per-race code (admin-issued); required for referees, ignored for admins. */
+        String refCode
 ) {
 }

@@ -69,6 +69,9 @@ public class Race {
     @Column(name = "max_participants")
     private Integer maxParticipants;
 
+    @Column(name = "min_participants")
+    private Integer minParticipants;
+
     @Column(name = "venue")
     private String venue;
 

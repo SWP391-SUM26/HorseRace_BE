@@ -17,6 +17,9 @@ public interface UserService {
     UserResponse getUserById(UUID id);
     List<UserResponse> getAllUsers();
 
+    /** First-place finishes of horses owned by this user (admin user-detail). */
+    List<com.SWP391.horserace.users.dto.UserWinResponse> getUserWins(UUID userId);
+
     /**
      * Admin: filtered, paginated user listing (non-deleted users only). Supports free-text
      * {@code q} (name/email/code), {@code roleCode}, {@code status}, plus page/size/sort.

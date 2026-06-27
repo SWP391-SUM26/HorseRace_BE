@@ -9,7 +9,9 @@ import java.util.UUID;
 
 /** Body for POST /api/v1/races/{raceId}/results — bulk upsert the finish order (FE-v2 mục 5). */
 public record RecordResultsRequest(
-        @Valid @NotNull List<ResultRow> results
+        @Valid @NotNull List<ResultRow> results,
+        /** The referee's per-race code (admin-issued); required for referees, ignored for admins. */
+        String refCode
 ) {
 
     /** One entry's recorded result. */

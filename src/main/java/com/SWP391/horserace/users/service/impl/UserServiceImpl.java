@@ -58,11 +58,39 @@ public class UserServiceImpl implements UserService {
     private final ImageUploadService imageUploadService;
     private final PermissionRepository permissionRepository;
     private final RoleRepository roleRepository;
+    private final com.SWP391.horserace.races.repository.RaceResultRepository raceResultRepository;
 
     @Override
     @Transactional(readOnly = true)
     public UserResponse getUserById(UUID id) {
         return mapToResponse(loadActiveUser(id));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<com.SWP391.horserace.users.dto.UserWinResponse> getUserWins(UUID userId) {
+        loadActiveUser(userId); // 404 if the user doesn't exist
+        return raceResultRepository.findWinsByOwnerUserId(userId).stream()
+                .map(rr -> {
+                    var race = rr.getRace();
+                    var tournament = race != null ? race.getTournament() : null;
+                    var entry = rr.getEntry();
+                    var horse = entry != null && entry.getRegistration() != null
+                            ? entry.getRegistration().getHorse() : null;
+                    return com.SWP391.horserace.users.dto.UserWinResponse.builder()
+                            .raceId(race != null ? race.getRaceId() : null)
+                            .raceCode(race != null ? race.getRaceCode() : null)
+                            .raceName(race != null ? race.getName() : null)
+                            .tournamentId(tournament != null ? tournament.getTournamentId() : null)
+                            .tournamentName(tournament != null ? tournament.getName() : null)
+                            .horseId(horse != null ? horse.getHorseId() : null)
+                            .horseName(horse != null ? horse.getName() : null)
+                            .finishPosition(rr.getFinishPosition())
+                            .scheduledStartAt(race != null ? race.getScheduledStartAt() : null)
+                            .prizeEarned(entry != null ? entry.getPrizeEarned() : null)
+                            .build();
+                })
+                .collect(Collectors.toList());
     }
 
     @Override

@@ -24,12 +24,15 @@ public class RaceResponse {
     private OffsetDateTime actualEndAt;
     private OffsetDateTime predictionCutoffAt;
     private Integer maxParticipants;
+    private Integer minParticipants;
     private String venue;
     // §D1 — linked structured venue (FK). venueName is populated from the linked venue when present.
     private UUID venueId;
     private String venueName;
     // §D2 — number of race_entry rows for this race (avoids a second /entries call)
     private long entriesCount;
+    // Confirmed runners = entries whose jockey has ACCEPTED (used for the admin "enough?" check).
+    private long confirmedCount;
     private Integer goingMoisturePct;
     private BigDecimal totalPurse;
     private List<PrizeDistributionDto> prizeDistribution;

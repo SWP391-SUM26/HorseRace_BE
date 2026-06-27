@@ -45,15 +45,19 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class UserServiceImplTest {
 
-    @Mock UserRepository userRepository;
-    @Mock PermissionRepository permissionRepository;
-    @Mock RoleRepository roleRepository;
+    @Mock
+    UserRepository userRepository;
+    @Mock
+    PermissionRepository permissionRepository;
+    @Mock
+    RoleRepository roleRepository;
 
     private UserServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        // ImageUploadService is a concrete class (not mockable on this JVM); construct a real
+        // ImageUploadService is a concrete class (not mockable on this JVM); construct
+        // a real
         // instance over a mocked FileStorageService — not exercised by these tests.
         service = new UserServiceImpl(userRepository,
                 new ImageUploadService(Mockito.mock(FileStorageService.class)),
@@ -217,11 +221,11 @@ class UserServiceImplTest {
     void getUserStats_aggregatesTotalsByRoleAndStatus() {
         when(userRepository.countByDeletedFalse()).thenReturn(10L);
         when(userRepository.countByRoleCodeGrouped()).thenReturn(List.of(
-                new Object[]{"ADMIN", 1L},
-                new Object[]{"JOCKEY", 4L}));
+                new Object[] { "ADMIN", 1L },
+                new Object[] { "JOCKEY", 4L }));
         when(userRepository.countByStatusGrouped()).thenReturn(List.of(
-                new Object[]{UserStatus.ACTIVE, 9L},
-                new Object[]{UserStatus.SUSPENDED, 1L}));
+                new Object[] { UserStatus.ACTIVE, 9L },
+                new Object[] { UserStatus.SUSPENDED, 1L }));
 
         UserStatsResponse stats = service.getUserStats();
 

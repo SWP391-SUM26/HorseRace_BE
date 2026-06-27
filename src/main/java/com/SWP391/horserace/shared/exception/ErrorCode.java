@@ -56,6 +56,7 @@ public enum ErrorCode {
     NOT_INVITED_JOCKEY(2009, "You are not the jockey invited for this assignment", HttpStatus.FORBIDDEN),
     OWNER_NOT_MATCH(2010, "You are not the owner of this horse entry", HttpStatus.FORBIDDEN),
     INVITATION_NOT_ACCEPTED(2011, "Only ACCEPTED rides can be withdrawn", HttpStatus.BAD_REQUEST),
+    WITHDRAW_TOO_LATE(2012, "A jockey must withdraw at least 5 days before the race", HttpStatus.BAD_REQUEST),
 
     // ---- tournament ----
     TOURNAMENT_NOT_FOUND(3001, "Tournament not found", HttpStatus.NOT_FOUND),
@@ -71,6 +72,13 @@ public enum ErrorCode {
     REFEREE_ASSIGNMENT_NOT_FOUND(4005, "Referee assignment not found", HttpStatus.NOT_FOUND),
     ASSIGNMENT_ALREADY_REVOKED(4006, "Assignment has already been revoked", HttpStatus.BAD_REQUEST),
     STAFF_EMAIL_EXISTED(4007, "Email is already registered", HttpStatus.CONFLICT),
+    REFEREE_NOT_ASSIGNED(4008, "You are not assigned to officiate this race", HttpStatus.FORBIDDEN),
+    REFEREE_CODE_REQUIRED(4009, "Your referee race code is required to submit", HttpStatus.BAD_REQUEST),
+    REFEREE_CODE_INVALID(4010, "Referee race code is invalid for this race", HttpStatus.FORBIDDEN),
+    TOURNAMENT_REFEREE_ALREADY_INVITED(4011, "This referee is already invited to this tournament", HttpStatus.CONFLICT),
+    TOURNAMENT_INVITATION_NOT_FOUND(4012, "Tournament referee invitation not found", HttpStatus.NOT_FOUND),
+    NOT_INVITED_REFEREE(4013, "This invitation does not belong to you", HttpStatus.FORBIDDEN),
+    TOURNAMENT_INVITATION_NOT_PENDING(4014, "Only pending (INVITED) invitations can be changed", HttpStatus.BAD_REQUEST),
 
     // ---- horse management ----
     HORSE_NOT_FOUND(5001, "Horse not found", HttpStatus.NOT_FOUND),
@@ -78,6 +86,7 @@ public enum ErrorCode {
     MICROCHIP_EXISTED(5004, "Microchip number already exists", HttpStatus.CONFLICT),
     NOT_HORSE_OWNER(5005, "You are not the owner of this horse", HttpStatus.FORBIDDEN),
     HORSE_NO_APPROVED_REGISTRATION(5006, "Horse has no approved registration for this race's tournament", HttpStatus.BAD_REQUEST),
+    MEDICAL_RECORD_NOT_FOUND(5007, "Medical record not found", HttpStatus.NOT_FOUND),
 
     // ---- file upload / storage ----
     FILE_EMPTY(6001, "Uploaded file is empty", HttpStatus.BAD_REQUEST),
@@ -129,6 +138,8 @@ public enum ErrorCode {
     RESULT_NOT_FOUND(9501, "Race result not found", HttpStatus.NOT_FOUND),
     RESULT_INQUIRIES_UNRESOLVED(9502, "All inquiries must be resolved before certification", HttpStatus.BAD_REQUEST),
     RESULT_ENTRY_RACE_MISMATCH(9503, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+    RESULT_ALREADY_OFFICIAL(9504, "Official results can no longer be deleted", HttpStatus.BAD_REQUEST),
+    RACE_NOT_FINISHED(9505, "Results and violations can only be filed after the race has finished", HttpStatus.BAD_REQUEST),
 
     // ---- violations / inquiries (FE-v2 §3) ----
     VIOLATION_NOT_FOUND(9601, "Violation not found", HttpStatus.NOT_FOUND),

@@ -50,6 +50,7 @@ import java.util.UUID;
 public class RefereeAssignmentController {
 
     private final StaffRefereeAssignmentService assignmentService;
+    private final com.SWP391.horserace.staffing.service.TournamentRefereeService tournamentRefereeService;
 
     // -------------------------------------------------------------------------
     // GET /api/v1/staffing/dashboard — Dashboard Statistics
@@ -88,6 +89,40 @@ public class RefereeAssignmentController {
                 .success(true)
                 .message("Fetched race assignments")
                 .data(assignmentService.getRaceAssignments(filter))
+                .build();
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /api/v1/staffing/races/{raceId}/assignments — Full referee panel for a race
+    // -------------------------------------------------------------------------
+    /** GET /api/v1/staffing/my-races — race IDs the signed-in referee is assigned to officiate. */
+    @GetMapping("/my-races")
+    public ApiResponse<java.util.List<UUID>> getMyAssignedRaces(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal UUID userId) {
+        return ApiResponse.<java.util.List<UUID>>builder()
+                .success(true)
+                .message("Fetched assigned race ids")
+                .data(assignmentService.getAssignedRaceIds(userId))
+                .build();
+    }
+
+    /** GET /api/v1/staffing/my-assignments — the signed-in referee's own assignments + per-race codes. */
+    @GetMapping("/my-assignments")
+    public ApiResponse<java.util.List<RefereeAssignmentResponse>> getMyAssignments(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal UUID userId) {
+        return ApiResponse.<java.util.List<RefereeAssignmentResponse>>builder()
+                .success(true)
+                .message("Fetched my assignments")
+                .data(assignmentService.getMyAssignments(userId))
+                .build();
+    }
+
+    @GetMapping("/races/{raceId}/assignments")
+    public ApiResponse<java.util.List<RefereeAssignmentResponse>> getRacePanel(@PathVariable UUID raceId) {
+        return ApiResponse.<java.util.List<RefereeAssignmentResponse>>builder()
+                .success(true)
+                .message("Fetched race panel")
+                .data(assignmentService.getRacePanel(raceId))
                 .build();
     }
 
@@ -142,6 +177,50 @@ public class RefereeAssignmentController {
         return ApiResponse.<Void>builder()
                 .success(true)
                 .message("Assignment removed successfully")
+                .build();
+    }
+
+    // =========================================================================
+    // TOURNAMENT-LEVEL REFEREE INVITATIONS  (admin invite/list/revoke — §E)
+    // =========================================================================
+
+    /** GET /api/v1/staffing/tournament-assignments?tournamentId=&status= — referee panel for a tournament. */
+    @GetMapping("/tournament-assignments")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<java.util.List<com.SWP391.horserace.staffing.dto.TournamentRefereeAssignmentResponse>> listTournamentAssignments(
+            @RequestParam("tournamentId") UUID tournamentId,
+            @RequestParam(value = "status", required = false) String status) {
+        return ApiResponse.<java.util.List<com.SWP391.horserace.staffing.dto.TournamentRefereeAssignmentResponse>>builder()
+                .success(true)
+                .message("Fetched tournament referee invitations")
+                .data(tournamentRefereeService.listByTournament(tournamentId, status))
+                .build();
+    }
+
+    /** POST /api/v1/staffing/tournament-assignments — invite a referee to a tournament (status INVITED). */
+    @PostMapping("/tournament-assignments")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<com.SWP391.horserace.staffing.dto.TournamentRefereeAssignmentResponse> inviteTournamentReferee(
+            @Valid @RequestBody com.SWP391.horserace.staffing.dto.InviteTournamentRefereeRequest request,
+            @RequestParam(value = "currentUserId", required = false) UUID currentUserIdParam,
+            Authentication authentication) {
+        UUID currentUserId = resolveUserId(authentication, currentUserIdParam);
+        return ApiResponse.<com.SWP391.horserace.staffing.dto.TournamentRefereeAssignmentResponse>builder()
+                .success(true)
+                .message("Referee invited to tournament")
+                .data(tournamentRefereeService.invite(currentUserId, request))
+                .build();
+    }
+
+    /** DELETE /api/v1/staffing/tournament-assignments/{id} — revoke an invitation (status REVOKED). */
+    @DeleteMapping("/tournament-assignments/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<Void> revokeTournamentAssignment(@PathVariable UUID id) {
+        tournamentRefereeService.revoke(id);
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("Tournament invitation revoked")
                 .build();
     }
 

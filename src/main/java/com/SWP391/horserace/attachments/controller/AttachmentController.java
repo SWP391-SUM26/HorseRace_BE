@@ -32,7 +32,9 @@ public class AttachmentController {
             @AuthenticationPrincipal UUID userId,
             @RequestParam("file") MultipartFile file,
             @RequestParam("ownerEntityType") String ownerEntityType,
-            @RequestParam("ownerEntityId") UUID ownerEntityId,
+            // Optional — the owner entity (e.g. a violation) may not exist yet at upload time;
+            // the entity then references the returned attachmentId.
+            @RequestParam(value = "ownerEntityId", required = false) UUID ownerEntityId,
             @RequestParam(value = "sensitivityLevel", required = false) String sensitivityLevel) {
         return ApiResponse.<AttachmentResponse>builder()
                 .success(true)

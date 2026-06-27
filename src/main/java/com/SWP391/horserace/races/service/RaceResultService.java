@@ -23,6 +23,9 @@ public interface RaceResultService {
     /** Inline-edit one result row; snapshots the prior values into a new version (AMENDED). */
     UpdateResultResponse updateResult(UUID currentUserId, UUID raceId, UUID resultId, UpdateResultRequest request);
 
+    /** Delete one result row (and its version history). Rejected once results are OFFICIAL. */
+    void deleteResult(UUID currentUserId, UUID raceId, UUID resultId);
+
     /** Certify the race — flips all results + the race to OFFICIAL. */
     CertifyResultsResponse certify(UUID currentUserId, UUID raceId, CertifyResultsRequest request);
 }

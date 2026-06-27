@@ -20,6 +20,8 @@ public class RaceResultsResponse {
     private BigDecimal windSpeedKph;
     private List<String> fractions;
     private String photofinishUrl;
+    /** Stewards' report / race notes — published with the results (FE-v2 race report). */
+    private String stewardsReport;
     private List<OrderRow> order;
 
     /** One row of the finish order. */

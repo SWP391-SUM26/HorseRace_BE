@@ -18,6 +18,15 @@ public interface StaffRefereeAssignmentService {
     /** List race assignments with filters and pagination (Figma table). */
     Page<RaceAssignmentResponse> getRaceAssignments(RaceAssignmentFilterRequest filter);
 
+    /** Full referee panel (all non-revoked assignments) for a single race. */
+    java.util.List<RefereeAssignmentResponse> getRacePanel(UUID raceId);
+
+    /** Distinct race IDs the given referee is actively assigned to officiate. */
+    java.util.List<UUID> getAssignedRaceIds(UUID refereeUserId);
+
+    /** The signed-in referee's own active assignments (including their per-race code). */
+    java.util.List<RefereeAssignmentResponse> getMyAssignments(UUID refereeUserId);
+
     /** Assign a referee to a race (task 148). */
     RefereeAssignmentResponse assignReferee(AssignRefereeRequest request, UUID currentUserId);
 

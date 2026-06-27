@@ -25,6 +25,28 @@ public interface RaceRepository extends JpaRepository<Race, UUID>, JpaSpecificat
     Optional<Race> findByIdWithTournament(@Param("id") UUID id);
 
     /**
+     * Races a horse can still be entered into (Enter Race modal): an APPROVED registration exists
+     * for the horse in the race's tournament, the race is open (SCHEDULED/OPEN), and the horse is
+     * not already entered in that race.
+     */
+    @Query("""
+        SELECT r FROM Race r
+          LEFT JOIN FETCH r.tournament t
+         WHERE r.deleted = false
+           AND r.status IN (com.SWP391.horserace.races.entity.RaceStatus.SCHEDULED,
+                            com.SWP391.horserace.races.entity.RaceStatus.OPEN)
+           AND EXISTS (SELECT 1 FROM TournamentRegistration reg
+                        WHERE reg.horse.horseId = :horseId
+                          AND reg.tournament = r.tournament
+                          AND reg.status = com.SWP391.horserace.registrations.entity.RegistrationStatus.APPROVED)
+           AND NOT EXISTS (SELECT 1 FROM RaceEntry e
+                        WHERE e.race = r
+                          AND e.registration.horse.horseId = :horseId)
+         ORDER BY r.scheduledStartAt ASC NULLS LAST
+        """)
+    List<Race> findEnterableRacesForHorse(@Param("horseId") UUID horseId);
+
+    /**
      * §D3 — count non-deleted races grouped by status, optionally scoped to one tournament.
      * Returns rows of {@code [RaceStatus, Long]}. Null {@code tournamentId} = all tournaments.
      */

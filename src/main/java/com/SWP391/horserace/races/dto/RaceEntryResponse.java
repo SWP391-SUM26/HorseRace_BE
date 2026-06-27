@@ -22,6 +22,7 @@ public class RaceEntryResponse {
     private String horseName;
     private UUID ownerUserId;
     private String ownerName;
+    private UUID jockeyUserId;
     private String jockeyName;
     private Integer weightCarriedLbs;
     private String recentForm;

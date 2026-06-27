@@ -28,6 +28,8 @@ public class RefereeAssignmentResponse {
 
     // -- assignment --
     private String panelRole;
+    /** Per-race code the referee must quote when filing results/violations. */
+    private String refCode;
     private String status;
     private OffsetDateTime assignedAt;
     private OffsetDateTime createdAt;

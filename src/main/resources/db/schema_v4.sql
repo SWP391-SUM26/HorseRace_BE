@@ -55,6 +55,7 @@ DROP TABLE IF EXISTS race                     CASCADE;  -- FKs venue -> drop bef
 DROP TABLE IF EXISTS tournament_round         CASCADE;
 DROP TABLE IF EXISTS tournament               CASCADE;
 DROP TABLE IF EXISTS venue                    CASCADE;  -- after race + tournament_venue
+DROP TABLE IF EXISTS horse_medical_record     CASCADE;
 DROP TABLE IF EXISTS horse_characteristic     CASCADE;
 DROP TABLE IF EXISTS horse                    CASCADE;
 DROP TABLE IF EXISTS jockey_profile           CASCADE;
@@ -248,6 +249,19 @@ CREATE TABLE horse (
     deleted_at          TIMESTAMPTZ
 );
 
+-- HORSE_MEDICAL_RECORD -- owner-managed medical records (certificates / vaccinations / injuries / notes)
+CREATE TABLE horse_medical_record (
+    record_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    horse_id    UUID NOT NULL REFERENCES horse(horse_id),
+    record_type VARCHAR(30) NOT NULL DEFAULT 'NOTE'
+                CHECK (record_type IN ('CERTIFICATE', 'VACCINATION', 'INJURY', 'NOTE')),
+    title       VARCHAR(255) NOT NULL,
+    note        TEXT,
+    record_date DATE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- FE-v2 Horse Profile (mục 1): horse characteristics tags (@ElementCollection)
 CREATE TABLE horse_characteristic (
     horse_id UUID NOT NULL REFERENCES horse(horse_id),
@@ -350,6 +364,7 @@ CREATE TABLE race (
     actual_end_at        TIMESTAMPTZ,
     prediction_cutoff_at TIMESTAMPTZ,
     max_participants     INT CHECK (max_participants IS NULL OR max_participants > 0),
+    min_participants      INT CHECK (min_participants IS NULL OR min_participants > 0),
     venue                VARCHAR(255),
     venue_id             UUID REFERENCES venue(venue_id),  -- §D1 structured venue FK (nullable)
     going_moisture_pct   INT CHECK (going_moisture_pct IS NULL OR (going_moisture_pct BETWEEN 0 AND 100)),
@@ -482,12 +497,29 @@ CREATE TABLE referee_assignment (
     referee_user_id    UUID NOT NULL REFERENCES app_user(user_id),
     panel_role         VARCHAR(50)
                        CHECK (panel_role IN ('CHIEF', 'JUDGE', 'STEWARD', 'TIMEKEEPER', 'OBSERVER')),
+    ref_code           VARCHAR(50) UNIQUE,  -- mã trọng tài/cuộc đua admin cấp; bắt buộc khi nộp report
     status             VARCHAR(50) NOT NULL DEFAULT 'ASSIGNED'
                        CHECK (status IN ('ASSIGNED', 'CONFIRMED', 'REVOKED')),
     assigned_at        TIMESTAMPTZ,
     created_by_user_id UUID REFERENCES app_user(user_id),
     created_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (race_id, referee_user_id)  -- 1 trọng tài / cuộc đua tối đa 1 lần
+);
+
+-- Tournament-level referee invitation (invite/accept flow, distinct from per-race referee_assignment)
+CREATE TABLE tournament_referee_assignment (
+    tournament_ref_assignment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tournament_id      UUID NOT NULL REFERENCES tournament(tournament_id),
+    referee_user_id    UUID NOT NULL REFERENCES app_user(user_id),
+    panel_role         VARCHAR(50)
+                       CHECK (panel_role IS NULL OR panel_role IN ('CHIEF', 'JUDGE', 'STEWARD', 'TIMEKEEPER', 'OBSERVER')),
+    status             VARCHAR(30) NOT NULL DEFAULT 'INVITED'
+                       CHECK (status IN ('INVITED', 'ACCEPTED', 'DECLINED', 'REVOKED')),
+    invited_by_user_id UUID REFERENCES app_user(user_id),
+    invited_at         TIMESTAMPTZ,
+    responded_at       TIMESTAMPTZ,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tournament_id, referee_user_id)  -- 1 trọng tài / giải đấu tối đa 1 lần
 );
 
 -- =========================================================

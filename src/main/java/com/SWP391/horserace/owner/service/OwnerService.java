@@ -14,4 +14,7 @@ public interface OwnerService {
 
     /** Aggregated KPIs + horses + upcoming races for the caller. */
     OwnerOverviewResponse getOverview(UUID ownerUserId);
+
+    /** Distinct IDs of every race the caller's horses are entered into (any status). */
+    List<UUID> getOwnerRaceIds(UUID ownerUserId);
 }

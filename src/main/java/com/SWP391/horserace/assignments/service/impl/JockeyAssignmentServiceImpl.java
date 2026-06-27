@@ -48,6 +48,7 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
     private final JockeyProfileRepository jockeyProfileRepository;
     private final UserRepository userRepository;
     private final RaceResultRepository raceResultRepository;
+    private final com.SWP391.horserace.notifications.service.NotificationService notificationService;
 
     // -------------------------------------------------------------------------
     // SEND INVITATION  (Horse Owner → Jockey)
@@ -67,13 +68,6 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         }
         */
 
-        // 3. TẠM TẮT CHECK TRÙNG LẶP ĐỂ DEV/TEST KHÔNG BỊ 409
-        /*
-        if (assignmentRepository.existsActiveByEntryId(request.getEntryId())) {
-            throw new AppException(ErrorCode.ENTRY_ALREADY_ASSIGNED);
-        }
-        */
-
         // 4. Verify the jockey exists and is active
         JockeyProfile jockeyProfile = jockeyProfileRepository.findByIdAndUserActive(request.getJockeyUserId())
                 .orElseThrow(() -> new AppException(ErrorCode.JOCKEY_NOT_FOUND));
@@ -81,14 +75,31 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         // 5. Lấy thẳng chủ ngựa làm người gửi thay vì bắt buộc truyền currentUserId hợp lệ
         User assignedByUser = entry.getRegistration().getOwner();
 
-        // 6. Create the assignment
-        JockeyAssignment assignment = JockeyAssignment.builder()
-                .entry(entry)
-                .jockey(jockeyProfile.getJockeyUser())
-                .status(JockeyAssignmentStatus.INVITED)
-                .invitedAt(OffsetDateTime.now())
-                .assignedBy(assignedByUser)
-                .build();
+        // 6. Create or reuse the assignment. entry_id is UNIQUE (one jockey per entry), so:
+        //    - if a row already exists and is ACTIVE (INVITED/ACCEPTED), reject;
+        //    - if it exists but was CANCELLED/DECLINED, reuse that row (re-invite, even a
+        //      different jockey) instead of inserting — which would hit the unique constraint.
+        JockeyAssignment assignment = assignmentRepository.findByEntry_EntryId(request.getEntryId())
+                .orElse(null);
+        if (assignment != null) {
+            JockeyAssignmentStatus status = assignment.getStatus();
+            if (status == JockeyAssignmentStatus.INVITED || status == JockeyAssignmentStatus.ACCEPTED) {
+                throw new AppException(ErrorCode.ENTRY_ALREADY_ASSIGNED);
+            }
+            assignment.setJockey(jockeyProfile.getJockeyUser());
+            assignment.setStatus(JockeyAssignmentStatus.INVITED);
+            assignment.setInvitedAt(OffsetDateTime.now());
+            assignment.setRespondedAt(null);
+            assignment.setAssignedBy(assignedByUser);
+        } else {
+            assignment = JockeyAssignment.builder()
+                    .entry(entry)
+                    .jockey(jockeyProfile.getJockeyUser())
+                    .status(JockeyAssignmentStatus.INVITED)
+                    .invitedAt(OffsetDateTime.now())
+                    .assignedBy(assignedByUser)
+                    .build();
+        }
 
         assignment = assignmentRepository.save(assignment);
 
@@ -165,6 +176,9 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         assignment.setStatus(JockeyAssignmentStatus.ACCEPTED);
         assignment.setRespondedAt(OffsetDateTime.now());
         assignment = assignmentRepository.save(assignment);
+
+        // The horse is now crewed — forward it to the admins so they can schedule the race.
+        notifyAdminsReadyToSchedule(assignment);
 
         return mapToResponse(assignment);
     }
@@ -249,6 +263,14 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
             throw new AppException(ErrorCode.INVITATION_NOT_ACCEPTED);
         }
 
+        // A jockey must withdraw at least 5 days before the race so the owner has time to
+        // find a replacement. Once withdrawn, the entry frees up and the horse reappears
+        // in the owner's Jockey Market rail.
+        OffsetDateTime raceStart = assignment.getEntry().getRace().getScheduledStartAt();
+        if (raceStart != null && raceStart.isBefore(OffsetDateTime.now().plusDays(5))) {
+            throw new AppException(ErrorCode.WITHDRAW_TOO_LATE);
+        }
+
         assignment.setStatus(JockeyAssignmentStatus.CANCELLED);
         assignment.setRespondedAt(OffsetDateTime.now());
         assignment = assignmentRepository.save(assignment);
@@ -317,6 +339,29 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
     // =========================================================================
     // PRIVATE HELPERS
     // =========================================================================
+
+    /**
+     * Once a jockey accepts, the horse is fully crewed — forward the entry to the admins
+     * (best-effort in-app notification) so they can schedule the race.
+     */
+    private void notifyAdminsReadyToSchedule(JockeyAssignment assignment) {
+        try {
+            RaceEntry entry = assignment.getEntry();
+            var reg = entry != null ? entry.getRegistration() : null;
+            String horse = (reg != null && reg.getHorse() != null) ? reg.getHorse().getName() : "A horse";
+            String race = (entry != null && entry.getRace() != null && entry.getRace().getName() != null)
+                    ? entry.getRace().getName() : "a race";
+            String jockey = assignment.getJockey() != null ? assignment.getJockey().getFullName() : "A jockey";
+            for (User admin : userRepository.findByRole_RoleCodeAndDeletedFalse("ADMIN")) {
+                notificationService.notifyUser(admin.getUserId(),
+                        "Race ready to schedule",
+                        jockey + " accepted to ride " + horse + " in " + race
+                                + ". The entry is complete — schedule the race.");
+            }
+        } catch (Exception ignored) {
+            // best-effort: never block the jockey's acceptance on a notification failure
+        }
+    }
 
     /**
      * Maps a fully-loaded JockeyAssignment entity to the rich InvitationResponse DTO.

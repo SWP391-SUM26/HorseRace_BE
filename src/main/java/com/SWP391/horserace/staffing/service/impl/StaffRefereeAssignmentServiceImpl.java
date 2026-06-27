@@ -93,21 +93,53 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 .map(Race::getRaceId)
                 .toList();
 
-        Map<UUID, RefereeAssignment> activeAssignments = raceIds.stream()
+        // A race may have a panel of several referees — group them all (no dedup).
+        Map<UUID, List<RefereeAssignment>> assignmentsByRace = raceIds.stream()
                 .flatMap(raceId -> refereeAssignmentRepository
                         .findByRace_RaceIdAndStatusNot(raceId, REVOKED).stream())
-                .collect(Collectors.toMap(
-                        ra -> ra.getRace().getRaceId(),
-                        ra -> ra,
-                        (a, b) -> a
-                ));
+                .collect(Collectors.groupingBy(ra -> ra.getRace().getRaceId()));
 
         List<RaceAssignmentResponse> responses = racePage.getContent().stream()
-                .map(race -> buildRaceAssignmentResponse(race, activeAssignments.get(race.getRaceId())))
+                .map(race -> buildRaceAssignmentResponse(race,
+                        assignmentsByRace.getOrDefault(race.getRaceId(), List.of())))
                 .filter(response -> matchesFilters(response, filter))
                 .toList();
 
         return new PageImpl<>(responses, pageable, racePage.getTotalElements());
+    }
+
+    // =========================================================================
+    // GET RACE PANEL  (all referees assigned to one race)
+    // =========================================================================
+    @Override
+    @Transactional(readOnly = true)
+    public List<RefereeAssignmentResponse> getRacePanel(UUID raceId) {
+        if (!raceRepository.existsById(raceId)) {
+            throw new AppException(ErrorCode.RACE_NOT_FOUND);
+        }
+        return refereeAssignmentRepository.findByRace_RaceIdAndStatusNot(raceId, REVOKED).stream()
+                .map(this::mapToAssignmentResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UUID> getAssignedRaceIds(UUID refereeUserId) {
+        if (refereeUserId == null) {
+            return List.of();
+        }
+        return refereeAssignmentRepository.findRaceIdsByReferee(refereeUserId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<RefereeAssignmentResponse> getMyAssignments(UUID refereeUserId) {
+        if (refereeUserId == null) {
+            return List.of();
+        }
+        return refereeAssignmentRepository.findByReferee_UserIdAndStatusNot(refereeUserId, REVOKED).stream()
+                .map(this::mapToAssignmentResponse)
+                .toList();
     }
 
     // =========================================================================
@@ -134,6 +166,7 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 .race(race)
                 .referee(referee)
                 .panelRole(request.getPanelRole())
+                .refCode(generateRefCode())
                 .status(ASSIGNED)
                 .assignedAt(OffsetDateTime.now())
                 .createdBy(createdBy)
@@ -177,6 +210,7 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 .race(existing.getRace())
                 .referee(newReferee)
                 .panelRole(panelRole)
+                .refCode(generateRefCode())
                 .status(ASSIGNED)
                 .assignedAt(OffsetDateTime.now())
                 .createdBy(createdBy)
@@ -206,6 +240,15 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
     // PRIVATE HELPERS
     // =========================================================================
 
+    /** Generate a unique, human-readable per-race referee code, e.g. {@code REF-3F9A2C}. */
+    private String generateRefCode() {
+        String code;
+        do {
+            code = "REF-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase();
+        } while (refereeAssignmentRepository.existsByRefCode(code));
+        return code;
+    }
+
     private User loadReferee(UUID userId) {
         User user = userRepository.findByUserIdAndDeletedFalse(userId)
                 .orElseThrow(() -> new AppException(ErrorCode.STAFF_NOT_FOUND));
@@ -232,6 +275,7 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 .refereeName(referee != null ? referee.getFullName() : null)
                 .refereeAvatarUrl(referee != null ? referee.getAvatarUrl() : null)
                 .panelRole(ra.getPanelRole() != null ? ra.getPanelRole().name() : null)
+                .refCode(ra.getRefCode())
                 .status(ra.getStatus() != null ? ra.getStatus().name() : null)
                 .assignedAt(ra.getAssignedAt())
                 .createdAt(ra.getCreatedAt())
@@ -240,15 +284,17 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 .build();
     }
 
-    private RaceAssignmentResponse buildRaceAssignmentResponse(Race race, RefereeAssignment assignment) {
+    private RaceAssignmentResponse buildRaceAssignmentResponse(Race race, List<RefereeAssignment> assignments) {
         RaceAssignmentResponse.RaceAssignmentResponseBuilder builder = RaceAssignmentResponse.builder()
                 .raceId(race.getRaceId())
                 .raceName(race.getName())
                 .raceCode(race.getRaceCode())
                 .raceStatus(race.getStatus() != null ? race.getStatus().name() : null)
-                .scheduledStartAt(race.getScheduledStartAt());
+                .scheduledStartAt(race.getScheduledStartAt())
+                .assignmentCount(assignments.size());
 
-        if (assignment != null) {
+        if (!assignments.isEmpty()) {
+            RefereeAssignment assignment = assignments.get(0); // primary (for the table row preview)
             User referee = assignment.getReferee();
             builder.refAssignmentId(assignment.getRefAssignmentId())
                     .refereeUserId(referee != null ? referee.getUserId() : null)

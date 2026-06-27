@@ -41,6 +41,13 @@ public class RefereeAssignment {
     @Column(name = "panel_role", length = 50)
     private PanelRole panelRole;
 
+    /**
+     * Per-referee, per-race code the admin issues. The referee must quote it when submitting
+     * results/violations so the admin can audit who filed which report.
+     */
+    @Column(name = "ref_code", length = 50)
+    private String refCode;
+
     /** ASSIGNED | CONFIRMED | REVOKED */
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)

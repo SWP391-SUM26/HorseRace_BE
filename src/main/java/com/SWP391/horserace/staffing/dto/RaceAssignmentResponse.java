@@ -21,11 +21,14 @@ public class RaceAssignmentResponse {
     private String raceStatus;
     private OffsetDateTime scheduledStartAt;
 
-    // -- referee assignment info (null when unassigned) --
+    // -- primary referee assignment info (null when unassigned) --
     private UUID refAssignmentId;
     private UUID refereeUserId;
     private String refereeName;
     private String refereeAvatarUrl;
     private String panelRole;
     private String assignmentStatus;
+
+    /** Total non-revoked referees assigned to this race (panel size). */
+    private int assignmentCount;
 }

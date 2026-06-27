@@ -116,6 +116,21 @@ public class OwnerServiceImpl implements OwnerService {
                 .build();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<UUID> getOwnerRaceIds(UUID ownerUserId) {
+        if (ownerUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        return raceEntryRepository.findByOwnerUserId(ownerUserId).stream()
+                .map(RaceEntry::getRace)
+                .filter(r -> r != null)
+                .map(Race::getRaceId)
+                .filter(id -> id != null)
+                .distinct()
+                .toList();
+    }
+
     // ── helpers ──
 
     private static OwnerOverviewResponse.UpcomingRace mapToUpcomingRace(RaceEntry e) {

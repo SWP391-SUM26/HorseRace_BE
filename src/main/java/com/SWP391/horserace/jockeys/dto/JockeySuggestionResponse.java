@@ -19,4 +19,8 @@ import java.util.UUID;
 public class JockeySuggestionResponse {
     private UUID jockeyUserId;
     private int compatibility;
+    /** Whether this jockey can be invited for the (race, horse). */
+    private boolean eligible;
+    /** ALREADY_INVITED | RIDING_THIS_RACE | SCHEDULE_CLASH — null when eligible. */
+    private String ineligibleReason;
 }

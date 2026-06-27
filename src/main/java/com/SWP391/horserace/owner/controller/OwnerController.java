@@ -39,4 +39,17 @@ public class OwnerController {
                 .data(ownerService.getOverview(userId))
                 .build();
     }
+
+    /**
+     * GET /api/v1/owner/races — IDs of every race the caller's horses are entered into
+     * (any status, via their registrations). Powers the owner Race Calendar's "my races" filter.
+     */
+    @GetMapping("/races")
+    public ApiResponse<List<UUID>> getOwnerRaceIds(@AuthenticationPrincipal UUID userId) {
+        return ApiResponse.<List<UUID>>builder()
+                .success(true)
+                .message("Fetched owner race ids")
+                .data(ownerService.getOwnerRaceIds(userId))
+                .build();
+    }
 }

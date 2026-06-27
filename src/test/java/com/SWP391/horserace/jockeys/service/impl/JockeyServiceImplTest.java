@@ -39,6 +39,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -207,6 +209,89 @@ class JockeyServiceImplTest {
             int b = second.stream().filter(s -> s.getJockeyUserId().equals(id)).findFirst().orElseThrow().getCompatibility();
             assertThat(a).isEqualTo(b);
         }
+    }
+
+    // ---- Jockey-market eligibility (Phase 1) ----
+
+    private JockeySuggestionResponse find(List<JockeySuggestionResponse> list, UUID id) {
+        return list.stream().filter(s -> s.getJockeyUserId().equals(id)).findFirst().orElseThrow();
+    }
+
+    private void stubRaceAndHorse(OffsetDateTime startAt, JockeyProfile... profiles) {
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId))
+                .thenReturn(Optional.of(Race.builder().raceId(raceId).scheduledStartAt(startAt).build()));
+        when(horseRepository.findByHorseIdAndDeletedFalse(horseId))
+                .thenReturn(Optional.of(Horse.builder().horseId(horseId).build()));
+        when(jockeyProfileRepository.findAllActiveJockeys()).thenReturn(List.of(profiles));
+    }
+
+    @Test
+    void getJockeySuggestions_alreadyInvited_isIneligible() {
+        UUID j1 = UUID.randomUUID();
+        UUID j2 = UUID.randomUUID();
+        stubRaceAndHorse(null, profile(j1, new BigDecimal("60.00"), null, "W"), profile(j2, new BigDecimal("60.00"), null, "W"));
+        when(jockeyAssignmentRepository.findJockeyIdsInvitedForRaceHorse(raceId, horseId)).thenReturn(List.of(j1));
+
+        List<JockeySuggestionResponse> out = service.getJockeySuggestions(raceId, horseId);
+
+        assertThat(find(out, j1).isEligible()).isFalse();
+        assertThat(find(out, j1).getIneligibleReason()).isEqualTo("ALREADY_INVITED");
+        assertThat(find(out, j2).isEligible()).isTrue();
+        assertThat(find(out, j2).getIneligibleReason()).isNull();
+    }
+
+    @Test
+    void getJockeySuggestions_ridingThisRace_isIneligible() {
+        UUID j1 = UUID.randomUUID();
+        UUID j2 = UUID.randomUUID();
+        stubRaceAndHorse(null, profile(j1, new BigDecimal("60.00"), null, "W"), profile(j2, new BigDecimal("60.00"), null, "W"));
+        when(jockeyAssignmentRepository.findJockeyIdsAcceptedInRace(raceId)).thenReturn(List.of(j2));
+
+        List<JockeySuggestionResponse> out = service.getJockeySuggestions(raceId, horseId);
+
+        assertThat(find(out, j2).isEligible()).isFalse();
+        assertThat(find(out, j2).getIneligibleReason()).isEqualTo("RIDING_THIS_RACE");
+        assertThat(find(out, j1).isEligible()).isTrue();
+    }
+
+    @Test
+    void getJockeySuggestions_scheduleClash_isIneligible() {
+        UUID j1 = UUID.randomUUID();
+        UUID j2 = UUID.randomUUID();
+        OffsetDateTime start = OffsetDateTime.now();
+        stubRaceAndHorse(start, profile(j1, new BigDecimal("60.00"), null, "W"), profile(j2, new BigDecimal("60.00"), null, "W"));
+        when(jockeyAssignmentRepository.findJockeyIdsAcceptedAtTime(eq(raceId), any())).thenReturn(List.of(j2));
+
+        List<JockeySuggestionResponse> out = service.getJockeySuggestions(raceId, horseId);
+
+        assertThat(find(out, j2).isEligible()).isFalse();
+        assertThat(find(out, j2).getIneligibleReason()).isEqualTo("SCHEDULE_CLASH");
+        assertThat(find(out, j1).isEligible()).isTrue();
+    }
+
+    @Test
+    void getJockeySuggestions_precedence_alreadyInvitedWins() {
+        UUID j1 = UUID.randomUUID();
+        OffsetDateTime start = OffsetDateTime.now();
+        stubRaceAndHorse(start, profile(j1, new BigDecimal("60.00"), null, "W"));
+        when(jockeyAssignmentRepository.findJockeyIdsInvitedForRaceHorse(raceId, horseId)).thenReturn(List.of(j1));
+        when(jockeyAssignmentRepository.findJockeyIdsAcceptedInRace(raceId)).thenReturn(List.of(j1));
+        when(jockeyAssignmentRepository.findJockeyIdsAcceptedAtTime(eq(raceId), any())).thenReturn(List.of(j1));
+
+        List<JockeySuggestionResponse> out = service.getJockeySuggestions(raceId, horseId);
+
+        assertThat(find(out, j1).getIneligibleReason()).isEqualTo("ALREADY_INVITED");
+    }
+
+    @Test
+    void getJockeySuggestions_nullStartTime_skipsClashQuery() {
+        UUID j1 = UUID.randomUUID();
+        stubRaceAndHorse(null, profile(j1, new BigDecimal("60.00"), null, "W"));
+
+        List<JockeySuggestionResponse> out = service.getJockeySuggestions(raceId, horseId);
+
+        assertThat(find(out, j1).isEligible()).isTrue();
+        verify(jockeyAssignmentRepository, never()).findJockeyIdsAcceptedAtTime(any(), any());
     }
 
     // =========================================================================

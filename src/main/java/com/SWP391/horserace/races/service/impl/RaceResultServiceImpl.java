@@ -48,6 +48,8 @@ public class RaceResultServiceImpl implements RaceResultService {
     private final RaceResultVersionRepository raceResultVersionRepository;
     private final JockeyAssignmentRepository jockeyAssignmentRepository;
     private final UserRepository userRepository;
+    private final com.SWP391.horserace.notifications.service.NotificationService notificationService;
+    private final com.SWP391.horserace.staffing.service.RefereeCodeValidator refereeCodeValidator;
 
     @Override
     @Transactional
@@ -55,9 +57,16 @@ public class RaceResultServiceImpl implements RaceResultService {
         if (currentUserId == null) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
+        // Referees must quote their admin-issued per-race code to file results (admins bypass).
+        refereeCodeValidator.validate(currentUserId, raceId, request != null ? request.refCode() : null);
 
         Race race = raceRepository.findByRaceIdAndDeletedFalse(raceId)
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
+
+        // Results may only be filed in the post-race window (after the admin ends the race).
+        if (race.getStatus() != RaceStatus.FINISHED) {
+            throw new AppException(ErrorCode.RACE_NOT_FINISHED);
+        }
 
         List<RecordResultsRequest.ResultRow> rows =
                 request != null && request.results() != null ? request.results() : List.of();
@@ -158,6 +167,7 @@ public class RaceResultServiceImpl implements RaceResultService {
                 .windSpeedKph(race.getWindSpeedKph())
                 .fractions(fractions)
                 .photofinishUrl(race.getPhotofinishUrl())
+                .stewardsReport(race.getStewardsReport())
                 .order(order)
                 .build();
     }
@@ -221,6 +231,33 @@ public class RaceResultServiceImpl implements RaceResultService {
 
     @Override
     @Transactional
+    public void deleteResult(UUID currentUserId, UUID raceId, UUID resultId) {
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+
+        Race race = raceRepository.findByRaceIdAndDeletedFalse(raceId)
+                .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
+
+        RaceResult result = raceResultRepository.findById(resultId)
+                .orElseThrow(() -> new AppException(ErrorCode.RESULT_NOT_FOUND));
+
+        if (result.getRace() == null || !race.getRaceId().equals(result.getRace().getRaceId())) {
+            throw new AppException(ErrorCode.RESULT_ENTRY_RACE_MISMATCH);
+        }
+
+        // Published (certified) results are immutable — they can no longer be deleted.
+        if (result.getOfficialityStatus() == OfficialityStatus.OFFICIAL) {
+            throw new AppException(ErrorCode.RESULT_ALREADY_OFFICIAL);
+        }
+
+        // Remove the audit trail first (FK), then the result row itself.
+        raceResultVersionRepository.deleteByResult_ResultId(resultId);
+        raceResultRepository.delete(result);
+    }
+
+    @Override
+    @Transactional
     // TODO(authz #0): restrict to RESULT_PUBLISH
     public CertifyResultsResponse certify(UUID currentUserId, UUID raceId, CertifyResultsRequest request) {
         if (currentUserId == null) {
@@ -232,6 +269,11 @@ public class RaceResultServiceImpl implements RaceResultService {
 
         Race race = raceRepository.findByRaceIdAndDeletedFalse(raceId)
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
+
+        // Publish only after the race has finished (admin consolidates all referees' reports first).
+        if (race.getStatus() != RaceStatus.FINISHED) {
+            throw new AppException(ErrorCode.RACE_NOT_FINISHED);
+        }
 
         User certifier = userRepository.findByUserIdAndDeletedFalse(currentUserId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
@@ -252,6 +294,20 @@ public class RaceResultServiceImpl implements RaceResultService {
         race.setStewardsReport(request.stewardsReport());
         raceRepository.save(race);
 
+        // Notify each owner whose horse ran that the official result is published.
+        for (RaceResult result : results) {
+            RaceEntry entry = result.getEntry();
+            if (entry == null || entry.getRegistration() == null) continue;
+            User owner = entry.getRegistration().getOwner();
+            if (owner == null) continue;
+            String horse = entry.getRegistration().getHorse() != null
+                    ? entry.getRegistration().getHorse().getName() : "Your horse";
+            String pos = result.getFinishPosition() != null ? ordinal(result.getFinishPosition()) : "—";
+            notificationService.notifyUser(owner.getUserId(),
+                    "Official results published",
+                    (race.getName() != null ? race.getName() : "Your race") + ": " + horse + " finished " + pos + ".");
+        }
+
         return CertifyResultsResponse.builder()
                 .raceId(raceId)
                 .raceStatus(race.getStatus())
@@ -264,6 +320,17 @@ public class RaceResultServiceImpl implements RaceResultService {
     }
 
     // ── helpers ──
+
+    /** 1 -> "1st", 2 -> "2nd", 3 -> "3rd", 4 -> "4th" … for human-friendly finish positions. */
+    private static String ordinal(int n) {
+        if (n % 100 >= 11 && n % 100 <= 13) return n + "th";
+        return switch (n % 10) {
+            case 1 -> n + "st";
+            case 2 -> n + "nd";
+            case 3 -> n + "rd";
+            default -> n + "th";
+        };
+    }
 
     /** Riding (ACCEPTED) jockey name per entry, resolved in one query (avoids N+1). */
     private Map<UUID, String> jockeyNamesByEntryIds(List<UUID> entryIds) {

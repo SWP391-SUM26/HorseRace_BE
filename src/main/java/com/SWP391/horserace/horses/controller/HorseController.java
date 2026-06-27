@@ -171,6 +171,52 @@ public class HorseController {
                 .build();
     }
 
+    // ── Medical records (owner-managed: view / add / edit / delete) ──
+
+    /** GET /api/v1/horses/{id}/medical-records — list a horse's medical records. */
+    @GetMapping("/{id}/medical-records")
+    public ApiResponse<java.util.List<com.SWP391.horserace.horses.dto.MedicalRecordResponse>> listMedicalRecords(@PathVariable UUID id) {
+        return ApiResponse.<java.util.List<com.SWP391.horserace.horses.dto.MedicalRecordResponse>>builder()
+                .success(true).message("Fetched medical records").data(horseService.listMedicalRecords(id)).build();
+    }
+
+    /** POST /api/v1/horses/{id}/medical-records — add a medical record (owner/admin). */
+    @PostMapping("/{id}/medical-records")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<com.SWP391.horserace.horses.dto.MedicalRecordResponse> addMedicalRecord(
+            @AuthenticationPrincipal UUID userId, @PathVariable UUID id,
+            @Valid @RequestBody com.SWP391.horserace.horses.dto.MedicalRecordRequest request) {
+        return ApiResponse.<com.SWP391.horserace.horses.dto.MedicalRecordResponse>builder()
+                .success(true).message("Medical record added").data(horseService.addMedicalRecord(userId, id, request)).build();
+    }
+
+    /** PUT /api/v1/horses/{id}/medical-records/{recordId} — edit a medical record (owner/admin). */
+    @PutMapping("/{id}/medical-records/{recordId}")
+    public ApiResponse<com.SWP391.horserace.horses.dto.MedicalRecordResponse> updateMedicalRecord(
+            @AuthenticationPrincipal UUID userId, @PathVariable UUID id, @PathVariable UUID recordId,
+            @Valid @RequestBody com.SWP391.horserace.horses.dto.MedicalRecordRequest request) {
+        return ApiResponse.<com.SWP391.horserace.horses.dto.MedicalRecordResponse>builder()
+                .success(true).message("Medical record updated").data(horseService.updateMedicalRecord(userId, id, recordId, request)).build();
+    }
+
+    /** DELETE /api/v1/horses/{id}/medical-records/{recordId} — delete a medical record (owner/admin). */
+    @DeleteMapping("/{id}/medical-records/{recordId}")
+    public ApiResponse<Void> deleteMedicalRecord(@AuthenticationPrincipal UUID userId, @PathVariable UUID id, @PathVariable UUID recordId) {
+        horseService.deleteMedicalRecord(userId, id, recordId);
+        return ApiResponse.<Void>builder().success(true).message("Medical record deleted").build();
+    }
+
+    /** GET /api/v1/horses/{id}/enterable-races — open races this horse can still be entered into. */
+    @GetMapping("/{id}/enterable-races")
+    public ApiResponse<java.util.List<com.SWP391.horserace.horses.dto.EnterableRaceResponse>> enterableRaces(
+            @PathVariable UUID id) {
+        return ApiResponse.<java.util.List<com.SWP391.horserace.horses.dto.EnterableRaceResponse>>builder()
+                .success(true)
+                .message("Fetched enterable races")
+                .data(horseService.getEnterableRaces(id))
+                .build();
+    }
+
     /** POST /api/v1/horses/{id}/assign-to-race — enter the horse into a race (owner or admin). */
     @PostMapping("/{id}/assign-to-race")
     @ResponseStatus(HttpStatus.CREATED)

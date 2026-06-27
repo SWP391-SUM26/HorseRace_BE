@@ -185,6 +185,16 @@ public class UserController {
                 .build();
     }
 
+    /** GET /api/v1/users/{id}/wins — first-place finishes of this user's horses (admin user-detail). */
+    @GetMapping("/{id}/wins")
+    public ApiResponse<java.util.List<com.SWP391.horserace.users.dto.UserWinResponse>> getUserWins(@PathVariable UUID id) {
+        return ApiResponse.<java.util.List<com.SWP391.horserace.users.dto.UserWinResponse>>builder()
+                .success(true)
+                .message("Fetched user wins")
+                .data(userService.getUserWins(id))
+                .build();
+    }
+
     /** PATCH /api/v1/users/{id}/role — admin: change a user's role by role code. */
     @PatchMapping("/{id}/role")
     @PreAuthorize("hasRole('ADMIN')")

@@ -25,7 +25,7 @@ import java.util.UUID;
 public class AttachmentServiceImpl implements AttachmentService {
 
     /** Allowed polymorphic owner types for attachments (FE-v2 §6). */
-    private static final Set<String> ALLOWED_OWNER_TYPES = Set.of("RACE_RESULT", "VIOLATION", "RACE");
+    private static final Set<String> ALLOWED_OWNER_TYPES = Set.of("RACE_RESULT", "VIOLATION", "RACE", "TOURNAMENT_REGISTRATION");
     private static final String STORAGE_FOLDER = "attachments";
 
     private final AttachmentRepository attachmentRepository;

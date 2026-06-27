@@ -30,6 +30,12 @@ public interface RaceService {
 
     RaceResponse scheduleRace(UUID currentUserId, UUID id, ScheduleRaceRequest request);
 
+    /** Conduct the race: OPEN/CLOSED → RUNNING (locks entries; stamps actual start). */
+    RaceResponse startRace(UUID currentUserId, UUID id);
+
+    /** End the race: RUNNING → FINISHED (opens the referee reporting window; stamps actual end). */
+    RaceResponse finishRace(UUID currentUserId, UUID id);
+
     RaceResponse cancelRace(UUID currentUserId, UUID id);
 
     RaceEntryResponse assignParticipant(UUID currentUserId, UUID raceId, AssignParticipantRequest request);

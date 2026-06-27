@@ -59,6 +59,15 @@ public interface HorseService {
     /** Assign a horse to a race via its approved registration; only the owner (or admin) may do this. */
     RaceEntryResponse assignHorseToRace(UUID currentUserId, UUID horseId, AssignHorseToRaceRequest request);
 
+    /** Open races this horse can still be entered into (APPROVED registration + not already entered). */
+    java.util.List<com.SWP391.horserace.horses.dto.EnterableRaceResponse> getEnterableRaces(UUID horseId);
+
+    // ---- Medical records (owner-managed) ----
+    java.util.List<com.SWP391.horserace.horses.dto.MedicalRecordResponse> listMedicalRecords(UUID horseId);
+    com.SWP391.horserace.horses.dto.MedicalRecordResponse addMedicalRecord(UUID currentUserId, UUID horseId, com.SWP391.horserace.horses.dto.MedicalRecordRequest request);
+    com.SWP391.horserace.horses.dto.MedicalRecordResponse updateMedicalRecord(UUID currentUserId, UUID horseId, UUID recordId, com.SWP391.horserace.horses.dto.MedicalRecordRequest request);
+    void deleteMedicalRecord(UUID currentUserId, UUID horseId, UUID recordId);
+
     /** Ride intelligence for a horse (FE-v2 jockey contract #7): surface, post time, trainer, owner, recent form. */
     RideIntelligenceResponse getRideIntelligence(UUID horseId);
 }

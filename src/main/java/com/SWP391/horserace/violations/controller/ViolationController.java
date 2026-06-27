@@ -1,6 +1,7 @@
 package com.SWP391.horserace.violations.controller;
 
 import com.SWP391.horserace.shared.dto.ApiResponse;
+import com.SWP391.horserace.violations.dto.CreateViolationRequest;
 import com.SWP391.horserace.violations.dto.RulingRequest;
 import com.SWP391.horserace.violations.dto.RulingResponse;
 import com.SWP391.horserace.violations.dto.ViolationDetailResponse;
@@ -12,9 +13,11 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -53,6 +56,28 @@ public class ViolationController {
                 .message("Ruling recorded")
                 .data(violationService.recordRuling(userId, violationId, request))
                 .build();
+    }
+
+    /** PUT /{id} — edit a violation's details (only before it has been ruled). */
+    @PutMapping("/{violationId}")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
+    public ApiResponse<ViolationDetailResponse> update(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID violationId,
+            @Valid @RequestBody CreateViolationRequest request) {
+        return ApiResponse.<ViolationDetailResponse>builder()
+                .success(true)
+                .message("Violation updated")
+                .data(violationService.updateViolation(userId, violationId, request))
+                .build();
+    }
+
+    /** DELETE /{id} — delete a violation (referee/admin). */
+    @DeleteMapping("/{violationId}")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
+    public ApiResponse<Void> delete(@AuthenticationPrincipal UUID userId, @PathVariable UUID violationId) {
+        violationService.deleteViolation(userId, violationId);
+        return ApiResponse.<Void>builder().success(true).message("Violation deleted").build();
     }
 
     /** GET /export?raceId=&format=csv — stream a CSV of the race's violations (not ApiResponse-wrapped). */

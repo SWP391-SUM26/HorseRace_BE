@@ -32,4 +32,18 @@ public interface RaceResultRepository extends JpaRepository<RaceResult, UUID> {
          WHERE rr.race.raceId = :raceId
         """)
     List<RaceResult> findByRaceIdWithEntry(@Param("raceId") UUID raceId);
+
+    /** First-place finishes of horses owned by a user (admin user-detail "wins"). */
+    @Query("""
+        SELECT rr FROM RaceResult rr
+          JOIN FETCH rr.race race
+          LEFT JOIN FETCH race.tournament t
+          JOIN FETCH rr.entry e
+          JOIN FETCH e.registration reg
+          JOIN FETCH reg.horse h
+         WHERE rr.finishPosition = 1
+           AND reg.owner.userId = :ownerUserId
+         ORDER BY race.scheduledStartAt DESC NULLS LAST
+        """)
+    List<RaceResult> findWinsByOwnerUserId(@Param("ownerUserId") UUID ownerUserId);
 }

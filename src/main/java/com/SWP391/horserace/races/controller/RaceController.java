@@ -125,6 +125,32 @@ public class RaceController {
                 .build();
     }
 
+    /** PATCH /api/v1/races/{id}/start — conduct the race (OPEN/CLOSED → RUNNING; locks entries). */
+    @PatchMapping("/{id}/start")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<RaceResponse> startRace(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID id) {
+        return ApiResponse.<RaceResponse>builder()
+                .success(true)
+                .message("Race started")
+                .data(raceService.startRace(userId, id))
+                .build();
+    }
+
+    /** PATCH /api/v1/races/{id}/finish — end the race (RUNNING → FINISHED; opens referee reporting). */
+    @PatchMapping("/{id}/finish")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<RaceResponse> finishRace(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID id) {
+        return ApiResponse.<RaceResponse>builder()
+                .success(true)
+                .message("Race finished")
+                .data(raceService.finishRace(userId, id))
+                .build();
+    }
+
     /** PATCH /api/v1/races/{id}/cancel — cancel a race. */
     @PatchMapping("/{id}/cancel")
     @PreAuthorize("hasRole('ADMIN')")

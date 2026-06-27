@@ -27,6 +27,9 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
 
     boolean existsByEmail(String email);
 
+    /** All active users with a given role code (e.g. "ADMIN") — used to notify admins. */
+    List<User> findByRole_RoleCodeAndDeletedFalse(String roleCode);
+
     /** Total non soft-deleted users (powers the Total Users KPI). */
     long countByDeletedFalse();
 

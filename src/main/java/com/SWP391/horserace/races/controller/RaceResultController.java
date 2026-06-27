@@ -13,6 +13,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -85,6 +86,20 @@ public class RaceResultController {
                 .success(true)
                 .message("Result updated")
                 .data(raceResultService.updateResult(userId, raceId, resultId, request))
+                .build();
+    }
+
+    /** DELETE /{resultId} — remove one provisional result row (and its version history). */
+    @DeleteMapping("/{resultId}")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
+    public ApiResponse<Void> deleteResult(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID raceId,
+            @PathVariable UUID resultId) {
+        raceResultService.deleteResult(userId, raceId, resultId);
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("Result deleted")
                 .build();
     }
 }

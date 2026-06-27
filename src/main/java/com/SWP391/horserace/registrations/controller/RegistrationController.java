@@ -78,9 +78,9 @@ public class RegistrationController {
                 .build();
     }
 
-    /** PATCH /api/v1/registrations/{id}/approve — approve a submitted registration. */
+    /** PATCH /api/v1/registrations/{id}/approve — referee accepts the registration (admin allowed too). */
     @PatchMapping("/{id}/approve")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<RegistrationResponse> approveRegistration(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id) {
@@ -91,9 +91,9 @@ public class RegistrationController {
                 .build();
     }
 
-    /** PATCH /api/v1/registrations/{id}/reject — reject a submitted registration with a reason. */
+    /** PATCH /api/v1/registrations/{id}/reject — referee rejects the registration (admin allowed too). */
     @PatchMapping("/{id}/reject")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<RegistrationResponse> rejectRegistration(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id,

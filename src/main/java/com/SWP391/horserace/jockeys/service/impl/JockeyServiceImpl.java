@@ -41,6 +41,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -133,7 +134,6 @@ public class JockeyServiceImpl implements JockeyService {
                 .winCount(profile.getWinCount())
                 .bio(profile.getBio())
                 .createdAt(profile.getCreatedAt())
-                // -- Jockey Market (FE-v2 §2) --
                 .rating(profile.getRating())
                 .ridingStyle(profile.getRidingStyle())
                 .winRate(profile.getWinRate())
@@ -144,7 +144,10 @@ public class JockeyServiceImpl implements JockeyService {
                 .build();
     }
 
-    /** Split the comma-joined recent_form CSV into a list; empty list when null/blank. */
+    /**
+     * Split the comma-joined recent_form CSV into a list; empty list when
+     * null/blank.
+     */
     private List<String> splitRecentForm(String csv) {
         if (csv == null || csv.isBlank()) {
             return List.of();
@@ -182,26 +185,53 @@ public class JockeyServiceImpl implements JockeyService {
     @Override
     @Transactional(readOnly = true)
     public List<JockeySuggestionResponse> getJockeySuggestions(UUID raceId, UUID horseId) {
-        raceRepository.findByRaceIdAndDeletedFalse(raceId)
+        Race race = raceRepository.findByRaceIdAndDeletedFalse(raceId)
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
         horseRepository.findByHorseIdAndDeletedFalse(horseId)
                 .orElseThrow(() -> new AppException(ErrorCode.HORSE_NOT_FOUND));
 
+        // Eligibility sets (FE-v2 Phase 1): a jockey is ineligible if already invited
+        // for this
+        // (race, horse), already riding this race, or has an accepted ride clashing on
+        // start time.
+        Set<UUID> alreadyInvited = Set.copyOf(
+                jockeyAssignmentRepository.findJockeyIdsInvitedForRaceHorse(raceId, horseId));
+        Set<UUID> ridingThisRace = Set.copyOf(
+                jockeyAssignmentRepository.findJockeyIdsAcceptedInRace(raceId));
+        Set<UUID> scheduleClash = race.getScheduledStartAt() == null
+                ? Set.of()
+                : Set.copyOf(
+                        jockeyAssignmentRepository.findJockeyIdsAcceptedAtTime(raceId, race.getScheduledStartAt()));
+
         return jockeyProfileRepository.findAllActiveJockeys().stream()
-                .map(jp -> JockeySuggestionResponse.builder()
-                        .jockeyUserId(jp.getJockeyUserId())
-                        .compatibility(computeCompatibility(jp, horseId))
-                        .build())
+                .map(jp -> {
+                    UUID jid = jp.getJockeyUserId();
+                    String reason = alreadyInvited.contains(jid) ? "ALREADY_INVITED"
+                            : ridingThisRace.contains(jid) ? "RIDING_THIS_RACE"
+                                    : scheduleClash.contains(jid) ? "SCHEDULE_CLASH"
+                                            : null;
+                    return JockeySuggestionResponse.builder()
+                            .jockeyUserId(jid)
+                            .compatibility(computeCompatibility(jp, horseId))
+                            .eligible(reason == null)
+                            .ineligibleReason(reason)
+                            .build();
+                })
                 .sorted((a, b) -> Integer.compare(b.getCompatibility(), a.getCompatibility()))
                 .collect(Collectors.toList());
     }
 
     /**
-     * Deterministic compatibility score in the inclusive range 50–99 (no ML model exists).
+     * Deterministic compatibility score in the inclusive range 50–99 (no ML model
+     * exists).
      *
-     * <p>It blends a stat-based component (the jockey's win rate, or rating scaled to a
-     * percentage when win rate is absent) with a stable pseudo-random jitter derived from
-     * {@code hash(jockeyUserId, horseId)}. The same (jockey, horse) pair always yields the
+     * <p>
+     * It blends a stat-based component (the jockey's win rate, or rating scaled to
+     * a
+     * percentage when win rate is absent) with a stable pseudo-random jitter
+     * derived from
+     * {@code hash(jockeyUserId, horseId)}. The same (jockey, horse) pair always
+     * yields the
      * same score, and better stats trend toward higher scores.
      */
     private int computeCompatibility(JockeyProfile profile, UUID horseId) {
@@ -215,7 +245,8 @@ public class JockeyServiceImpl implements JockeyService {
             statScore = 50.0;
         }
 
-        // Stable jitter (0..14) from the (jockey, horse) pair hash so the score is repeatable.
+        // Stable jitter (0..14) from the (jockey, horse) pair hash so the score is
+        // repeatable.
         int hash = (profile.getJockeyUserId().hashCode() * 31) ^ horseId.hashCode();
         int jitter = Math.floorMod(hash, 15);
 
@@ -239,13 +270,20 @@ public class JockeyServiceImpl implements JockeyService {
                 .orElseThrow(() -> new AppException(ErrorCode.JOCKEY_NOT_FOUND));
 
         // Partial update — only apply non-null fields.
-        if (request.getBodyWeight() != null)   profile.setBodyWeight(request.getBodyWeight());
-        if (request.getHeightCm() != null)      profile.setHeightCm(request.getHeightCm());
-        if (request.getRidingStyle() != null)   profile.setRidingStyle(request.getRidingStyle());
-        if (request.getBio() != null)           profile.setBio(request.getBio());
-        if (request.getLicenseNo() != null)     profile.setLicenseNo(request.getLicenseNo());
-        if (request.getBaseFee() != null)       profile.setBaseFee(request.getBaseFee());
-        if (request.getPrizePercent() != null)  profile.setPrizePercent(request.getPrizePercent());
+        if (request.getBodyWeight() != null)
+            profile.setBodyWeight(request.getBodyWeight());
+        if (request.getHeightCm() != null)
+            profile.setHeightCm(request.getHeightCm());
+        if (request.getRidingStyle() != null)
+            profile.setRidingStyle(request.getRidingStyle());
+        if (request.getBio() != null)
+            profile.setBio(request.getBio());
+        if (request.getLicenseNo() != null)
+            profile.setLicenseNo(request.getLicenseNo());
+        if (request.getBaseFee() != null)
+            profile.setBaseFee(request.getBaseFee());
+        if (request.getPrizePercent() != null)
+            profile.setPrizePercent(request.getPrizePercent());
 
         profile = jockeyProfileRepository.save(profile);
         return mapToResponse(profile);
@@ -270,7 +308,7 @@ public class JockeyServiceImpl implements JockeyService {
         Map<UUID, RaceResult> resultByEntry = entryIds.isEmpty()
                 ? Map.of()
                 : raceResultRepository.findByEntry_EntryIdIn(entryIds).stream()
-                    .collect(Collectors.toMap(rr -> rr.getEntry().getEntryId(), Function.identity(), (a, b) -> a));
+                        .collect(Collectors.toMap(rr -> rr.getEntry().getEntryId(), Function.identity(), (a, b) -> a));
 
         int totalRides = 0;
         int wins = 0;
@@ -282,14 +320,17 @@ public class JockeyServiceImpl implements JockeyService {
         for (JockeyAssignment ja : rides) {
             RaceResult result = resultByEntry.get(ja.getEntry().getEntryId());
             if (result == null || result.getFinishPosition() == null) {
-                continue;  // only rides with a result count
+                continue; // only rides with a result count
             }
             int pos = result.getFinishPosition();
             totalRides++;
             positionSum += pos;
-            if (pos == 1) wins++;
-            if (pos == 2) places++;
-            if (pos <= 3) top3++;
+            if (pos == 1)
+                wins++;
+            if (pos == 2)
+                places++;
+            if (pos <= 3)
+                top3++;
 
             BigDecimal prize = ja.getEntry().getPrizeEarned();
             if (prize != null) {
@@ -309,7 +350,7 @@ public class JockeyServiceImpl implements JockeyService {
                 .top3Rate(top3Rate)
                 .avgPlacement(avgPlacement)
                 .careerWins(profile.getWinCount() != null ? profile.getWinCount() : 0)
-                .seasonEarnings(earnings)  // TODO season filter — no season dimension yet, equals careerEarnings
+                .seasonEarnings(earnings) // TODO season filter — no season dimension yet, equals careerEarnings
                 .careerEarnings(earnings)
                 .build();
     }
@@ -378,4 +419,3 @@ public class JockeyServiceImpl implements JockeyService {
         return BigDecimal.valueOf(value).setScale(1, RoundingMode.HALF_UP).doubleValue();
     }
 }
-

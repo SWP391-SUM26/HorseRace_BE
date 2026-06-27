@@ -255,6 +255,14 @@ INSERT INTO horse_characteristic (horse_id, tag) VALUES
     ('aaaa2222-aaaa-2222-aaaa-222222222222', 'CLOSER'),
     ('aaaa2222-aaaa-2222-aaaa-222222222222', 'SOFT_GROUND');
 
+-- Owner-managed medical records (certificates / vaccinations / injuries / notes)
+INSERT INTO horse_medical_record (horse_id, record_type, title, note, record_date) VALUES
+    ('aaaa2222-aaaa-2222-aaaa-222222222222', 'CERTIFICATE', 'Annual fitness-to-race certificate', 'Passed full veterinary examination. Heart, lungs and limbs all clear. Cleared for competition.', '2026-05-10'),
+    ('aaaa2222-aaaa-2222-aaaa-222222222222', 'VACCINATION', 'Equine influenza booster', 'Administered by Dr. Tran. Next booster due in 6 months.', '2026-04-02'),
+    ('aaaa2222-aaaa-2222-aaaa-222222222222', 'INJURY', 'Minor tendon strain (left foreleg)', 'Diagnosed after training. Two weeks rest then light work. Fully resolved.', '2026-03-15'),
+    ('aaaa4444-aaaa-4444-aaaa-444444444444', 'CERTIFICATE', 'Pre-race health certificate', 'Fit to race. No abnormalities found.', '2026-06-01'),
+    ('aaaa4444-aaaa-4444-aaaa-444444444444', 'NOTE', 'Summer dietary adjustment', 'Increased electrolyte supplementation during hot-weather training.', '2026-06-10');
+
 -- Prize earned per race entry (drives lifetimeEarnings + race-history.prizeEarned)
 UPDATE race_entry SET prize_earned = 1200000.00 WHERE entry_id = 'eeee1111-eeee-1111-eeee-111111111111'; -- ENT-001 Midnight Thunder
 UPDATE race_entry SET prize_earned =  450000.00 WHERE entry_id = 'eeee2222-eeee-2222-eeee-222222222222'; -- ENT-002 Silver Bullet

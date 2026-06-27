@@ -49,6 +49,9 @@ public class ViolationServiceImpl implements ViolationService {
     private final JockeyAssignmentRepository jockeyAssignmentRepository;
     private final PenaltyRepository penaltyRepository;
     private final UserRepository userRepository;
+    private final com.SWP391.horserace.notifications.service.NotificationService notificationService;
+    private final com.SWP391.horserace.staffing.service.RefereeCodeValidator refereeCodeValidator;
+    private final com.SWP391.horserace.attachments.repository.AttachmentRepository attachmentRepository;
 
     @Override
     @Transactional
@@ -56,9 +59,16 @@ public class ViolationServiceImpl implements ViolationService {
         if (currentUserId == null) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
+        // Referees must quote their admin-issued per-race code to file a violation (admins bypass).
+        refereeCodeValidator.validate(currentUserId, raceId, request != null ? request.refCode() : null);
 
         Race race = raceRepository.findById(raceId)
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
+
+        // Violations may only be filed in the post-race window (after the admin ends the race).
+        if (race.getStatus() != com.SWP391.horserace.races.entity.RaceStatus.FINISHED) {
+            throw new AppException(ErrorCode.RACE_NOT_FINISHED);
+        }
 
         RaceEntry entry = null;
         if (request.entryId() != null) {
@@ -96,6 +106,21 @@ public class ViolationServiceImpl implements ViolationService {
                 .build();
 
         RaceViolation saved = violationRepository.save(violation);
+
+        // Notify the owner of the cited horse that a violation was logged against it.
+        if (entry != null && entry.getRegistration() != null && entry.getRegistration().getOwner() != null) {
+            Horse h = entry.getRegistration().getHorse();
+            String horse = h != null ? h.getName() : "your horse";
+            String infraction = request.infractionType() != null
+                    ? request.infractionType().name().charAt(0)
+                        + request.infractionType().name().substring(1).toLowerCase().replace('_', ' ')
+                    : "A violation";
+            notificationService.notifyUser(entry.getRegistration().getOwner().getUserId(),
+                    "Violation logged",
+                    infraction + " recorded against " + horse
+                        + (race.getName() != null ? " in " + race.getName() : "") + ".");
+        }
+
         return toDetail(saved, jockey);
     }
 
@@ -121,6 +146,44 @@ public class ViolationServiceImpl implements ViolationService {
         RaceViolation violation = violationRepository.findByIdWithDetails(violationId)
                 .orElseThrow(() -> new AppException(ErrorCode.VIOLATION_NOT_FOUND));
         return toDetail(violation, violation.getJockey());
+    }
+
+    @Override
+    @Transactional
+    public ViolationDetailResponse updateViolation(UUID currentUserId, UUID violationId, CreateViolationRequest request) {
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        RaceViolation violation = violationRepository.findByIdWithDetails(violationId)
+                .orElseThrow(() -> new AppException(ErrorCode.VIOLATION_NOT_FOUND));
+        // A violation can only be edited while it hasn't been ruled.
+        if (violation.getStatus() == ViolationStatus.RESOLVED || violation.getStatus() == ViolationStatus.DISMISSED) {
+            throw new AppException(ErrorCode.VIOLATION_ALREADY_RULED);
+        }
+        if (request.infractionType() != null) violation.setInfractionType(request.infractionType());
+        if (request.severity() != null) violation.setSeverity(request.severity());
+        violation.setTurnNo(request.turnNo());
+        violation.setRaceTimeOffsetMs(request.raceTimeOffsetMs());
+        violation.setRemarks(request.remarks());
+        violation.setRegulatoryRef(request.regulatoryRef());
+        // Only replace the footage when a new attachment is supplied — editing other fields
+        // must not silently wipe an existing photo.
+        if (request.footageAttachmentId() != null) {
+            violation.setFootageAttachmentId(request.footageAttachmentId());
+        }
+        RaceViolation saved = violationRepository.save(violation);
+        return toDetail(saved, saved.getJockey());
+    }
+
+    @Override
+    @Transactional
+    public void deleteViolation(UUID currentUserId, UUID violationId) {
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        RaceViolation violation = violationRepository.findById(violationId)
+                .orElseThrow(() -> new AppException(ErrorCode.VIOLATION_NOT_FOUND));
+        violationRepository.delete(violation);
     }
 
     @Override
@@ -246,14 +309,24 @@ public class ViolationServiceImpl implements ViolationService {
                 .regulatoryRef(v.getRegulatoryRef())
                 .regulatoryText(v.getRegulatoryRef())
                 .footageAttachmentId(v.getFootageAttachmentId())
-                .footageUrl(v.getFootageAttachmentId() != null
-                        ? "/api/v1/files/" + v.getFootageAttachmentId()
-                        : null)
+                .footageUrl(footageUrl(v.getFootageAttachmentId()))
                 .status(v.getStatus())
                 .reportedByUserId(v.getReportedBy() != null ? v.getReportedBy().getUserId() : null)
                 .createdAt(v.getCreatedAt())
                 .ruling(ruling)
                 .build();
+    }
+
+    /** Resolve a footage attachment id to its public file URL (null if missing). */
+    private String footageUrl(UUID attachmentId) {
+        if (attachmentId == null) {
+            return null;
+        }
+        return attachmentRepository.findById(attachmentId)
+                .map(a -> a.getObjectKey() != null
+                        ? com.SWP391.horserace.shared.storage.ImageUploadService.PUBLIC_URL_PREFIX + a.getObjectKey()
+                        : null)
+                .orElse(null);
     }
 
     /** "Race {raceCode} / {horseName} / {jockeyName}" — missing parts omitted. */

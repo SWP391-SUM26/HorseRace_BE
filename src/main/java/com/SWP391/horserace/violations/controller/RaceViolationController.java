@@ -48,9 +48,10 @@ public class RaceViolationController {
                 .build();
     }
 
-    /** GET — all violations of the race, optionally filtered by status / severity / infractionType. */
+    /** GET — all violations of the race, optionally filtered by status / severity / infractionType.
+     *  Readable by referees/admins and by horse owners (to view the report of races they ran in). */
     @GetMapping
-    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN','HORSE_OWNER')")
     public ApiResponse<List<ViolationListItemResponse>> list(
             @PathVariable UUID raceId,
             @RequestParam(name = "status", required = false) ViolationStatus status,

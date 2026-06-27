@@ -25,6 +25,12 @@ public interface ViolationService {
     /** Full detail of one violation, including any ruling. */
     ViolationDetailResponse getViolation(UUID violationId);
 
+    /** Edit a violation's details (only while it has not yet been ruled). */
+    ViolationDetailResponse updateViolation(UUID currentUserId, UUID violationId, CreateViolationRequest request);
+
+    /** Delete a violation (referee/admin). */
+    void deleteViolation(UUID currentUserId, UUID violationId);
+
     /** Record an official ruling; may create + link a penalty and resolve/dismiss the violation. */
     RulingResponse recordRuling(UUID currentUserId, UUID violationId, RulingRequest request);
 

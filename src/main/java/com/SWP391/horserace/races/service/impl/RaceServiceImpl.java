@@ -131,6 +131,8 @@ public class RaceServiceImpl implements RaceService {
                 .scheduledStartAt(request.scheduledStartAt())
                 .predictionCutoffAt(request.predictionCutoffAt())
                 .maxParticipants(request.maxParticipants())
+                .minParticipants(request.minParticipants())
+                .venue(request.venue())
                 .venueRef(resolveVenue(request.venueId()))
                 // Status is always SCHEDULED on create; lifecycle changes go through
                 // schedule()/cancel(), never a client-supplied status.
@@ -186,6 +188,8 @@ public class RaceServiceImpl implements RaceService {
         if (request.scheduledStartAt() != null) race.setScheduledStartAt(request.scheduledStartAt());
         if (request.predictionCutoffAt() != null) race.setPredictionCutoffAt(request.predictionCutoffAt());
         if (request.maxParticipants() != null) race.setMaxParticipants(request.maxParticipants());
+        if (request.minParticipants() != null) race.setMinParticipants(request.minParticipants());
+        if (request.venue() != null) race.setVenue(request.venue());
         if (request.venueId() != null) race.setVenueRef(resolveVenue(request.venueId()));
         // Status is intentionally NOT updatable here — transitions go through schedule()/cancel().
 
@@ -223,6 +227,46 @@ public class RaceServiceImpl implements RaceService {
             race.setPredictionCutoffAt(request.predictionCutoffAt());
         }
         race.setStatus(RaceStatus.OPEN);
+
+        return mapToResponse(raceRepository.save(race));
+    }
+
+    @Override
+    @Transactional
+    public RaceResponse startRace(UUID currentUserId, UUID id) {
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        Race race = loadRace(id);
+
+        // Conduct the race: only from OPEN (or CLOSED entries). Locks further entries.
+        if (race.getStatus() != RaceStatus.OPEN && race.getStatus() != RaceStatus.CLOSED) {
+            throw new AppException(ErrorCode.RACE_INVALID_STATUS);
+        }
+
+        race.setStatus(RaceStatus.RUNNING);
+        if (race.getActualStartAt() == null) {
+            race.setActualStartAt(OffsetDateTime.now());
+        }
+
+        return mapToResponse(raceRepository.save(race));
+    }
+
+    @Override
+    @Transactional
+    public RaceResponse finishRace(UUID currentUserId, UUID id) {
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        Race race = loadRace(id);
+
+        // End the race: only from RUNNING. Opens the referee reporting window.
+        if (race.getStatus() != RaceStatus.RUNNING) {
+            throw new AppException(ErrorCode.RACE_INVALID_STATUS);
+        }
+
+        race.setStatus(RaceStatus.FINISHED);
+        race.setActualEndAt(OffsetDateTime.now());
 
         return mapToResponse(raceRepository.save(race));
     }
@@ -300,17 +344,17 @@ public class RaceServiceImpl implements RaceService {
 
         // Batch-fetch the ACCEPTED jockey for every entry in one query (avoids N+1).
         List<UUID> entryIds = entries.stream().map(RaceEntry::getEntryId).toList();
-        Map<UUID, String> jockeyNameByEntryId = entryIds.isEmpty()
+        Map<UUID, User> jockeyByEntryId = entryIds.isEmpty()
                 ? Map.of()
                 : jockeyAssignmentRepository.findAcceptedByEntryIds(entryIds).stream()
                         .filter(ja -> ja.getEntry() != null && ja.getJockey() != null)
                         .collect(Collectors.toMap(
                                 ja -> ja.getEntry().getEntryId(),
-                                ja -> ja.getJockey().getFullName(),
+                                JockeyAssignment::getJockey,
                                 (a, b) -> a));
 
         return entries.stream()
-                .map(e -> mapToEntryResponse(e, jockeyNameByEntryId.get(e.getEntryId())))
+                .map(e -> mapToEntryResponse(e, jockeyByEntryId.get(e.getEntryId())))
                 .toList();
     }
 
@@ -398,6 +442,8 @@ public class RaceServiceImpl implements RaceService {
         String venueName = v != null ? v.getName() : r.getVenue();
         long entriesCount = r.getRaceId() == null ? 0L
                 : raceEntryRepository.countByRace_RaceId(r.getRaceId());
+        long confirmedCount = r.getRaceId() == null ? 0L
+                : jockeyAssignmentRepository.countAcceptedByRaceId(r.getRaceId());
         return RaceResponse.builder()
                 .raceId(r.getRaceId())
                 .raceCode(r.getRaceCode())
@@ -411,10 +457,12 @@ public class RaceServiceImpl implements RaceService {
                 .actualEndAt(r.getActualEndAt())
                 .predictionCutoffAt(r.getPredictionCutoffAt())
                 .maxParticipants(r.getMaxParticipants())
+                .minParticipants(r.getMinParticipants())
                 .venue(r.getVenue())
                 .venueId(v != null ? v.getVenueId() : null)
                 .venueName(venueName)
                 .entriesCount(entriesCount)
+                .confirmedCount(confirmedCount)
                 .goingMoisturePct(r.getGoingMoisturePct())
                 .totalPurse(r.getTotalPurse())
                 .prizeDistribution(mapPrizeDistribution(r.getPrizeDistribution()))
@@ -437,10 +485,10 @@ public class RaceServiceImpl implements RaceService {
 
     /** Map an entry whose riding jockey has not been resolved (e.g. just after creation). */
     private RaceEntryResponse mapToEntryResponse(RaceEntry e) {
-        return mapToEntryResponse(e, null);
+        return mapToEntryResponse(e, (User) null);
     }
 
-    private RaceEntryResponse mapToEntryResponse(RaceEntry e, String jockeyName) {
+    private RaceEntryResponse mapToEntryResponse(RaceEntry e, User jockey) {
         TournamentRegistration reg = e.getRegistration();
         Horse horse = reg != null ? reg.getHorse() : null;
         User owner = reg != null ? reg.getOwner() : null;
@@ -457,7 +505,8 @@ public class RaceServiceImpl implements RaceService {
                 .horseName(horse != null ? horse.getName() : null)
                 .ownerUserId(owner != null ? owner.getUserId() : null)
                 .ownerName(owner != null ? owner.getFullName() : null)
-                .jockeyName(jockeyName)
+                .jockeyUserId(jockey != null ? jockey.getUserId() : null)
+                .jockeyName(jockey != null ? jockey.getFullName() : null)
                 .weightCarriedLbs(e.getWeightCarriedLbs())
                 .recentForm(e.getRecentForm())
                 .odds(e.getOdds())

@@ -63,6 +63,7 @@ public class HorseServiceImpl implements HorseService {
     private final RaceRepository raceRepository;
     private final RaceEntryRepository raceEntryRepository;
     private final RaceResultRepository raceResultRepository;
+    private final com.SWP391.horserace.horses.repository.HorseMedicalRecordRepository medicalRecordRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -403,6 +404,86 @@ public class HorseServiceImpl implements HorseService {
         // DB UNIQUE (race_id, registration_id)/(race_id, lane_no)/(race_id, entry_no)
         // guards dupes -> DataIntegrityViolationException -> existing 409 handler.
         return mapToEntryResponse(raceEntryRepository.save(entry));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<com.SWP391.horserace.horses.dto.EnterableRaceResponse> getEnterableRaces(UUID horseId) {
+        horseRepository.findByHorseIdAndDeletedFalse(horseId)
+                .orElseThrow(() -> new AppException(ErrorCode.HORSE_NOT_FOUND));
+        return raceRepository.findEnterableRacesForHorse(horseId).stream()
+                .map(r -> com.SWP391.horserace.horses.dto.EnterableRaceResponse.builder()
+                        .raceId(r.getRaceId())
+                        .raceCode(r.getRaceCode())
+                        .name(r.getName())
+                        .tournamentId(r.getTournament() != null ? r.getTournament().getTournamentId() : null)
+                        .tournamentName(r.getTournament() != null ? r.getTournament().getName() : null)
+                        .scheduledStartAt(r.getScheduledStartAt())
+                        .status(r.getStatus() != null ? r.getStatus().name() : null)
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    // ── medical records (owner-managed) ──
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<com.SWP391.horserace.horses.dto.MedicalRecordResponse> listMedicalRecords(UUID horseId) {
+        loadHorse(horseId);
+        return medicalRecordRepository.findByHorse_HorseIdOrderByRecordDateDescCreatedAtDesc(horseId).stream()
+                .map(this::mapMedical)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional
+    public com.SWP391.horserace.horses.dto.MedicalRecordResponse addMedicalRecord(
+            UUID currentUserId, UUID horseId, com.SWP391.horserace.horses.dto.MedicalRecordRequest request) {
+        Horse horse = loadOwnedHorse(currentUserId, horseId);
+        com.SWP391.horserace.horses.entity.HorseMedicalRecord rec = com.SWP391.horserace.horses.entity.HorseMedicalRecord.builder()
+                .horse(horse)
+                .recordType(request.recordType())
+                .title(request.title())
+                .note(request.note())
+                .recordDate(request.recordDate())
+                .build();
+        return mapMedical(medicalRecordRepository.save(rec));
+    }
+
+    @Override
+    @Transactional
+    public com.SWP391.horserace.horses.dto.MedicalRecordResponse updateMedicalRecord(
+            UUID currentUserId, UUID horseId, UUID recordId, com.SWP391.horserace.horses.dto.MedicalRecordRequest request) {
+        loadOwnedHorse(currentUserId, horseId);
+        com.SWP391.horserace.horses.entity.HorseMedicalRecord rec = medicalRecordRepository
+                .findByRecordIdAndHorse_HorseId(recordId, horseId)
+                .orElseThrow(() -> new AppException(ErrorCode.MEDICAL_RECORD_NOT_FOUND));
+        rec.setRecordType(request.recordType());
+        rec.setTitle(request.title());
+        rec.setNote(request.note());
+        rec.setRecordDate(request.recordDate());
+        return mapMedical(medicalRecordRepository.save(rec));
+    }
+
+    @Override
+    @Transactional
+    public void deleteMedicalRecord(UUID currentUserId, UUID horseId, UUID recordId) {
+        loadOwnedHorse(currentUserId, horseId);
+        com.SWP391.horserace.horses.entity.HorseMedicalRecord rec = medicalRecordRepository
+                .findByRecordIdAndHorse_HorseId(recordId, horseId)
+                .orElseThrow(() -> new AppException(ErrorCode.MEDICAL_RECORD_NOT_FOUND));
+        medicalRecordRepository.delete(rec);
+    }
+
+    private com.SWP391.horserace.horses.dto.MedicalRecordResponse mapMedical(com.SWP391.horserace.horses.entity.HorseMedicalRecord r) {
+        return com.SWP391.horserace.horses.dto.MedicalRecordResponse.builder()
+                .recordId(r.getRecordId())
+                .recordType(r.getRecordType() != null ? r.getRecordType().name() : null)
+                .title(r.getTitle())
+                .note(r.getNote())
+                .recordDate(r.getRecordDate())
+                .createdAt(r.getCreatedAt())
+                .build();
     }
 
     // ── helpers ──

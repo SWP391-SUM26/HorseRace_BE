@@ -76,7 +76,7 @@ class RaceServiceImplTest {
 
     private RaceRequest createReq() {
         return new RaceRequest(tournamentId, "Race 1", "FLAT", 1200, "GOOD", "SUNNY",
-                null, null, 8, null);
+                null, null, 8, null, null);
     }
 
     // ── create ──
@@ -227,7 +227,7 @@ class RaceServiceImplTest {
         when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
 
         RaceRequest req = new RaceRequest(tournamentId, "Race 1", "FLAT", 1200, "GOOD", "SUNNY",
-                null, null, 8, venueId);
+                null, null, 8, null, venueId);
         RaceResponse res = service.createRace(currentUserId, req);
 
         assertThat(res.getVenueId()).isEqualTo(venueId);
@@ -241,7 +241,7 @@ class RaceServiceImplTest {
         when(venueRepository.findById(venueId)).thenReturn(Optional.empty());
 
         RaceRequest req = new RaceRequest(tournamentId, "Race 1", "FLAT", 1200, "GOOD", "SUNNY",
-                null, null, 8, venueId);
+                null, null, 8, null, venueId);
 
         assertThatThrownBy(() -> service.createRace(currentUserId, req))
                 .isInstanceOf(AppException.class)
