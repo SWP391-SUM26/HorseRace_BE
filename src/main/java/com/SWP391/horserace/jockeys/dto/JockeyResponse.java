@@ -5,6 +5,7 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -32,4 +33,14 @@ public class JockeyResponse {
     private Integer winCount;
     private String bio;
     private OffsetDateTime createdAt;
+
+    // -- Jockey Market (FE-v2 §2) marketing/stat fields --
+    private BigDecimal rating;
+    private String ridingStyle;
+    private BigDecimal winRate;
+    /** Recent form, most-recent first, e.g. ["W","L","W","W","L"]; empty list if none. */
+    private List<String> recentForm;
+    private BigDecimal baseFee;
+    private BigDecimal prizePercent;
+    private String lastTrophy;
 }

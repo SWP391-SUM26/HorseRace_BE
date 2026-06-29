@@ -14,6 +14,7 @@ public class RaceEntryResponse {
     private String entryCode;
     private Integer entryNo;
     private Integer laneNo;
+    private String drawStall;
     private RaceEntryStatus status;
     private UUID raceId;
     private UUID registrationId;
@@ -21,5 +22,10 @@ public class RaceEntryResponse {
     private String horseName;
     private UUID ownerUserId;
     private String ownerName;
+    private UUID jockeyUserId;
+    private String jockeyName;
+    private Integer weightCarriedLbs;
+    private String recentForm;
+    private String odds;
     private OffsetDateTime createdAt;
 }

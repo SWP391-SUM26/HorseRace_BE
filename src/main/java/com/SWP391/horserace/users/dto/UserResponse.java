@@ -20,7 +20,10 @@ public class UserResponse {
     private String avatarUrl;
     private String status;
     private String kycStatus;
+    private boolean emailVerified;
+    private String googleId;
     private String roleCode;
     private String roleName;
+    private OffsetDateTime lastLoginAt;
     private OffsetDateTime createdAt;
 }

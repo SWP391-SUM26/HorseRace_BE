@@ -3,6 +3,7 @@ package com.SWP391.horserace.horses.dto;
 import lombok.Builder;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -19,4 +20,8 @@ public class RaceHistoryItemResponse {
     private String entryStatus;
     private Integer finishPosition;
     private String entryCode;
+    /** FE-v2 Horse Profile (mục 1): race venue, from the tournament's location. */
+    private String venue;
+    /** FE-v2 Horse Profile (mục 1): prize money earned in this race. */
+    private BigDecimal prizeEarned;
 }

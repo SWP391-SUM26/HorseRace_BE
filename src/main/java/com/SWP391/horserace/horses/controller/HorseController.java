@@ -4,8 +4,11 @@ import com.SWP391.horserace.horses.dto.AssignHorseToRaceRequest;
 import com.SWP391.horserace.horses.dto.HorseFilterRequest;
 import com.SWP391.horserace.horses.dto.HorseRequest;
 import com.SWP391.horserace.horses.dto.HorseResponse;
+import com.SWP391.horserace.horses.dto.HorseStatsResponse;
 import com.SWP391.horserace.horses.dto.MedicalStatusResponse;
+import com.SWP391.horserace.horses.dto.PedigreeResponse;
 import com.SWP391.horserace.horses.dto.RaceHistoryItemResponse;
+import com.SWP391.horserace.horses.dto.RideIntelligenceResponse;
 import com.SWP391.horserace.horses.dto.UpdateMedicalStatusRequest;
 import com.SWP391.horserace.horses.service.HorseService;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
@@ -42,11 +45,12 @@ public class HorseController {
 
     /** GET /api/v1/horses — list with search (q), filters, sort and pagination. */
     @GetMapping
-    public ApiResponse<Page<HorseResponse>> listHorses(@ModelAttribute HorseFilterRequest filter) {
+    public ApiResponse<Page<HorseResponse>> listHorses(@ModelAttribute HorseFilterRequest filter,
+                                                       @AuthenticationPrincipal UUID userId) {
         return ApiResponse.<Page<HorseResponse>>builder()
                 .success(true)
                 .message("Fetched horses")
-                .data(horseService.listHorses(filter))
+                .data(horseService.listHorses(filter, userId))
                 .build();
     }
 
@@ -105,6 +109,26 @@ public class HorseController {
                 .build();
     }
 
+    /** GET /api/v1/horses/{id}/stats — career statistics (earnings, starts, wins, top3, grade, characteristics). */
+    @GetMapping("/{id}/stats")
+    public ApiResponse<HorseStatsResponse> getStats(@PathVariable UUID id) {
+        return ApiResponse.<HorseStatsResponse>builder()
+                .success(true)
+                .message("Fetched horse stats")
+                .data(horseService.getStats(id))
+                .build();
+    }
+
+    /** GET /api/v1/horses/{id}/pedigree — sire, dam and trainer. */
+    @GetMapping("/{id}/pedigree")
+    public ApiResponse<PedigreeResponse> getPedigree(@PathVariable UUID id) {
+        return ApiResponse.<PedigreeResponse>builder()
+                .success(true)
+                .message("Fetched horse pedigree")
+                .data(horseService.getPedigree(id))
+                .build();
+    }
+
     /** GET /api/v1/horses/{id}/medical-status — current medical status. */
     @GetMapping("/{id}/medical-status")
     public ApiResponse<MedicalStatusResponse> getMedicalStatus(@PathVariable UUID id) {
@@ -134,6 +158,62 @@ public class HorseController {
                 .success(true)
                 .message("Fetched race history")
                 .data(horseService.getRaceHistory(id))
+                .build();
+    }
+
+    /** GET /api/v1/horses/{id}/ride-intelligence — surface, post time, trainer, owner, recent form (FE-v2 jockey #7). */
+    @GetMapping("/{id}/ride-intelligence")
+    public ApiResponse<RideIntelligenceResponse> getRideIntelligence(@PathVariable UUID id) {
+        return ApiResponse.<RideIntelligenceResponse>builder()
+                .success(true)
+                .message("Fetched ride intelligence")
+                .data(horseService.getRideIntelligence(id))
+                .build();
+    }
+
+    // ── Medical records (owner-managed: view / add / edit / delete) ──
+
+    /** GET /api/v1/horses/{id}/medical-records — list a horse's medical records. */
+    @GetMapping("/{id}/medical-records")
+    public ApiResponse<java.util.List<com.SWP391.horserace.horses.dto.MedicalRecordResponse>> listMedicalRecords(@PathVariable UUID id) {
+        return ApiResponse.<java.util.List<com.SWP391.horserace.horses.dto.MedicalRecordResponse>>builder()
+                .success(true).message("Fetched medical records").data(horseService.listMedicalRecords(id)).build();
+    }
+
+    /** POST /api/v1/horses/{id}/medical-records — add a medical record (owner/admin). */
+    @PostMapping("/{id}/medical-records")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<com.SWP391.horserace.horses.dto.MedicalRecordResponse> addMedicalRecord(
+            @AuthenticationPrincipal UUID userId, @PathVariable UUID id,
+            @Valid @RequestBody com.SWP391.horserace.horses.dto.MedicalRecordRequest request) {
+        return ApiResponse.<com.SWP391.horserace.horses.dto.MedicalRecordResponse>builder()
+                .success(true).message("Medical record added").data(horseService.addMedicalRecord(userId, id, request)).build();
+    }
+
+    /** PUT /api/v1/horses/{id}/medical-records/{recordId} — edit a medical record (owner/admin). */
+    @PutMapping("/{id}/medical-records/{recordId}")
+    public ApiResponse<com.SWP391.horserace.horses.dto.MedicalRecordResponse> updateMedicalRecord(
+            @AuthenticationPrincipal UUID userId, @PathVariable UUID id, @PathVariable UUID recordId,
+            @Valid @RequestBody com.SWP391.horserace.horses.dto.MedicalRecordRequest request) {
+        return ApiResponse.<com.SWP391.horserace.horses.dto.MedicalRecordResponse>builder()
+                .success(true).message("Medical record updated").data(horseService.updateMedicalRecord(userId, id, recordId, request)).build();
+    }
+
+    /** DELETE /api/v1/horses/{id}/medical-records/{recordId} — delete a medical record (owner/admin). */
+    @DeleteMapping("/{id}/medical-records/{recordId}")
+    public ApiResponse<Void> deleteMedicalRecord(@AuthenticationPrincipal UUID userId, @PathVariable UUID id, @PathVariable UUID recordId) {
+        horseService.deleteMedicalRecord(userId, id, recordId);
+        return ApiResponse.<Void>builder().success(true).message("Medical record deleted").build();
+    }
+
+    /** GET /api/v1/horses/{id}/enterable-races — open races this horse can still be entered into. */
+    @GetMapping("/{id}/enterable-races")
+    public ApiResponse<java.util.List<com.SWP391.horserace.horses.dto.EnterableRaceResponse>> enterableRaces(
+            @PathVariable UUID id) {
+        return ApiResponse.<java.util.List<com.SWP391.horserace.horses.dto.EnterableRaceResponse>>builder()
+                .success(true)
+                .message("Fetched enterable races")
+                .data(horseService.getEnterableRaces(id))
                 .build();
     }
 

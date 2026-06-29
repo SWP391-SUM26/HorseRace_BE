@@ -2,22 +2,34 @@ package com.SWP391.horserace.users.controller;
 
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import com.SWP391.horserace.users.dto.ChangeEmailRequest;
+import com.SWP391.horserace.users.dto.ChangeRoleRequest;
+import com.SWP391.horserace.users.dto.ChangeStatusRequest;
+import com.SWP391.horserace.users.dto.CreateUserRequest;
 import com.SWP391.horserace.users.dto.UpdateProfileRequest;
+import com.SWP391.horserace.users.dto.UserFilterRequest;
 import com.SWP391.horserace.users.dto.UserResponse;
+import com.SWP391.horserace.users.dto.UserStatsResponse;
 import com.SWP391.horserace.users.dto.VerifyEmailChangeRequest;
 import com.SWP391.horserace.users.service.EmailChangeService;
 import com.SWP391.horserace.users.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -119,13 +131,47 @@ public class UserController {
                 .build();
     }
 
-    /** GET /api/v1/users — list all active users. */
+    /**
+     * GET /api/v1/users — admin: filtered, paginated user listing. Query params bound via
+     * {@link UserFilterRequest}: {@code q}, {@code roleCode}, {@code status}, {@code page},
+     * {@code size}, {@code sortBy}, {@code sortDir}. Returns a Spring {@code Page<UserResponse>}.
+     */
     @GetMapping
-    public ApiResponse<List<UserResponse>> getAllUsers() {
-        return ApiResponse.<List<UserResponse>>builder()
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<Page<UserResponse>> listUsers(@ModelAttribute UserFilterRequest filter) {
+        return ApiResponse.<Page<UserResponse>>builder()
                 .success(true)
-                .message("Fetched all users")
-                .data(userService.getAllUsers())
+                .message("Fetched users")
+                .data(userService.listUsers(filter))
+                .build();
+    }
+
+    /**
+     * GET /api/v1/users/stats — admin: aggregate user counts
+     * ({@code totalUsers}, {@code byRole}, {@code byStatus}) over non-deleted users.
+     */
+    @GetMapping("/stats")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<UserStatsResponse> getUserStats() {
+        return ApiResponse.<UserStatsResponse>builder()
+                .success(true)
+                .message("Fetched user stats")
+                .data(userService.getUserStats())
+                .build();
+    }
+
+    /**
+     * POST /api/v1/users — admin: provision a new ACTIVE user with the given role.
+     * Body {@link CreateUserRequest}. Returns 201 with the created user.
+     */
+    @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<UserResponse> createUser(@Valid @RequestBody CreateUserRequest request) {
+        return ApiResponse.<UserResponse>builder()
+                .success(true)
+                .message("User created")
+                .data(userService.createUser(request))
                 .build();
     }
 
@@ -136,6 +182,66 @@ public class UserController {
                 .success(true)
                 .message("Fetched user")
                 .data(userService.getUserById(id))
+                .build();
+    }
+
+    /** GET /api/v1/users/{id}/wins — first-place finishes of this user's horses (admin user-detail). */
+    @GetMapping("/{id}/wins")
+    public ApiResponse<java.util.List<com.SWP391.horserace.users.dto.UserWinResponse>> getUserWins(@PathVariable UUID id) {
+        return ApiResponse.<java.util.List<com.SWP391.horserace.users.dto.UserWinResponse>>builder()
+                .success(true)
+                .message("Fetched user wins")
+                .data(userService.getUserWins(id))
+                .build();
+    }
+
+    /** PATCH /api/v1/users/{id}/role — admin: change a user's role by role code. */
+    @PatchMapping("/{id}/role")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<UserResponse> changeRole(@PathVariable UUID id,
+                                                @Valid @RequestBody ChangeRoleRequest request) {
+        return ApiResponse.<UserResponse>builder()
+                .success(true)
+                .message("User role updated")
+                .data(userService.changeRole(id, request))
+                .build();
+    }
+
+    /** PATCH /api/v1/users/{id}/status — admin: suspend / activate / ban a user. */
+    @PatchMapping("/{id}/status")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<UserResponse> changeStatus(@PathVariable UUID id,
+                                                  @Valid @RequestBody ChangeStatusRequest request) {
+        return ApiResponse.<UserResponse>builder()
+                .success(true)
+                .message("User status updated")
+                .data(userService.changeStatus(id, request))
+                .build();
+    }
+
+    /**
+     * PUT /api/v1/users/{id} — admin updates a user's display profile by id
+     * (fullName / phone / avatarUrl). Admin-intended; role enforcement is deferred to the
+     * RBAC phase (consistent with the rest of the API's current dev posture).
+     */
+    @PutMapping("/{id}")
+    public ApiResponse<UserResponse> updateUserById(@PathVariable UUID id,
+                                                    @Valid @RequestBody UpdateProfileRequest request) {
+        return ApiResponse.<UserResponse>builder()
+                .success(true)
+                .message("User updated")
+                .data(userService.updateUserById(id, request))
+                .build();
+    }
+
+    /** DELETE /api/v1/users/{id} — admin soft-delete a user by UUID. */
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<Void> deleteUser(@PathVariable UUID id) {
+        userService.deleteUser(id);
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("User deleted")
                 .build();
     }
 }

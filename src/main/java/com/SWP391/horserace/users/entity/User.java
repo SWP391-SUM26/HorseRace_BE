@@ -80,6 +80,10 @@ public class User {
     @Builder.Default
     private boolean emailVerified = false;
 
+    /** Google subject (sub) — set when the account is linked via Google sign-in. */
+    @Column(name = "google_id")
+    private String googleId;
+
     @Column(name = "last_login_at")
     private OffsetDateTime lastLoginAt;
 

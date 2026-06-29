@@ -39,6 +39,9 @@ public enum ErrorCode {
     EMAIL_SEND_FAILED(1021, "Failed to send email", HttpStatus.INTERNAL_SERVER_ERROR),
     PASSWORD_TOO_WEAK(1022, "Password must be at least 8 characters and contain 1 number and 1 symbol", HttpStatus.BAD_REQUEST),
 
+    // ---- admin user management ----
+    INVALID_USER_STATUS(1023, "Invalid user status. Allowed: ACTIVE, INACTIVE, SUSPENDED, BANNED", HttpStatus.BAD_REQUEST),
+
     // ---- jockey ----
     JOCKEY_NOT_FOUND(2001, "Jockey profile not found", HttpStatus.NOT_FOUND),
 
@@ -52,11 +55,14 @@ public enum ErrorCode {
     NOT_INVITATION_OWNER(2008, "You are not the owner who sent this invitation", HttpStatus.FORBIDDEN),
     NOT_INVITED_JOCKEY(2009, "You are not the jockey invited for this assignment", HttpStatus.FORBIDDEN),
     OWNER_NOT_MATCH(2010, "You are not the owner of this horse entry", HttpStatus.FORBIDDEN),
+    INVITATION_NOT_ACCEPTED(2011, "Only ACCEPTED rides can be withdrawn", HttpStatus.BAD_REQUEST),
+    WITHDRAW_TOO_LATE(2012, "A jockey must withdraw at least 5 days before the race", HttpStatus.BAD_REQUEST),
 
     // ---- tournament ----
     TOURNAMENT_NOT_FOUND(3001, "Tournament not found", HttpStatus.NOT_FOUND),
     TOURNAMENT_CODE_EXISTED(3002, "Tournament code already existed", HttpStatus.CONFLICT),
     TOURNAMENT_INVALID_STATUS(3003, "Invalid status transition for tournament", HttpStatus.BAD_REQUEST),
+    VENUE_NOT_FOUND(3004, "Venue not found", HttpStatus.NOT_FOUND),
 
     // ---- staffing / referee assignment ----
     STAFF_NOT_FOUND(4001, "Staff member not found", HttpStatus.NOT_FOUND),
@@ -66,6 +72,13 @@ public enum ErrorCode {
     REFEREE_ASSIGNMENT_NOT_FOUND(4005, "Referee assignment not found", HttpStatus.NOT_FOUND),
     ASSIGNMENT_ALREADY_REVOKED(4006, "Assignment has already been revoked", HttpStatus.BAD_REQUEST),
     STAFF_EMAIL_EXISTED(4007, "Email is already registered", HttpStatus.CONFLICT),
+    REFEREE_NOT_ASSIGNED(4008, "You are not assigned to officiate this race", HttpStatus.FORBIDDEN),
+    REFEREE_CODE_REQUIRED(4009, "Your referee race code is required to submit", HttpStatus.BAD_REQUEST),
+    REFEREE_CODE_INVALID(4010, "Referee race code is invalid for this race", HttpStatus.FORBIDDEN),
+    TOURNAMENT_REFEREE_ALREADY_INVITED(4011, "This referee is already invited to this tournament", HttpStatus.CONFLICT),
+    TOURNAMENT_INVITATION_NOT_FOUND(4012, "Tournament referee invitation not found", HttpStatus.NOT_FOUND),
+    NOT_INVITED_REFEREE(4013, "This invitation does not belong to you", HttpStatus.FORBIDDEN),
+    TOURNAMENT_INVITATION_NOT_PENDING(4014, "Only pending (INVITED) invitations can be changed", HttpStatus.BAD_REQUEST),
 
     // ---- horse management ----
     HORSE_NOT_FOUND(5001, "Horse not found", HttpStatus.NOT_FOUND),
@@ -73,6 +86,7 @@ public enum ErrorCode {
     MICROCHIP_EXISTED(5004, "Microchip number already exists", HttpStatus.CONFLICT),
     NOT_HORSE_OWNER(5005, "You are not the owner of this horse", HttpStatus.FORBIDDEN),
     HORSE_NO_APPROVED_REGISTRATION(5006, "Horse has no approved registration for this race's tournament", HttpStatus.BAD_REQUEST),
+    MEDICAL_RECORD_NOT_FOUND(5007, "Medical record not found", HttpStatus.NOT_FOUND),
 
     // ---- file upload / storage ----
     FILE_EMPTY(6001, "Uploaded file is empty", HttpStatus.BAD_REQUEST),
@@ -104,7 +118,43 @@ public enum ErrorCode {
     PREDICTION_ENTRY_MISMATCH(9005, "The predicted entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
     PREDICTION_CANNOT_CANCEL(9006, "Prediction cannot be cancelled at this stage", HttpStatus.BAD_REQUEST),
     IDEMPOTENCY_KEY_EXISTED(9007, "Idempotency key already exists", HttpStatus.CONFLICT),
-    BETTING_POOL_CLOSED(9008, "Betting pool is not open", HttpStatus.BAD_REQUEST);
+    BETTING_POOL_CLOSED(9008, "Betting pool is not open", HttpStatus.BAD_REQUEST),
+
+    // ---- referee management ----
+    REPORT_NOT_FOUND(9101, "Referee report not found", HttpStatus.NOT_FOUND),
+    REPORT_INVALID_STATUS(9102, "Invalid status transition for this report", HttpStatus.BAD_REQUEST),
+
+    // ---- reward system ----
+    REWARD_NOT_FOUND(9201, "Reward not found", HttpStatus.NOT_FOUND),
+    REWARD_ALREADY_CLAIMED(9202, "Reward has already been claimed", HttpStatus.BAD_REQUEST),
+    REWARD_EXPIRED(9203, "Reward has expired", HttpStatus.BAD_REQUEST),
+    NOT_REWARD_OWNER(9204, "You do not own this reward", HttpStatus.FORBIDDEN),
+
+    // ---- pre-race inspection (FE-v2 §2) ----
+    INSPECTION_ENTRY_RACE_MISMATCH(9401, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+    INSPECTION_CONFIRM_REQUIRED(9402, "Submission must be confirmed", HttpStatus.BAD_REQUEST),
+
+    // ---- results record/read/edit/certify (FE-v2 §5) ----
+    RESULT_NOT_FOUND(9501, "Race result not found", HttpStatus.NOT_FOUND),
+    RESULT_INQUIRIES_UNRESOLVED(9502, "All inquiries must be resolved before certification", HttpStatus.BAD_REQUEST),
+    RESULT_ENTRY_RACE_MISMATCH(9503, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+    RESULT_ALREADY_OFFICIAL(9504, "Official results can no longer be deleted", HttpStatus.BAD_REQUEST),
+    RACE_NOT_FINISHED(9505, "Results and violations can only be filed after the race has finished", HttpStatus.BAD_REQUEST),
+
+    // ---- violations / inquiries (FE-v2 §3) ----
+    VIOLATION_NOT_FOUND(9601, "Violation not found", HttpStatus.NOT_FOUND),
+    VIOLATION_ENTRY_RACE_MISMATCH(9602, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+    VIOLATION_ALREADY_RULED(9603, "This violation has already been ruled on", HttpStatus.BAD_REQUEST),
+
+    // ---- attachments (FE-v2 §6) ----
+    ATTACHMENT_INVALID_OWNER_TYPE(9701, "Invalid ownerEntityType. Allowed: RACE_RESULT, VIOLATION, RACE", HttpStatus.BAD_REQUEST),
+    ATTACHMENT_INVALID_SENSITIVITY(9702, "Invalid sensitivityLevel. Allowed: PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED", HttpStatus.BAD_REQUEST),
+
+    // ---- referee applicant onboarding (FE-v2 Registration Approval) ----
+    APPLICATION_NOT_FOUND(9301, "Membership application not found", HttpStatus.NOT_FOUND),
+    APPLICATION_ALREADY_DECIDED(9302, "Application has already been decided", HttpStatus.BAD_REQUEST),
+    APPLICATION_INVALID_STATUS(9303, "Invalid status transition for this application", HttpStatus.BAD_REQUEST),
+    APPLICATION_ROLE_NOT_FOUND(9304, "Target role for the requested role mapping was not found", HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final int code;
     private final String message;

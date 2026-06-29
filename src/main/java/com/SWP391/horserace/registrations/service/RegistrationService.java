@@ -3,6 +3,7 @@ package com.SWP391.horserace.registrations.service;
 import com.SWP391.horserace.registrations.dto.RegistrationFilterRequest;
 import com.SWP391.horserace.registrations.dto.RegistrationRequest;
 import com.SWP391.horserace.registrations.dto.RegistrationResponse;
+import com.SWP391.horserace.registrations.dto.RegistrationStatsResponse;
 import com.SWP391.horserace.registrations.dto.RejectRegistrationRequest;
 import org.springframework.data.domain.Page;
 
@@ -15,6 +16,9 @@ public interface RegistrationService {
     Page<RegistrationResponse> listRegistrations(RegistrationFilterRequest filter);
 
     RegistrationResponse getRegistrationById(UUID id);
+
+    /** KPI aggregate (total / pending / approved / rejected), optionally scoped to a tournament. */
+    RegistrationStatsResponse getStats(UUID tournamentId);
 
     RegistrationResponse approveRegistration(UUID currentUserId, UUID id);
 

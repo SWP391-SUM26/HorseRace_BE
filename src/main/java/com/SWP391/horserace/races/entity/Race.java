@@ -1,6 +1,7 @@
 package com.SWP391.horserace.races.entity;
 
 import com.SWP391.horserace.tournaments.entity.Tournament;
+import com.SWP391.horserace.venues.entity.Venue;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -10,7 +11,10 @@ import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /** Maps the {@code race} table. */
@@ -64,6 +68,61 @@ public class Race {
 
     @Column(name = "max_participants")
     private Integer maxParticipants;
+
+    @Column(name = "min_participants")
+    private Integer minParticipants;
+
+    @Column(name = "venue")
+    private String venue;
+
+    /** §D1 — optional FK to a structured venue (track). The free-text {@code venue} column is kept too. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "venue_id")
+    private Venue venueRef;
+
+    @Column(name = "going_moisture_pct")
+    private Integer goingMoisturePct;
+
+    @Column(name = "total_purse")
+    private BigDecimal totalPurse;
+
+    // ── FE-v2 Results + Certify (mục 5): telemetry / photofinish / certification ──
+
+    @Column(name = "wind_speed_kph", precision = 5, scale = 2)
+    private BigDecimal windSpeedKph;
+
+    /** FE-v2 Live monitor (mục 4): compass label, e.g. "NW". */
+    @Column(name = "wind_direction", length = 10)
+    private String windDirection;
+
+    @Column(name = "track_bias", length = 50)
+    private String trackBias;
+
+    @Column(name = "photofinish_url", columnDefinition = "text")
+    private String photofinishUrl;
+
+    @Column(name = "video_feed_url", columnDefinition = "text")
+    private String videoFeedUrl;
+
+    @Column(name = "certified_by_user_id")
+    private UUID certifiedByUserId;
+
+    @Column(name = "certified_at")
+    private OffsetDateTime certifiedAt;
+
+    @Column(name = "stewards_report", columnDefinition = "text")
+    private String stewardsReport;
+
+    @ElementCollection
+    @CollectionTable(name = "race_prize_distribution", joinColumns = @JoinColumn(name = "race_id"))
+    @Builder.Default
+    private List<PrizeDistributionItem> prizeDistribution = new ArrayList<>();
+
+    /** Split (fraction) times for this race, ordered in app code by split_no. */
+    @ElementCollection
+    @CollectionTable(name = "race_fraction", joinColumns = @JoinColumn(name = "race_id"))
+    @Builder.Default
+    private List<RaceFraction> fractions = new ArrayList<>();
 
     /** SCHEDULED | OPEN | CLOSED | RUNNING | FINISHED | OFFICIAL | CANCELLED */
     @Enumerated(EnumType.STRING)

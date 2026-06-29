@@ -4,8 +4,11 @@ import com.SWP391.horserace.horses.dto.AssignHorseToRaceRequest;
 import com.SWP391.horserace.horses.dto.HorseFilterRequest;
 import com.SWP391.horserace.horses.dto.HorseRequest;
 import com.SWP391.horserace.horses.dto.HorseResponse;
+import com.SWP391.horserace.horses.dto.HorseStatsResponse;
 import com.SWP391.horserace.horses.dto.MedicalStatusResponse;
+import com.SWP391.horserace.horses.dto.PedigreeResponse;
 import com.SWP391.horserace.horses.dto.RaceHistoryItemResponse;
+import com.SWP391.horserace.horses.dto.RideIntelligenceResponse;
 import com.SWP391.horserace.horses.dto.UpdateMedicalStatusRequest;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.entity.HorseStatus;
@@ -39,6 +42,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -59,13 +63,37 @@ public class HorseServiceImpl implements HorseService {
     private final RaceRepository raceRepository;
     private final RaceEntryRepository raceEntryRepository;
     private final RaceResultRepository raceResultRepository;
+    private final com.SWP391.horserace.horses.repository.HorseMedicalRecordRepository medicalRecordRepository;
 
     @Override
     @Transactional(readOnly = true)
-    public Page<HorseResponse> listHorses(HorseFilterRequest filter) {
+    public Page<HorseResponse> listHorses(HorseFilterRequest filter, UUID currentUserId) {
+        UUID ownerFilter = resolveOwnerFilter(filter.getOwnerUserId(), currentUserId);
         return horseRepository
-                .findAll(HorseSpecification.withFilters(filter), buildPageable(filter))
+                .findAll(HorseSpecification.withFilters(filter, ownerFilter), buildPageable(filter))
                 .map(this::mapToResponse);
+    }
+
+    /**
+     * Resolves the {@code ownerUserId} query value: the literal {@code "me"} → the caller's id
+     * (requires authentication), a UUID string → that id, blank/null → no owner filter. An
+     * unparseable value is a 400 rather than a 500.
+     */
+    private UUID resolveOwnerFilter(String raw, UUID currentUserId) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        if (raw.equalsIgnoreCase("me")) {
+            if (currentUserId == null) {
+                throw new AppException(ErrorCode.UNAUTHENTICATED);
+            }
+            return currentUserId;
+        }
+        try {
+            return UUID.fromString(raw.trim());
+        } catch (IllegalArgumentException e) {
+            throw new AppException(ErrorCode.INVALID_KEY);
+        }
     }
 
     @Override
@@ -163,6 +191,70 @@ public class HorseServiceImpl implements HorseService {
 
     @Override
     @Transactional(readOnly = true)
+    public HorseStatsResponse getStats(UUID horseId) {
+        Horse horse = loadHorse(horseId);
+
+        // The horse's race entries; finish positions come from race_result rows for those entries.
+        List<RaceEntry> entries = raceEntryRepository.findHistoryByHorseId(horseId);
+
+        // lifetimeEarnings = SUM of prize_earned across the horse's entries.
+        BigDecimal lifetimeEarnings = entries.stream()
+                .map(RaceEntry::getPrizeEarned)
+                .filter(p -> p != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        long starts = 0;
+        int wins = 0;
+        int top3 = 0;
+        if (!entries.isEmpty()) {
+            List<UUID> entryIds = entries.stream().map(RaceEntry::getEntryId).toList();
+            List<RaceResult> results = raceResultRepository.findByEntry_EntryIdIn(entryIds).stream()
+                    .filter(r -> r.getFinishPosition() != null)
+                    .toList();
+            starts = results.size();
+            for (RaceResult r : results) {
+                int pos = r.getFinishPosition();
+                if (pos == 1) wins++;
+                if (pos <= 3) top3++;
+            }
+        }
+
+        return HorseStatsResponse.builder()
+                .lifetimeEarnings(lifetimeEarnings)
+                .starts(starts)
+                .wins(wins)
+                .top3(top3)
+                .grade(horse.getGrade())
+                .characteristics(horse.getCharacteristics() == null
+                        ? List.of()
+                        : horse.getCharacteristics().stream().sorted().toList())
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PedigreeResponse getPedigree(UUID horseId) {
+        Horse h = loadHorse(horseId);
+        return PedigreeResponse.builder()
+                .sire(PedigreeResponse.Sire.builder()
+                        .name(h.getSireName())
+                        .wins(h.getSireWins())
+                        .earnings(h.getSireEarnings())
+                        .build())
+                .dam(PedigreeResponse.Dam.builder()
+                        .name(h.getDamName())
+                        .wins(h.getDamWins())
+                        .note(h.getDamNote())
+                        .build())
+                .trainer(PedigreeResponse.Trainer.builder()
+                        .name(h.getTrainerName())
+                        .licenseNo(h.getTrainerLicenseNo())
+                        .build())
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public MedicalStatusResponse getMedicalStatus(UUID horseId) {
         return mapToMedicalStatus(loadHorse(horseId));
     }
@@ -207,6 +299,76 @@ public class HorseServiceImpl implements HorseService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public RideIntelligenceResponse getRideIntelligence(UUID horseId) {
+        Horse horse = loadHorse(horseId); // 404 HORSE_NOT_FOUND if missing
+
+        // entries are newest-scheduled first
+        List<RaceEntry> entries = raceEntryRepository.findHistoryByHorseId(horseId);
+
+        // recentForm: up-to-3 most-recent finish positions joined "-", e.g. "1-2-1"
+        String recentForm = null;
+        OffsetDateTime postTime = null;
+        if (!entries.isEmpty()) {
+            List<UUID> entryIds = entries.stream().map(RaceEntry::getEntryId).toList();
+            Map<UUID, Integer> finishByEntry = raceResultRepository.findByEntry_EntryIdIn(entryIds).stream()
+                    .filter(r -> r.getEntry() != null && r.getFinishPosition() != null)
+                    .collect(Collectors.toMap(r -> r.getEntry().getEntryId(), RaceResult::getFinishPosition,
+                            (a, b) -> a));
+
+            String form = entries.stream()
+                    .map(e -> finishByEntry.get(e.getEntryId()))
+                    .filter(java.util.Objects::nonNull)
+                    .limit(3)
+                    .map(String::valueOf)
+                    .collect(Collectors.joining("-"));
+            if (!form.isEmpty()) {
+                recentForm = form;
+            }
+
+            // postTime: the horse's next SCHEDULED/OPEN race start (earliest upcoming).
+            postTime = entries.stream()
+                    .map(RaceEntry::getRace)
+                    .filter(r -> r != null
+                            && (r.getStatus() == RaceStatus.SCHEDULED || r.getStatus() == RaceStatus.OPEN)
+                            && r.getScheduledStartAt() != null)
+                    .map(Race::getScheduledStartAt)
+                    .min(OffsetDateTime::compareTo)
+                    .orElse(null);
+        }
+
+        return RideIntelligenceResponse.builder()
+                .preferredSurface(derivePreferredSurface(horse.getCharacteristics()))
+                .postTime(postTime)
+                .trainer(horse.getTrainerName())
+                .owner(horse.getOwner() != null ? horse.getOwner().getFullName() : null)
+                .recentForm(recentForm)
+                .formNotes(null)
+                .build();
+    }
+
+    /**
+     * Derive a preferred surface from the horse's characteristic tags.
+     * A tag containing "TURF" → "TURF"; "DIRT" → "DIRT"; otherwise null.
+     */
+    private String derivePreferredSurface(java.util.Set<String> characteristics) {
+        if (characteristics == null) {
+            return null;
+        }
+        for (String tag : characteristics) {
+            if (tag == null) continue;
+            String upper = tag.toUpperCase();
+            if (upper.contains("TURF")) {
+                return "TURF";
+            }
+            if (upper.contains("DIRT")) {
+                return "DIRT";
+            }
+        }
+        return null;
+    }
+
+    @Override
     @Transactional
     public RaceEntryResponse assignHorseToRace(UUID currentUserId, UUID horseId,
                                                AssignHorseToRaceRequest request) {
@@ -242,6 +404,86 @@ public class HorseServiceImpl implements HorseService {
         // DB UNIQUE (race_id, registration_id)/(race_id, lane_no)/(race_id, entry_no)
         // guards dupes -> DataIntegrityViolationException -> existing 409 handler.
         return mapToEntryResponse(raceEntryRepository.save(entry));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<com.SWP391.horserace.horses.dto.EnterableRaceResponse> getEnterableRaces(UUID horseId) {
+        horseRepository.findByHorseIdAndDeletedFalse(horseId)
+                .orElseThrow(() -> new AppException(ErrorCode.HORSE_NOT_FOUND));
+        return raceRepository.findEnterableRacesForHorse(horseId).stream()
+                .map(r -> com.SWP391.horserace.horses.dto.EnterableRaceResponse.builder()
+                        .raceId(r.getRaceId())
+                        .raceCode(r.getRaceCode())
+                        .name(r.getName())
+                        .tournamentId(r.getTournament() != null ? r.getTournament().getTournamentId() : null)
+                        .tournamentName(r.getTournament() != null ? r.getTournament().getName() : null)
+                        .scheduledStartAt(r.getScheduledStartAt())
+                        .status(r.getStatus() != null ? r.getStatus().name() : null)
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    // ── medical records (owner-managed) ──
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<com.SWP391.horserace.horses.dto.MedicalRecordResponse> listMedicalRecords(UUID horseId) {
+        loadHorse(horseId);
+        return medicalRecordRepository.findByHorse_HorseIdOrderByRecordDateDescCreatedAtDesc(horseId).stream()
+                .map(this::mapMedical)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional
+    public com.SWP391.horserace.horses.dto.MedicalRecordResponse addMedicalRecord(
+            UUID currentUserId, UUID horseId, com.SWP391.horserace.horses.dto.MedicalRecordRequest request) {
+        Horse horse = loadOwnedHorse(currentUserId, horseId);
+        com.SWP391.horserace.horses.entity.HorseMedicalRecord rec = com.SWP391.horserace.horses.entity.HorseMedicalRecord.builder()
+                .horse(horse)
+                .recordType(request.recordType())
+                .title(request.title())
+                .note(request.note())
+                .recordDate(request.recordDate())
+                .build();
+        return mapMedical(medicalRecordRepository.save(rec));
+    }
+
+    @Override
+    @Transactional
+    public com.SWP391.horserace.horses.dto.MedicalRecordResponse updateMedicalRecord(
+            UUID currentUserId, UUID horseId, UUID recordId, com.SWP391.horserace.horses.dto.MedicalRecordRequest request) {
+        loadOwnedHorse(currentUserId, horseId);
+        com.SWP391.horserace.horses.entity.HorseMedicalRecord rec = medicalRecordRepository
+                .findByRecordIdAndHorse_HorseId(recordId, horseId)
+                .orElseThrow(() -> new AppException(ErrorCode.MEDICAL_RECORD_NOT_FOUND));
+        rec.setRecordType(request.recordType());
+        rec.setTitle(request.title());
+        rec.setNote(request.note());
+        rec.setRecordDate(request.recordDate());
+        return mapMedical(medicalRecordRepository.save(rec));
+    }
+
+    @Override
+    @Transactional
+    public void deleteMedicalRecord(UUID currentUserId, UUID horseId, UUID recordId) {
+        loadOwnedHorse(currentUserId, horseId);
+        com.SWP391.horserace.horses.entity.HorseMedicalRecord rec = medicalRecordRepository
+                .findByRecordIdAndHorse_HorseId(recordId, horseId)
+                .orElseThrow(() -> new AppException(ErrorCode.MEDICAL_RECORD_NOT_FOUND));
+        medicalRecordRepository.delete(rec);
+    }
+
+    private com.SWP391.horserace.horses.dto.MedicalRecordResponse mapMedical(com.SWP391.horserace.horses.entity.HorseMedicalRecord r) {
+        return com.SWP391.horserace.horses.dto.MedicalRecordResponse.builder()
+                .recordId(r.getRecordId())
+                .recordType(r.getRecordType() != null ? r.getRecordType().name() : null)
+                .title(r.getTitle())
+                .note(r.getNote())
+                .recordDate(r.getRecordDate())
+                .createdAt(r.getCreatedAt())
+                .build();
     }
 
     // ── helpers ──
@@ -315,6 +557,8 @@ public class HorseServiceImpl implements HorseService {
                 .healthStatus(h.getHealthStatus())
                 .lastHealthCheckAt(h.getLastHealthCheckAt())
                 .medicalNote(h.getMedicalNote())
+                .vaccinationsUpToDate(h.isVaccinationsUpToDate())
+                .recoveryPercent(h.getRecoveryPercent())
                 .build();
     }
 
@@ -331,6 +575,8 @@ public class HorseServiceImpl implements HorseService {
                 .entryStatus(e.getStatus() != null ? e.getStatus().name() : null)
                 .finishPosition(finishPosition)
                 .entryCode(e.getEntryCode())
+                .venue(t != null ? t.getLocation() : null)
+                .prizeEarned(e.getPrizeEarned())
                 .build();
     }
 
@@ -373,6 +619,10 @@ public class HorseServiceImpl implements HorseService {
                 .registrationStatus(h.getRegistrationStatus())
                 .status(h.getStatus())
                 .imageUrl(h.getImageUrl())
+                .fitnessCertified(h.isFitnessCertified())
+                .fitnessCertExpiresAt(h.getFitnessCertExpiresAt())
+                .passportScanStatus(h.getPassportScanStatus())
+                .cogginsTestDate(h.getCogginsTestDate())
                 .createdAt(h.getCreatedAt())
                 .updatedAt(h.getUpdatedAt())
                 .build();

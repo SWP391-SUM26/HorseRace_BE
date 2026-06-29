@@ -430,4 +430,23 @@ class RegistrationServiceImplTest {
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.REGISTRATION_NOT_FOUND);
     }
+
+    @Test
+    void getById_mapsCategory() {
+        UUID id = UUID.randomUUID();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(id)
+                .registrationCode("REG-001")
+                .owner(owner)
+                .horse(horse)
+                .tournament(tournament)
+                .status(RegistrationStatus.APPROVED)
+                .category("GROUP_1")
+                .build();
+        when(registrationRepository.findByIdWithDetails(id)).thenReturn(Optional.of(reg));
+
+        RegistrationResponse res = service.getRegistrationById(id);
+
+        assertThat(res.getCategory()).isEqualTo("GROUP_1");
+    }
 }

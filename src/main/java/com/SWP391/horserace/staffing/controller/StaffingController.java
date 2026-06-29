@@ -10,6 +10,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -74,6 +75,7 @@ public class StaffingController {
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<StaffResponse> createStaff(@Valid @RequestBody CreateStaffRequest request) {
         StaffResponse response = staffService.createStaff(request);
 
@@ -91,6 +93,7 @@ public class StaffingController {
      * Partial update of a referee's profile (name, phone, avatar, status).
      */
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<StaffResponse> updateStaff(@PathVariable UUID id,
                                                    @Valid @RequestBody UpdateStaffRequest request) {
         StaffResponse response = staffService.updateStaff(id, request);

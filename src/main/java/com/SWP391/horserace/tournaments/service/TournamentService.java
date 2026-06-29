@@ -15,4 +15,9 @@ public interface TournamentService {
     void deleteTournament(UUID id);
     TournamentResponse publishTournament(UUID id);
     TournamentResponse closeRegistration(UUID id);
+
+    // §C5 — status transitions
+    TournamentResponse openRegistration(UUID id);
+    TournamentResponse startTournament(UUID id);
+    TournamentResponse completeTournament(UUID id);
 }

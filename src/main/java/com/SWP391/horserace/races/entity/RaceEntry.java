@@ -10,6 +10,7 @@ import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -45,6 +46,15 @@ public class RaceEntry {
     @Column(name = "lane_no")
     private Integer laneNo;
 
+    @Column(name = "weight_carried_lbs")
+    private Integer weightCarriedLbs;
+
+    @Column(name = "recent_form", length = 50)
+    private String recentForm;
+
+    @Column(name = "odds", length = 20)
+    private String odds;
+
     /** ENTERED | CHECKED_IN | SCRATCHED | DISQUALIFIED | FINISHED */
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
@@ -53,6 +63,11 @@ public class RaceEntry {
 
     @Column(name = "checked_in_at")
     private OffsetDateTime checkedInAt;
+
+    /** FE-v2 Horse Profile (mục 1): prize money this horse earned in this race. */
+    @Column(name = "prize_earned", precision = 18, scale = 2, nullable = false)
+    @Builder.Default
+    private BigDecimal prizeEarned = BigDecimal.ZERO;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)

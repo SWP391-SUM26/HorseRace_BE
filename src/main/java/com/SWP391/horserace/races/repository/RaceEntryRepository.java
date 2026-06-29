@@ -29,6 +29,33 @@ public interface RaceEntryRepository extends JpaRepository<RaceEntry, UUID> {
 
     java.util.List<RaceEntry> findByRace_RaceId(UUID raceId);
 
+    /**
+     * All entries in a race with registration + horse eagerly fetched. Used by the pre-race
+     * inspection list to build horseId/horseName per entry without lazy-loading (FE-v2 §2).
+     */
+    @Query("""
+        SELECT re FROM RaceEntry re
+          JOIN FETCH re.registration r
+          JOIN FETCH r.horse h
+         WHERE re.race.raceId = :raceId
+        """)
+    java.util.List<RaceEntry> findByRaceIdWithHorse(@Param("raceId") UUID raceId);
+
+    /**
+     * The entry in a race that belongs to a specific owner (via its registration), with
+     * registration, horse, and owner eagerly fetched. Used for the owner's "Your Horse Status" card.
+     */
+    @Query("""
+        SELECT re FROM RaceEntry re
+          JOIN FETCH re.registration r
+          JOIN FETCH r.horse h
+          JOIN FETCH r.owner o
+         WHERE re.race.raceId = :raceId
+           AND o.userId = :ownerUserId
+        """)
+    Optional<RaceEntry> findByRaceIdAndOwnerUserId(@Param("raceId") UUID raceId,
+                                                   @Param("ownerUserId") UUID ownerUserId);
+
     long countByRace_RaceId(UUID raceId);
 
     boolean existsByEntryCode(String entryCode);
@@ -47,4 +74,33 @@ public interface RaceEntryRepository extends JpaRepository<RaceEntry, UUID> {
          ORDER BY rc.scheduledStartAt DESC NULLS LAST
         """)
     java.util.List<RaceEntry> findHistoryByHorseId(@Param("horseId") UUID horseId);
+
+    /**
+     * Every race entry belonging to one owner (via its registration). Used by the Owner
+     * Overview to compute starts/wins/top3 over the owner's entries.
+     */
+    @Query("""
+        SELECT re FROM RaceEntry re
+          JOIN re.registration r
+         WHERE r.owner.userId = :ownerUserId
+        """)
+    java.util.List<RaceEntry> findByOwnerUserId(@Param("ownerUserId") UUID ownerUserId);
+
+    /**
+     * The owner's entries for races that are still upcoming (SCHEDULED or OPEN), newest
+     * scheduled first. Race + horse are eagerly fetched so the caller can build the
+     * "upcomingRaces" cards without lazy-loading.
+     */
+    @Query("""
+        SELECT re FROM RaceEntry re
+          JOIN FETCH re.race rc
+          JOIN FETCH re.registration r
+          JOIN FETCH r.horse h
+         WHERE r.owner.userId = :ownerUserId
+           AND rc.status IN (com.SWP391.horserace.races.entity.RaceStatus.SCHEDULED,
+                             com.SWP391.horserace.races.entity.RaceStatus.OPEN)
+           AND rc.deleted = false
+         ORDER BY rc.scheduledStartAt ASC NULLS LAST
+        """)
+    java.util.List<RaceEntry> findUpcomingByOwnerUserId(@Param("ownerUserId") UUID ownerUserId);
 }

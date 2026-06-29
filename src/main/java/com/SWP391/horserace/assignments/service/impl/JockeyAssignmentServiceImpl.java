@@ -2,6 +2,7 @@ package com.SWP391.horserace.assignments.service.impl;
 
 import com.SWP391.horserace.assignments.dto.InvitationFilterRequest;
 import com.SWP391.horserace.assignments.dto.InvitationResponse;
+import com.SWP391.horserace.assignments.dto.JockeyRideResponse;
 import com.SWP391.horserace.assignments.dto.SendInvitationRequest;
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
 import com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus;
@@ -12,7 +13,10 @@ import com.SWP391.horserace.jockeys.entity.JockeyProfile;
 import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
+import com.SWP391.horserace.races.entity.RaceResult;
+import com.SWP391.horserace.races.entity.RaceStatus;
 import com.SWP391.horserace.races.repository.RaceEntryRepository;
+import com.SWP391.horserace.races.repository.RaceResultRepository;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
@@ -27,8 +31,13 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -38,6 +47,8 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
     private final RaceEntryRepository raceEntryRepository;
     private final JockeyProfileRepository jockeyProfileRepository;
     private final UserRepository userRepository;
+    private final RaceResultRepository raceResultRepository;
+    private final com.SWP391.horserace.notifications.service.NotificationService notificationService;
 
     // -------------------------------------------------------------------------
     // SEND INVITATION  (Horse Owner → Jockey)
@@ -57,13 +68,6 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         }
         */
 
-        // 3. TẠM TẮT CHECK TRÙNG LẶP ĐỂ DEV/TEST KHÔNG BỊ 409
-        /*
-        if (assignmentRepository.existsActiveByEntryId(request.getEntryId())) {
-            throw new AppException(ErrorCode.ENTRY_ALREADY_ASSIGNED);
-        }
-        */
-
         // 4. Verify the jockey exists and is active
         JockeyProfile jockeyProfile = jockeyProfileRepository.findByIdAndUserActive(request.getJockeyUserId())
                 .orElseThrow(() -> new AppException(ErrorCode.JOCKEY_NOT_FOUND));
@@ -71,14 +75,31 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         // 5. Lấy thẳng chủ ngựa làm người gửi thay vì bắt buộc truyền currentUserId hợp lệ
         User assignedByUser = entry.getRegistration().getOwner();
 
-        // 6. Create the assignment
-        JockeyAssignment assignment = JockeyAssignment.builder()
-                .entry(entry)
-                .jockey(jockeyProfile.getJockeyUser())
-                .status(JockeyAssignmentStatus.INVITED)
-                .invitedAt(OffsetDateTime.now())
-                .assignedBy(assignedByUser)
-                .build();
+        // 6. Create or reuse the assignment. entry_id is UNIQUE (one jockey per entry), so:
+        //    - if a row already exists and is ACTIVE (INVITED/ACCEPTED), reject;
+        //    - if it exists but was CANCELLED/DECLINED, reuse that row (re-invite, even a
+        //      different jockey) instead of inserting — which would hit the unique constraint.
+        JockeyAssignment assignment = assignmentRepository.findByEntry_EntryId(request.getEntryId())
+                .orElse(null);
+        if (assignment != null) {
+            JockeyAssignmentStatus status = assignment.getStatus();
+            if (status == JockeyAssignmentStatus.INVITED || status == JockeyAssignmentStatus.ACCEPTED) {
+                throw new AppException(ErrorCode.ENTRY_ALREADY_ASSIGNED);
+            }
+            assignment.setJockey(jockeyProfile.getJockeyUser());
+            assignment.setStatus(JockeyAssignmentStatus.INVITED);
+            assignment.setInvitedAt(OffsetDateTime.now());
+            assignment.setRespondedAt(null);
+            assignment.setAssignedBy(assignedByUser);
+        } else {
+            assignment = JockeyAssignment.builder()
+                    .entry(entry)
+                    .jockey(jockeyProfile.getJockeyUser())
+                    .status(JockeyAssignmentStatus.INVITED)
+                    .invitedAt(OffsetDateTime.now())
+                    .assignedBy(assignedByUser)
+                    .build();
+        }
 
         assignment = assignmentRepository.save(assignment);
 
@@ -156,6 +177,9 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         assignment.setRespondedAt(OffsetDateTime.now());
         assignment = assignmentRepository.save(assignment);
 
+        // The horse is now crewed — forward it to the admins so they can schedule the race.
+        notifyAdminsReadyToSchedule(assignment);
+
         return mapToResponse(assignment);
     }
 
@@ -216,9 +240,128 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         assignmentRepository.save(assignment);
     }
 
+    // -------------------------------------------------------------------------
+    // WITHDRAW INVITATION  (Jockey — from ACCEPTED, FE-v2 #9)
+    // -------------------------------------------------------------------------
+    @Override
+    @Transactional
+    public InvitationResponse withdrawInvitation(UUID assignmentId, UUID currentUserId) {
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+
+        JockeyAssignment assignment = assignmentRepository.findByIdWithDetails(assignmentId)
+                .orElseThrow(() -> new AppException(ErrorCode.ASSIGNMENT_NOT_FOUND));
+
+        // Only the invited jockey can withdraw their own ride.
+        if (!assignment.getJockey().getUserId().equals(currentUserId)) {
+            throw new AppException(ErrorCode.NOT_INVITED_JOCKEY);
+        }
+
+        // Can only withdraw from ACCEPTED (the enum has no WITHDRAWN — reuse CANCELLED).
+        if (assignment.getStatus() != JockeyAssignmentStatus.ACCEPTED) {
+            throw new AppException(ErrorCode.INVITATION_NOT_ACCEPTED);
+        }
+
+        // A jockey must withdraw at least 5 days before the race so the owner has time to
+        // find a replacement. Once withdrawn, the entry frees up and the horse reappears
+        // in the owner's Jockey Market rail.
+        OffsetDateTime raceStart = assignment.getEntry().getRace().getScheduledStartAt();
+        if (raceStart != null && raceStart.isBefore(OffsetDateTime.now().plusDays(5))) {
+            throw new AppException(ErrorCode.WITHDRAW_TOO_LATE);
+        }
+
+        assignment.setStatus(JockeyAssignmentStatus.CANCELLED);
+        assignment.setRespondedAt(OffsetDateTime.now());
+        assignment = assignmentRepository.save(assignment);
+
+        return mapToResponse(assignment);
+    }
+
+    // -------------------------------------------------------------------------
+    // MY RIDES  (Jockey — schedule/history, FE-v2 #6)
+    // -------------------------------------------------------------------------
+    @Override
+    @Transactional(readOnly = true)
+    public List<JockeyRideResponse> getMyRides(UUID jockeyUserId, String when) {
+        if (jockeyUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+
+        boolean past = "PAST".equalsIgnoreCase(when);  // default (null/blank/anything else) → UPCOMING
+        OffsetDateTime now = OffsetDateTime.now();
+
+        List<JockeyAssignment> rides = assignmentRepository.findAcceptedRidesByJockey(jockeyUserId);
+
+        // Pull all results for these entries in one query (avoid N+1).
+        List<UUID> entryIds = rides.stream()
+                .map(ja -> ja.getEntry().getEntryId())
+                .collect(Collectors.toList());
+        Map<UUID, RaceResult> resultByEntry = entryIds.isEmpty()
+                ? Map.of()
+                : raceResultRepository.findByEntry_EntryIdIn(entryIds).stream()
+                    .collect(Collectors.toMap(rr -> rr.getEntry().getEntryId(), Function.identity(), (a, b) -> a));
+
+        return rides.stream()
+                .filter(ja -> isPastRide(ja.getEntry().getRace(), now) == past)
+                .map(ja -> mapToRide(ja, resultByEntry.get(ja.getEntry().getEntryId())))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * A ride is PAST when its race is FINISHED/OFFICIAL or its scheduled start is in the past;
+     * otherwise it is UPCOMING.
+     */
+    private boolean isPastRide(Race race, OffsetDateTime now) {
+        RaceStatus status = race.getStatus();
+        if (status == RaceStatus.FINISHED || status == RaceStatus.OFFICIAL) {
+            return true;
+        }
+        OffsetDateTime start = race.getScheduledStartAt();
+        return start != null && start.isBefore(now);
+    }
+
+    private JockeyRideResponse mapToRide(JockeyAssignment assignment, RaceResult result) {
+        RaceEntry entry = assignment.getEntry();
+        Race race = entry.getRace();
+        Horse horse = entry.getRegistration().getHorse();
+        return JockeyRideResponse.builder()
+                .raceId(race.getRaceId())
+                .raceName(race.getName())
+                .venue(race.getVenue())
+                .date(race.getScheduledStartAt())
+                .horseName(horse.getName())
+                .finishPosition(result != null ? result.getFinishPosition() : null)
+                .earnings(entry.getPrizeEarned())
+                .build();
+    }
+
     // =========================================================================
     // PRIVATE HELPERS
     // =========================================================================
+
+    /**
+     * Once a jockey accepts, the horse is fully crewed — forward the entry to the admins
+     * (best-effort in-app notification) so they can schedule the race.
+     */
+    private void notifyAdminsReadyToSchedule(JockeyAssignment assignment) {
+        try {
+            RaceEntry entry = assignment.getEntry();
+            var reg = entry != null ? entry.getRegistration() : null;
+            String horse = (reg != null && reg.getHorse() != null) ? reg.getHorse().getName() : "A horse";
+            String race = (entry != null && entry.getRace() != null && entry.getRace().getName() != null)
+                    ? entry.getRace().getName() : "a race";
+            String jockey = assignment.getJockey() != null ? assignment.getJockey().getFullName() : "A jockey";
+            for (User admin : userRepository.findByRole_RoleCodeAndDeletedFalse("ADMIN")) {
+                notificationService.notifyUser(admin.getUserId(),
+                        "Race ready to schedule",
+                        jockey + " accepted to ride " + horse + " in " + race
+                                + ". The entry is complete — schedule the race.");
+            }
+        } catch (Exception ignored) {
+            // best-effort: never block the jockey's acceptance on a notification failure
+        }
+    }
 
     /**
      * Maps a fully-loaded JockeyAssignment entity to the rich InvitationResponse DTO.
@@ -233,6 +376,18 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         Tournament tournament = race.getTournament();
         User jockey = assignment.getJockey();
         User owner = registration.getOwner();
+
+        // -- prize / share (FE-v2 jockey contract #5) --
+        BigDecimal racePurse = race.getTotalPurse();
+        BigDecimal sharePercent = jockeyProfileRepository.findById(jockey.getUserId())
+                .map(JockeyProfile::getPrizePercent)
+                .orElse(null);
+        if (sharePercent == null) {
+            sharePercent = BigDecimal.ZERO;
+        }
+        BigDecimal estimatedShare = (racePurse == null)
+                ? BigDecimal.ZERO
+                : racePurse.multiply(sharePercent).divide(BigDecimal.valueOf(100));
 
         return InvitationResponse.builder()
                 // assignment
@@ -267,6 +422,10 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
                 .entryId(entry.getEntryId())
                 .entryCode(entry.getEntryCode())
                 .entryNo(entry.getEntryNo())
+                // prize / share (#5)
+                .racePurse(racePurse)
+                .jockeySharePercent(sharePercent)
+                .estimatedShare(estimatedShare)
                 .build();
     }
 

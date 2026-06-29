@@ -22,6 +22,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Service
@@ -53,6 +54,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AppException(ErrorCode.INVALID_CREDENTIALS);
         }
         ensureActive(user);
+        recordLogin(user);
         return issueTokens(user, userAgent);
     }
 
@@ -62,7 +64,24 @@ public class AuthServiceImpl implements AuthService {
         GooglePrincipal principal = googleTokenVerifier.verify(idToken);
         User user = userRepository.findByEmailAndDeletedFalse(principal.email())
                 .orElseGet(() -> provisionGoogleUser(principal));
+
+        // Link the Google account on first Google sign-in for this email: persist the Google
+        // subject id and mark the email verified (Google has already verified the address).
+        boolean changed = false;
+        if (user.getGoogleId() == null) {
+            user.setGoogleId(principal.subject());
+            changed = true;
+        }
+        if (!user.isEmailVerified()) {
+            user.setEmailVerified(true);
+            changed = true;
+        }
+        if (changed) {
+            user = userRepository.save(user);
+        }
+
         ensureActive(user);
+        recordLogin(user);
         return issueTokens(user, userAgent);
     }
 
@@ -193,6 +212,15 @@ public class AuthServiceImpl implements AuthService {
     // Private helpers
     // =========================================================
 
+    /**
+     * Stamps {@code last_login_at} on a successful interactive login (password / Google) and
+     * persists it. Not called on token refresh or registration — only genuine login events.
+     */
+    private void recordLogin(User user) {
+        user.setLastLoginAt(OffsetDateTime.now());
+        userRepository.save(user);
+    }
+
     private AuthResponse issueTokens(User user, String userAgent) {
         String accessToken = jwtService.generateAccessToken(user);
         String refreshToken = refreshTokenService.issue(user, userAgent);
@@ -254,6 +282,8 @@ public class AuthServiceImpl implements AuthService {
                 .passwordHash(passwordEncoder.encode(UUID.randomUUID().toString()))
                 .status(UserStatus.ACTIVE)
                 .kycStatus(KycStatus.PENDING)
+                .emailVerified(true)            // Google sign-in: email is already verified by Google
+                .googleId(principal.subject())  // remember the Google account id
                 .build();
         return userRepository.save(user);
     }

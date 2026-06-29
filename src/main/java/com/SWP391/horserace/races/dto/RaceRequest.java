@@ -22,5 +22,10 @@ public record RaceRequest(
         @Size(max = 50) String weatherCondition,
         OffsetDateTime scheduledStartAt,
         OffsetDateTime predictionCutoffAt,
-        @Positive Integer maxParticipants) {
+        @Positive Integer maxParticipants,
+        @Positive Integer minParticipants,
+        /** Free-text venue/track name, persisted to the {@code venue} column. */
+        @Size(max = 255) String venue,
+        /** §D1 — optional FK to a structured venue (track). */
+        UUID venueId) {
 }

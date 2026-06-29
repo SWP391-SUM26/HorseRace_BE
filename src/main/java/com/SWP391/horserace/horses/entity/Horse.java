@@ -13,6 +13,8 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /** Maps the {@code horse} table. */
@@ -86,6 +88,70 @@ public class Horse {
 
     @Column(name = "medical_note", columnDefinition = "text")
     private String medicalNote;
+
+    // ── FE-v2 Horse Profile (mục 1): career stats + grade + pedigree + medical extras ──
+
+    /** Grade enum stored as a string, e.g. GRADE_1. */
+    @Column(name = "grade", length = 50)
+    private String grade;
+
+    @Column(name = "lifetime_earnings", precision = 18, scale = 2, nullable = false)
+    @Builder.Default
+    private BigDecimal lifetimeEarnings = BigDecimal.ZERO;
+
+    @Column(name = "sire_name")
+    private String sireName;
+
+    @Column(name = "sire_wins")
+    private Integer sireWins;
+
+    @Column(name = "sire_earnings", precision = 18, scale = 2)
+    private BigDecimal sireEarnings;
+
+    @Column(name = "dam_name")
+    private String damName;
+
+    @Column(name = "dam_wins")
+    private Integer damWins;
+
+    @Column(name = "dam_note")
+    private String damNote;
+
+    @Column(name = "trainer_name")
+    private String trainerName;
+
+    @Column(name = "trainer_license_no", length = 100)
+    private String trainerLicenseNo;
+
+    @Column(name = "vaccinations_up_to_date", nullable = false)
+    @Builder.Default
+    private boolean vaccinationsUpToDate = false;
+
+    /** 0–100; null if not under recovery. */
+    @Column(name = "recovery_percent")
+    private Integer recoveryPercent;
+
+    // ── FE-v2 Registration Management (mục 8): eligibility checklist ──
+
+    @Column(name = "fitness_certified", nullable = false)
+    @Builder.Default
+    private boolean fitnessCertified = false;
+
+    @Column(name = "fitness_cert_expires_at")
+    private OffsetDateTime fitnessCertExpiresAt;
+
+    /** VALID | MISSING (null = unknown). */
+    @Column(name = "passport_scan_status", length = 20)
+    private String passportScanStatus;
+
+    @Column(name = "coggins_test_date")
+    private LocalDate cogginsTestDate;
+
+    @ElementCollection
+    @CollectionTable(name = "horse_characteristic", joinColumns = @JoinColumn(name = "horse_id"))
+    @Column(name = "tag")
+    @Builder.Default
+    private Set<String> characteristics = new HashSet<>();
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
