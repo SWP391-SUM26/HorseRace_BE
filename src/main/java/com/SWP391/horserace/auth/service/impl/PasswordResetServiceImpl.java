@@ -49,10 +49,15 @@ public class PasswordResetServiceImpl implements PasswordResetService {
 
     private final SecureRandom secureRandom = new SecureRandom();
 
-    /** Figma password rules: 8+ characters, at least 1 number, at least 1 symbol. */
+    /** Password rules aligned with registration: 8+ chars, upper, lower, number, symbol. */
     private static final Pattern HAS_DIGIT  = Pattern.compile(".*\\d.*");
     private static final Pattern HAS_SYMBOL = Pattern.compile(".*[^a-zA-Z0-9].*");
+    private static final Pattern HAS_UPPER  = Pattern.compile(".*[A-Z].*");
+    private static final Pattern HAS_LOWER  = Pattern.compile(".*[a-z].*");
     private static final int     MIN_LENGTH = 8;
+
+    /** Max wrong-code attempts before a reset token is invalidated (anti brute-force). */
+    private static final int     MAX_ATTEMPTS = 5;
 
     @Value("${app.password-reset.code-ttl-minutes:15}")
     private int codeTtlMinutes;
@@ -78,7 +83,10 @@ public class PasswordResetServiceImpl implements PasswordResetService {
         long recentCount = resetTokenRepository.countByUser_UserIdAndCreatedAtAfter(
                 user.getUserId(), cooldownCutoff);
         if (recentCount > 0) {
-            throw new AppException(ErrorCode.RESET_CODE_COOLDOWN);
+            // Within cooldown: silently skip (do NOT throw) so the response is identical to the
+            // unknown-email case — otherwise the error leaks that this email is registered.
+            log.debug("Reset-code cooldown active for user {}", user.getUserId());
+            return;
         }
 
         // Generate 6-digit code
@@ -115,7 +123,10 @@ public class PasswordResetServiceImpl implements PasswordResetService {
         long recentCount = resetTokenRepository.countByUser_UserIdAndCreatedAtAfter(
                 user.getUserId(), cooldownCutoff);
         if (recentCount > 0) {
-            throw new AppException(ErrorCode.RESET_CODE_COOLDOWN);
+            // Within cooldown: silently skip (do NOT throw) so the response is identical to the
+            // unknown-email case — otherwise the error leaks that this email is registered.
+            log.debug("Reset-code cooldown active for user {}", user.getUserId());
+            return;
         }
 
         // Invalidate all previous unused codes for this user
@@ -137,7 +148,8 @@ public class PasswordResetServiceImpl implements PasswordResetService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    // noRollbackFor: the wrong-code throw must NOT roll back the attempt_count increment.
+    @Transactional(noRollbackFor = AppException.class)
     public void verifyCode(String email, String code) {
         User user = userRepository.findByEmailAndDeletedFalse(email)
                 .orElseThrow(() -> new AppException(ErrorCode.RESET_CODE_INVALID));
@@ -147,6 +159,7 @@ public class PasswordResetServiceImpl implements PasswordResetService {
                 .orElseThrow(() -> new AppException(ErrorCode.RESET_CODE_INVALID));
 
         if (!sha256(code).equals(token.getCodeHash())) {
+            registerFailedAttempt(token);
             throw new AppException(ErrorCode.RESET_CODE_INVALID);
         }
 
@@ -159,7 +172,8 @@ public class PasswordResetServiceImpl implements PasswordResetService {
     }
 
     @Override
-    @Transactional
+    // noRollbackFor: a wrong-code throw must NOT roll back the attempt_count increment.
+    @Transactional(noRollbackFor = AppException.class)
     public void resetPassword(String email, String code, String newPassword, String confirmPassword) {
         // Validate passwords match
         if (!newPassword.equals(confirmPassword)) {
@@ -180,6 +194,7 @@ public class PasswordResetServiceImpl implements PasswordResetService {
 
         // Verify code hash matches
         if (!sha256(code).equals(token.getCodeHash())) {
+            registerFailedAttempt(token);
             throw new AppException(ErrorCode.RESET_CODE_INVALID);
         }
 
@@ -228,15 +243,26 @@ public class PasswordResetServiceImpl implements PasswordResetService {
      * - At least 1 symbol (non-alphanumeric)
      */
     private void validatePasswordStrength(String password) {
-        if (password.length() < MIN_LENGTH) {
+        if (password.length() < MIN_LENGTH
+                || !HAS_DIGIT.matcher(password).matches()
+                || !HAS_SYMBOL.matcher(password).matches()
+                || !HAS_UPPER.matcher(password).matches()      // FR-12: align with registration rules
+                || !HAS_LOWER.matcher(password).matches()) {
             throw new AppException(ErrorCode.PASSWORD_TOO_WEAK);
         }
-        if (!HAS_DIGIT.matcher(password).matches()) {
-            throw new AppException(ErrorCode.PASSWORD_TOO_WEAK);
+    }
+
+    /**
+     * Records a wrong-code attempt against a reset token; once {@link #MAX_ATTEMPTS} is reached the
+     * token is invalidated so a 6-digit code cannot be brute-forced within its TTL.
+     */
+    private void registerFailedAttempt(PasswordResetToken token) {
+        token.setAttemptCount(token.getAttemptCount() + 1);
+        if (token.getAttemptCount() >= MAX_ATTEMPTS) {
+            token.setUsed(true);
+            token.setUsedAt(OffsetDateTime.now());
         }
-        if (!HAS_SYMBOL.matcher(password).matches()) {
-            throw new AppException(ErrorCode.PASSWORD_TOO_WEAK);
-        }
+        resetTokenRepository.save(token);
     }
 
     private String sha256(String value) {

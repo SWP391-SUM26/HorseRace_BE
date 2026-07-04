@@ -33,6 +33,9 @@ public class ApplicationDetail {
     private String phone;
     private BusinessAffiliation businessAffiliation;
     private Eligibility eligibility;
+    /** JOCKEY applicants only — auth-gated download paths for the uploaded documents (nullable). */
+    private String jockeyLicenseUrl;
+    private String jockeyFitnessCertificateUrl;
     private OffsetDateTime submittedAt;
     private OffsetDateTime reviewedAt;
     private String rejectionReason;

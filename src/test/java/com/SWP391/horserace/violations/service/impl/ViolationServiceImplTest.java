@@ -2,17 +2,22 @@ package com.SWP391.horserace.violations.service.impl;
 
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
+import com.SWP391.horserace.attachments.entity.Attachment;
+import com.SWP391.horserace.attachments.repository.AttachmentRepository;
 import com.SWP391.horserace.horses.entity.Horse;
+import com.SWP391.horserace.notifications.service.NotificationService;
 import com.SWP391.horserace.penalties.entity.Penalty;
 import com.SWP391.horserace.penalties.entity.PenaltyStatus;
 import com.SWP391.horserace.penalties.entity.PenaltyType;
 import com.SWP391.horserace.penalties.repository.PenaltyRepository;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
+import com.SWP391.horserace.races.entity.RaceStatus;
 import com.SWP391.horserace.races.repository.RaceEntryRepository;
 import com.SWP391.horserace.races.repository.RaceRepository;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
 import com.SWP391.horserace.reports.entity.SeverityLevel;
+import com.SWP391.horserace.staffing.service.RefereeCodeValidator;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.users.entity.User;
@@ -54,6 +59,9 @@ class ViolationServiceImplTest {
     @Mock JockeyAssignmentRepository jockeyAssignmentRepository;
     @Mock PenaltyRepository penaltyRepository;
     @Mock UserRepository userRepository;
+    @Mock NotificationService notificationService;
+    @Mock RefereeCodeValidator refereeCodeValidator;
+    @Mock AttachmentRepository attachmentRepository;
 
     private ViolationServiceImpl service;
 
@@ -72,9 +80,11 @@ class ViolationServiceImplTest {
     void setUp() {
         service = new ViolationServiceImpl(
                 violationRepository, raceRepository, raceEntryRepository,
-                jockeyAssignmentRepository, penaltyRepository, userRepository);
+                jockeyAssignmentRepository, penaltyRepository, userRepository,
+                notificationService, refereeCodeValidator, attachmentRepository);
 
-        race = Race.builder().raceId(raceId).raceCode("R-07").build();
+        // Violations may only be filed post-race, so the fixture race is FINISHED.
+        race = Race.builder().raceId(raceId).raceCode("R-07").status(RaceStatus.FINISHED).build();
 
         Horse horse = Horse.builder().horseId(horseId).name("Thunderbolt").build();
         TournamentRegistration reg = TournamentRegistration.builder().horse(horse).build();
@@ -86,7 +96,7 @@ class ViolationServiceImplTest {
 
     private CreateViolationRequest createReq(UUID entry) {
         return new CreateViolationRequest(entry, InfractionType.WHIP_USAGE, SeverityLevel.MEDIUM,
-                3, 84000L, "Excessive whip use.", "Rule 142(b)", null);
+                3, 84000L, "Excessive whip use.", "Rule 142(b)", null, null);
     }
 
     // ── create ──
@@ -247,6 +257,9 @@ class ViolationServiceImplTest {
                 .ruledBy(reporter).ruledAt(OffsetDateTime.now())
                 .footageAttachmentId(footageId).regulatoryRef("Rule 142(b)").build();
         when(violationRepository.findByIdWithDetails(violationId)).thenReturn(Optional.of(v));
+        // Footage URL is now resolved via the attachment's object key (PUBLIC_URL_PREFIX + key).
+        when(attachmentRepository.findById(footageId))
+                .thenReturn(Optional.of(Attachment.builder().objectKey(footageId.toString()).build()));
 
         ViolationDetailResponse resp = service.getViolation(violationId);
 

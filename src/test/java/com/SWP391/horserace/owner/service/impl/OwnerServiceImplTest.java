@@ -5,13 +5,16 @@ import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.entity.HorseStatus;
 import com.SWP391.horserace.horses.repository.HorseRepository;
 import com.SWP391.horserace.owner.dto.OwnerOverviewResponse;
+import com.SWP391.horserace.owner.dto.OwnerRaceReportRow;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
 import com.SWP391.horserace.races.entity.RaceEntryStatus;
 import com.SWP391.horserace.races.entity.RaceResult;
 import com.SWP391.horserace.races.repository.RaceEntryRepository;
 import com.SWP391.horserace.races.repository.RaceResultRepository;
+import com.SWP391.horserace.registrations.entity.RegistrationStatus;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
+import com.SWP391.horserace.registrations.repository.RegistrationRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.users.entity.User;
@@ -37,6 +40,7 @@ class OwnerServiceImplTest {
     @Mock HorseRepository horseRepository;
     @Mock RaceEntryRepository raceEntryRepository;
     @Mock RaceResultRepository raceResultRepository;
+    @Mock RegistrationRepository registrationRepository;
 
     private OwnerServiceImpl service;
 
@@ -46,7 +50,8 @@ class OwnerServiceImplTest {
     @BeforeEach
     void setUp() {
         owner = User.builder().userId(ownerId).fullName("Owen Owner").build();
-        service = new OwnerServiceImpl(horseRepository, raceEntryRepository, raceResultRepository);
+        service = new OwnerServiceImpl(
+                horseRepository, raceEntryRepository, raceResultRepository, registrationRepository);
     }
 
     private Horse horse(String code, String name, HorseStatus status, BigDecimal earnings) {
@@ -196,5 +201,113 @@ class OwnerServiceImplTest {
         assertThatThrownBy(() -> service.getOverview(null))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNAUTHENTICATED);
+    }
+
+    // ── getRaceReport ──
+
+    private TournamentRegistration registration(RegistrationStatus status, Horse horse, Race race) {
+        return TournamentRegistration.builder()
+                .registrationId(UUID.randomUUID())
+                .registrationCode("REG" + UUID.randomUUID())
+                .owner(owner)
+                .horse(horse)
+                .race(race)
+                .status(status)
+                .build();
+    }
+
+    private Race raceFor(String code) {
+        return Race.builder()
+                .raceId(UUID.randomUUID())
+                .raceCode(code)
+                .name("Race " + code)
+                .scheduledStartAt(OffsetDateTime.parse("2026-06-20T13:00:00Z"))
+                .build();
+    }
+
+    private RaceEntry entry(TournamentRegistration reg, RaceEntryStatus status) {
+        return RaceEntry.builder()
+                .entryId(UUID.randomUUID())
+                .entryCode("ENT" + UUID.randomUUID())
+                .registration(reg)
+                .race(reg.getRace())
+                .status(status)
+                .entryNo(3)
+                .build();
+    }
+
+    @Test
+    void getRaceReport_nullPrincipal_unauthenticated() {
+        assertThatThrownBy(() -> service.getRaceReport(null))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNAUTHENTICATED);
+    }
+
+    @Test
+    void getRaceReport_noRegistrations_returnsEmpty() {
+        when(registrationRepository.findOwnerRaceRegistrations(ownerId)).thenReturn(List.of());
+
+        assertThat(service.getRaceReport(ownerId)).isEmpty();
+    }
+
+    @Test
+    void getRaceReport_registrationWithoutEntry_notEnteredNotParticipated() {
+        Horse h = horse("HRS0001", "Midnight", HorseStatus.ACTIVE, new BigDecimal("100"));
+        TournamentRegistration reg = registration(RegistrationStatus.REJECTED, h, raceFor("R1"));
+        reg.setRejectionReason("Vet check failed");
+        when(registrationRepository.findOwnerRaceRegistrations(ownerId)).thenReturn(List.of(reg));
+        // No entry was ever created from this registration.
+        when(raceEntryRepository.findByRegistration_RegistrationIdIn(anyCollection())).thenReturn(List.of());
+
+        List<OwnerRaceReportRow> rows = service.getRaceReport(ownerId);
+
+        assertThat(rows).hasSize(1);
+        OwnerRaceReportRow row = rows.get(0);
+        assertThat(row.isEntered()).isFalse();
+        assertThat(row.isParticipated()).isFalse();
+        assertThat(row.getEntryStatus()).isNull();
+        assertThat(row.getRegistrationStatus()).isEqualTo("REJECTED");
+        assertThat(row.getRejectionReason()).isEqualTo("Vet check failed");
+    }
+
+    @Test
+    void getRaceReport_enteredAndRan_participatedWithResult() {
+        Horse h = horse("HRS0001", "Midnight", HorseStatus.ACTIVE, new BigDecimal("100"));
+        TournamentRegistration reg = registration(RegistrationStatus.APPROVED, h, raceFor("R1"));
+        RaceEntry e = entry(reg, RaceEntryStatus.FINISHED);
+        when(registrationRepository.findOwnerRaceRegistrations(ownerId)).thenReturn(List.of(reg));
+        when(raceEntryRepository.findByRegistration_RegistrationIdIn(anyCollection())).thenReturn(List.of(e));
+        RaceResult result = RaceResult.builder()
+                .resultId(UUID.randomUUID()).entry(e).finishPosition(2).finishTimeMs(72_340L).build();
+        when(raceResultRepository.findByEntry_EntryIdIn(anyCollection())).thenReturn(List.of(result));
+
+        List<OwnerRaceReportRow> rows = service.getRaceReport(ownerId);
+
+        assertThat(rows).hasSize(1);
+        OwnerRaceReportRow row = rows.get(0);
+        assertThat(row.isEntered()).isTrue();
+        assertThat(row.isParticipated()).isTrue();
+        assertThat(row.getEntryStatus()).isEqualTo("FINISHED");
+        assertThat(row.getFinishPosition()).isEqualTo(2);
+        assertThat(row.getFinishTimeMs()).isEqualTo(72_340L);
+    }
+
+    @Test
+    void getRaceReport_scratchedEntry_enteredButNotParticipated() {
+        Horse h = horse("HRS0001", "Midnight", HorseStatus.ACTIVE, new BigDecimal("100"));
+        TournamentRegistration reg = registration(RegistrationStatus.APPROVED, h, raceFor("R1"));
+        RaceEntry e = entry(reg, RaceEntryStatus.SCRATCHED);
+        when(registrationRepository.findOwnerRaceRegistrations(ownerId)).thenReturn(List.of(reg));
+        when(raceEntryRepository.findByRegistration_RegistrationIdIn(anyCollection())).thenReturn(List.of(e));
+        when(raceResultRepository.findByEntry_EntryIdIn(anyCollection())).thenReturn(List.of());
+
+        List<OwnerRaceReportRow> rows = service.getRaceReport(ownerId);
+
+        assertThat(rows).hasSize(1);
+        OwnerRaceReportRow row = rows.get(0);
+        // A scratched horse became an entry but never ran — entered yet not participated.
+        assertThat(row.isEntered()).isTrue();
+        assertThat(row.isParticipated()).isFalse();
+        assertThat(row.getEntryStatus()).isEqualTo("SCRATCHED");
     }
 }

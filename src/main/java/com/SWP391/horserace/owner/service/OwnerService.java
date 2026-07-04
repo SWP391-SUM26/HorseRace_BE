@@ -2,6 +2,7 @@ package com.SWP391.horserace.owner.service;
 
 import com.SWP391.horserace.horses.dto.HorseResponse;
 import com.SWP391.horserace.owner.dto.OwnerOverviewResponse;
+import com.SWP391.horserace.owner.dto.OwnerRaceReportRow;
 
 import java.util.List;
 import java.util.UUID;
@@ -17,4 +18,7 @@ public interface OwnerService {
 
     /** Distinct IDs of every race the caller's horses are entered into (any status). */
     List<UUID> getOwnerRaceIds(UUID ownerUserId);
+
+    /** Per-race report rows: every race the owner registered for + whether each horse participated. */
+    List<OwnerRaceReportRow> getRaceReport(UUID ownerUserId);
 }

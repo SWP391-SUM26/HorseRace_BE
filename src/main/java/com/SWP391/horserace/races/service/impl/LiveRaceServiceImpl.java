@@ -108,7 +108,7 @@ public class LiveRaceServiceImpl implements LiveRaceService {
                         UpdateLivePositionRequest.RunnerTelemetry t = telemetry.get(e.getEntryId());
                         BigDecimal speed = t != null && t.getCurrentSpeedKph() != null
                                 ? t.getCurrentSpeedKph()
-                                : BigDecimal.ZERO;
+                                : null; // no live telemetry source yet → null per LiveRaceResponse contract
                         return LiveRaceResponse.RunnerRow.builder()
                                 .entryNo(e.getEntryNo())
                                 .horseName(horse != null ? horse.getName() : null)
@@ -145,7 +145,7 @@ public class LiveRaceServiceImpl implements LiveRaceService {
                     UpdateLivePositionRequest.RunnerTelemetry t = telemetry.get(e.getEntryId());
                     BigDecimal speed = t != null && t.getCurrentSpeedKph() != null
                             ? t.getCurrentSpeedKph()
-                            : BigDecimal.ZERO;
+                            : null; // no live telemetry source yet → null per LiveRaceResponse contract
                     return LiveRaceResponse.RunnerRow.builder()
                             .entryNo(e.getEntryNo())
                             .horseName(horse != null ? horse.getName() : null)

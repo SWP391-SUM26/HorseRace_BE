@@ -144,6 +144,15 @@
 					</excludes>
 				</configuration>
 			</plugin>
+			<!-- Enable ByteBuddy experimental support so Mockito can instrument concrete classes
+			     when the build runs on a JVM newer than the project's target (e.g. JDK 25 host). -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<argLine>-Dnet.bytebuddy.experimental=true</argLine>
+				</configuration>
+			</plugin>
 		</plugins>
 	</build>
 </project>

@@ -1,6 +1,7 @@
 package com.SWP391.horserace.onboarding.service.impl;
 
 import com.SWP391.horserace.horses.repository.HorseRepository;
+import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
 import com.SWP391.horserace.onboarding.dto.ApplicationDetail;
 import com.SWP391.horserace.onboarding.dto.ApplicationSummary;
 import com.SWP391.horserace.onboarding.dto.OnboardingStatsResponse;
@@ -45,6 +46,7 @@ public class RefereeApplicationServiceImpl implements RefereeApplicationService 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final HorseRepository horseRepository;
+    private final JockeyProfileRepository jockeyProfileRepository;
 
     @Override
     public Page<ApplicationSummary> list(ApplicationStatus status, RequestedRole requestedRole,
@@ -209,6 +211,18 @@ public class RefereeApplicationServiceImpl implements RefereeApplicationService 
                     .orElse(0L);
         }
 
+        // JOCKEY applicants: surface the auth-gated document download paths so the referee can review.
+        String jockeyLicenseUrl = null;
+        String jockeyFitnessCertificateUrl = null;
+        if (a.getRequestedRole() == RequestedRole.JOCKEY) {
+            var profile = userRepository.findByEmail(a.getEmail())
+                    .flatMap(u -> jockeyProfileRepository.findById(u.getUserId()));
+            if (profile.isPresent()) {
+                jockeyLicenseUrl = profile.get().getJockeyLicenseUrl();
+                jockeyFitnessCertificateUrl = profile.get().getFitnessCertificateUrl();
+            }
+        }
+
         ApplicationDetail.Eligibility eligibility = ApplicationDetail.Eligibility.builder()
                 .idVerification(ApplicationDetail.IdVerification.builder()
                         .status(a.getIdVerificationStatus())
@@ -242,6 +256,8 @@ public class RefereeApplicationServiceImpl implements RefereeApplicationService 
                         .horsesRegistered(horsesRegistered)
                         .build())
                 .eligibility(eligibility)
+                .jockeyLicenseUrl(jockeyLicenseUrl)
+                .jockeyFitnessCertificateUrl(jockeyFitnessCertificateUrl)
                 .submittedAt(a.getSubmittedAt())
                 .reviewedAt(a.getReviewedAt())
                 .rejectionReason(a.getRejectionReason())

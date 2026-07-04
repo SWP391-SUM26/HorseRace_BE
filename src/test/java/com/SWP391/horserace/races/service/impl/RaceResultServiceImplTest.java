@@ -3,6 +3,7 @@ package com.SWP391.horserace.races.service.impl;
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
 import com.SWP391.horserace.horses.entity.Horse;
+import com.SWP391.horserace.notifications.service.NotificationService;
 import com.SWP391.horserace.races.dto.CertifyResultsRequest;
 import com.SWP391.horserace.races.dto.CertifyResultsResponse;
 import com.SWP391.horserace.races.dto.RaceResultsResponse;
@@ -24,6 +25,7 @@ import com.SWP391.horserace.races.repository.RaceResultVersionRepository;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
+import com.SWP391.horserace.staffing.service.RefereeCodeValidator;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,6 +57,8 @@ class RaceResultServiceImplTest {
     @Mock RaceResultVersionRepository raceResultVersionRepository;
     @Mock JockeyAssignmentRepository jockeyAssignmentRepository;
     @Mock UserRepository userRepository;
+    @Mock NotificationService notificationService;
+    @Mock RefereeCodeValidator refereeCodeValidator;
 
     private RaceResultServiceImpl service;
 
@@ -73,9 +77,11 @@ class RaceResultServiceImplTest {
     void setUp() {
         service = new RaceResultServiceImpl(
                 raceRepository, raceEntryRepository, raceResultRepository,
-                raceResultVersionRepository, jockeyAssignmentRepository, userRepository);
+                raceResultVersionRepository, jockeyAssignmentRepository, userRepository,
+                notificationService, refereeCodeValidator);
 
-        race = Race.builder().raceId(raceId).trackCondition("FAST").trackBias("NONE").build();
+        race = Race.builder().raceId(raceId).status(RaceStatus.FINISHED)
+                .trackCondition("FAST").trackBias("NONE").build();
 
         Horse horse = Horse.builder().horseId(UUID.randomUUID()).name("Thunderbolt").build();
         entry = RaceEntry.builder()
@@ -102,7 +108,8 @@ class RaceResultServiceImplTest {
 
     private RecordResultsRequest recordReq() {
         return new RecordResultsRequest(List.of(
-                new RecordResultsRequest.ResultRow(entryId, 1, 91230L, BigDecimal.ZERO, new BigDecimal("100.0"))));
+                new RecordResultsRequest.ResultRow(entryId, 1, 91230L, BigDecimal.ZERO, new BigDecimal("100.0"))),
+                "4821");
     }
 
     // ── record (upsert + entry-race validation) ──

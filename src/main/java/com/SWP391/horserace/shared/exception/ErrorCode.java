@@ -20,6 +20,7 @@ public enum ErrorCode {
     TOKEN_INVALID(1008, "Invalid or expired access token", HttpStatus.UNAUTHORIZED),
     REFRESH_TOKEN_INVALID(1009, "Invalid or expired refresh token", HttpStatus.UNAUTHORIZED),
     ACCOUNT_INACTIVE(1010, "Account is not active", HttpStatus.FORBIDDEN),
+    ACCOUNT_PENDING_APPROVAL(1024, "Your account is pending approval and cannot log in yet", HttpStatus.FORBIDDEN),
     GOOGLE_AUTH_FAILED(1011, "Google authentication failed", HttpStatus.UNAUTHORIZED),
     ROLE_NOT_EXISTED(1012, "Default role not found", HttpStatus.INTERNAL_SERVER_ERROR),
 
@@ -37,7 +38,7 @@ public enum ErrorCode {
     RESET_CODE_USED(1019, "Reset code has already been used", HttpStatus.BAD_REQUEST),
     RESET_CODE_COOLDOWN(1020, "Please wait before requesting a new code", HttpStatus.TOO_MANY_REQUESTS),
     EMAIL_SEND_FAILED(1021, "Failed to send email", HttpStatus.INTERNAL_SERVER_ERROR),
-    PASSWORD_TOO_WEAK(1022, "Password must be at least 8 characters and contain 1 number and 1 symbol", HttpStatus.BAD_REQUEST),
+    PASSWORD_TOO_WEAK(1022, "Password must be at least 8 characters and contain an uppercase letter, a lowercase letter, a number, and a symbol", HttpStatus.BAD_REQUEST),
 
     // ---- admin user management ----
     INVALID_USER_STATUS(1023, "Invalid user status. Allowed: ACTIVE, INACTIVE, SUSPENDED, BANNED", HttpStatus.BAD_REQUEST),
@@ -57,6 +58,7 @@ public enum ErrorCode {
     OWNER_NOT_MATCH(2010, "You are not the owner of this horse entry", HttpStatus.FORBIDDEN),
     INVITATION_NOT_ACCEPTED(2011, "Only ACCEPTED rides can be withdrawn", HttpStatus.BAD_REQUEST),
     WITHDRAW_TOO_LATE(2012, "A jockey must withdraw at least 5 days before the race", HttpStatus.BAD_REQUEST),
+    JOCKEY_ALREADY_RIDING_RACE(2013, "This jockey has already accepted a ride in this race", HttpStatus.CONFLICT),
 
     // ---- tournament ----
     TOURNAMENT_NOT_FOUND(3001, "Tournament not found", HttpStatus.NOT_FOUND),

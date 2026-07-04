@@ -4,10 +4,15 @@ import com.SWP391.horserace.attachments.dto.AttachmentResponse;
 import com.SWP391.horserace.attachments.service.AttachmentService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -41,6 +46,24 @@ public class AttachmentController {
                 .message("Attachment uploaded")
                 .data(attachmentService.upload(userId, file, ownerEntityType, ownerEntityId, sensitivityLevel))
                 .build();
+    }
+
+    /**
+     * GET /api/v1/attachments/{id}/download — stream an attachment's bytes behind auth.
+     * <p>Used for SENSITIVE files (e.g. jockey licence / fitness certificate) that must NOT be
+     * served through the public {@code /api/v1/files/**} route. Restricted to referees/admins.
+     */
+    @GetMapping("/{id}/download")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
+    public ResponseEntity<Resource> download(@PathVariable("id") UUID id) {
+        AttachmentService.AttachmentDownload d = attachmentService.download(id);
+        MediaType type = d.mimeType() != null ? MediaType.parseMediaType(d.mimeType())
+                : MediaType.APPLICATION_OCTET_STREAM;
+        return ResponseEntity.ok()
+                .contentType(type)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=\"" + (d.fileName() != null ? d.fileName() : "document") + "\"")
+                .body(d.resource());
     }
 
     /** GET /api/v1/attachments?ownerEntityType=&ownerEntityId= — list attachments for an owner (FE-v2 §6). */

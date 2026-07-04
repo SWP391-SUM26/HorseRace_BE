@@ -1,6 +1,7 @@
 package com.SWP391.horserace.attachments.service;
 
 import com.SWP391.horserace.attachments.dto.AttachmentResponse;
+import org.springframework.core.io.Resource;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -8,6 +9,15 @@ import java.util.UUID;
 
 /** Upload + list of polymorphic file attachments (FE-v2 §6). */
 public interface AttachmentService {
+
+    /** File bytes + metadata for a secured (non-public) download. */
+    record AttachmentDownload(Resource resource, String fileName, String mimeType) {}
+
+    /**
+     * Load an attachment's bytes for a secured download. Caller authorization is enforced at the
+     * controller — used for sensitive files that must NOT go through the public /files route.
+     */
+    AttachmentDownload download(UUID attachmentId);
 
     /**
      * Store the file and insert an {@code attachment} row.

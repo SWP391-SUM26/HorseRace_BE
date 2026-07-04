@@ -90,6 +90,32 @@ public class JockeyProfile {
     @Column(name = "last_trophy", length = 255)
     private String lastTrophy;
 
+    // -- Self-registration (Jockey Registration form) fields — captured at signup, referee-reviewed --
+
+    /** Age in years (form). */
+    @Column(name = "age")
+    private Integer age;
+
+    /** Nationality / country code from the registration form (e.g. "VN", "US"). */
+    @Column(name = "nationality", length = 50)
+    private String nationality;
+
+    /**
+     * Riding style from the registration form (Flat/Jump/Harness/Endurance).
+     * Kept separate from the marketing {@link #ridingStyle} ("Stalker/Closer") to avoid clobbering
+     * Jockey Market data.
+     */
+    @Column(name = "application_riding_style", length = 30)
+    private String applicationRidingStyle;
+
+    /** URL/key of the uploaded jockey licence document (via attachments). */
+    @Column(name = "jockey_license_url", columnDefinition = "text")
+    private String jockeyLicenseUrl;
+
+    /** URL/key of the uploaded fitness certificate (via attachments). */
+    @Column(name = "fitness_certificate_url", columnDefinition = "text")
+    private String fitnessCertificateUrl;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private OffsetDateTime createdAt;

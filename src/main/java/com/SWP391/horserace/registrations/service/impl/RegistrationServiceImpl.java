@@ -235,7 +235,8 @@ public class RegistrationServiceImpl implements RegistrationService {
     private void enterIntoRace(TournamentRegistration registration) {
         Race race = registration.getRace();
 
-        if (race.getStatus() != RaceStatus.SCHEDULED && race.getStatus() != RaceStatus.OPEN) {
+        // Only OPEN races accept entries (approval creates the entry).
+        if (race.getStatus() != RaceStatus.OPEN) {
             throw new AppException(ErrorCode.RACE_NOT_OPEN_FOR_ENTRY);
         }
         if (race.getMaxParticipants() != null

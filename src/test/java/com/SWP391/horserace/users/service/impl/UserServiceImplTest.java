@@ -1,5 +1,6 @@
 package com.SWP391.horserace.users.service.impl;
 
+import com.SWP391.horserace.races.repository.RaceResultRepository;
 import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.roles.repository.PermissionRepository;
 import com.SWP391.horserace.roles.repository.RoleRepository;
@@ -51,6 +52,8 @@ class UserServiceImplTest {
     PermissionRepository permissionRepository;
     @Mock
     RoleRepository roleRepository;
+    @Mock
+    RaceResultRepository raceResultRepository;
 
     private UserServiceImpl service;
 
@@ -62,7 +65,8 @@ class UserServiceImplTest {
         service = new UserServiceImpl(userRepository,
                 new ImageUploadService(Mockito.mock(FileStorageService.class)),
                 permissionRepository,
-                roleRepository);
+                roleRepository,
+                raceResultRepository);
     }
 
     // ── update user by id (admin) ──

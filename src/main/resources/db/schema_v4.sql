@@ -110,7 +110,8 @@ CREATE TABLE app_user (
     password_hash TEXT NOT NULL,
     avatar_url    TEXT,
     status        VARCHAR(30) NOT NULL DEFAULT 'ACTIVE'
-                  CHECK (status IN ('ACTIVE', 'INACTIVE', 'SUSPENDED', 'BANNED')),
+                  -- PENDING: chờ duyệt (vd jockey tự đăng ký, chờ referee duyệt) — chưa login được
+                  CHECK (status IN ('ACTIVE', 'INACTIVE', 'SUSPENDED', 'BANNED', 'PENDING')),
     kyc_status    VARCHAR(30) NOT NULL DEFAULT 'PENDING'
                   CHECK (kyc_status IN ('PENDING', 'VERIFIED', 'REJECTED')),
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
@@ -142,6 +143,25 @@ CREATE TABLE jockey_profile (
     base_fee       NUMERIC(18,2),                                                        -- hire fee
     prize_percent  NUMERIC(5,2),                                                         -- % of prize taken
     last_trophy    VARCHAR(255),                                                         -- most recent trophy
+    -- Self-registration (Jockey Registration form) fields — thu lúc đăng ký, referee duyệt
+    age                      INT CHECK (age IS NULL OR age >= 16),
+    nationality              VARCHAR(50),
+    application_riding_style VARCHAR(30),   -- form domain (Flat/Jump/Harness/Endurance); TÁCH khỏi riding_style marketing
+    jockey_license_url       TEXT,          -- giấy phép nài (attachment key/url)
+    fitness_certificate_url  TEXT,          -- giấy chứng nhận thể lực
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================
+-- OWNER PROFILE  (NEW) -- hồ sơ chủ ngựa (self-registration)
+-- 1 owner (app_user role=HORSE_OWNER) <-> 1 hồ sơ. App layer đảm bảo đúng role.
+-- =========================================================
+CREATE TABLE owner_profile (
+    owner_user_id  UUID PRIMARY KEY REFERENCES app_user(user_id),
+    stable_name    VARCHAR(100),
+    primary_region VARCHAR(100),          -- lưu mã vùng FE gửi (vd "KY-US","VN")
+    bio            TEXT,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -179,13 +199,14 @@ CREATE TABLE email_change_request (
 -- PASSWORD RESET TOKEN  (OTP 6 số quên mật khẩu, lưu HASH)
 -- =========================================================
 CREATE TABLE password_reset_token (
-    token_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID NOT NULL REFERENCES app_user(user_id),
-    code_hash   VARCHAR(255) NOT NULL,
-    expires_at  TIMESTAMPTZ NOT NULL,
-    used        BOOLEAN NOT NULL DEFAULT FALSE,
-    used_at     TIMESTAMPTZ,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    token_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       UUID NOT NULL REFERENCES app_user(user_id),
+    code_hash     VARCHAR(255) NOT NULL,
+    expires_at    TIMESTAMPTZ NOT NULL,
+    used          BOOLEAN NOT NULL DEFAULT FALSE,
+    used_at       TIMESTAMPTZ,
+    attempt_count INT NOT NULL DEFAULT 0,   -- wrong-code attempts; token invalidated past a limit
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================

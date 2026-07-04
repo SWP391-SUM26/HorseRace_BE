@@ -82,22 +82,30 @@ race, prediction, wallet, …) should follow this same layout.
 
 ## Database — DB-first (schema is the source of truth)
 
-`src/main/resources/db/schema_v2.sql` is the authoritative schema (21 tables, UUID PKs,
+`src/main/resources/db/schema_v4.sql` is the authoritative schema (UUID PKs,
 `app_user`/`role`/`horse`/`race`/`prediction`/`wallet`/…, CHECK + UNIQUE constraints,
 `TIMESTAMPTZ`, `gen_random_uuid()` defaults). Schema-only: **no functions/procedures/triggers**
 — maintain `updated_at` in app code via Hibernate `@UpdateTimestamp`. It begins with a
-`DROP TABLE ... CASCADE` clean-slate block, so it is safe to re-run.
+`DROP TABLE ... CASCADE` clean-slate block. `db/seed.sql` is a **minimal seed**: roles,
+permissions, the role→permission matrix, and a single admin (`admin@horserace.local` / `admin123`).
 
-`application.properties` wires this up:
+**The DB self-initializes via Docker.** `docker-compose.yml` mounts the two SQL files into the
+Postgres `docker-entrypoint-initdb.d/` (`01-schema.sql`, `02-seed.sql`); Postgres runs them **only
+when the `postgres_data` volume is empty** (first boot). So:
 ```
-spring.jpa.hibernate.ddl-auto=validate                       # Hibernate verifies, never edits
-spring.sql.init.mode=always                                  # run the SQL on every startup
-spring.sql.init.schema-locations=classpath:db/schema_v2.sql  # schema
-spring.sql.init.data-locations=classpath:db/seed.sql         # dev seed (roles + sample users)
+docker compose up -d                        # DB only (dev) — self-inits on first run
+docker compose --profile full up -d --build # BE + DB (teammate/demo, one command)
+docker compose down -v && docker compose up -d   # RESET: wipe volume + re-init from schema+seed
 ```
-On startup Spring runs `schema_v2.sql` then `seed.sql`, then Hibernate **validates** the
-entities against the tables. **This wipes and re-seeds the DB every restart** (good for dev).
-To persist data across restarts after the first run, set `spring.sql.init.mode=never`.
+`application.properties`: `ddl-auto=validate` (Hibernate verifies, never edits);
+`spring.sql.init.mode` stays **off** (the DB initializes itself, so Spring must not double-run it);
+`spring.datasource.url` is env-overridable (`SPRING_DATASOURCE_URL`) so the same file works on host
+(`localhost`) and in-container (`db`).
+
+**Schema changes:** edit `schema_v4.sql`, then either reset the volume (`down -v`) OR, to keep data,
+apply a matching `ALTER`/`CREATE` on the live DB by hand
+(`docker exec horserace_postgres psql -U postgres -d horserace_db -c "…"`) before restarting — else
+`ddl-auto=validate` fails on the mismatch.
 
 **Entity-mapping rules (so `validate` passes):** every entity must match the SQL exactly —
 UUID PK with `@GeneratedValue(strategy = GenerationType.UUID)`, explicit `@Column(name="...")`
