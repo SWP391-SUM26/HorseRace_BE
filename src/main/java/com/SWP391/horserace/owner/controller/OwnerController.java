@@ -2,6 +2,7 @@ package com.SWP391.horserace.owner.controller;
 
 import com.SWP391.horserace.horses.dto.HorseResponse;
 import com.SWP391.horserace.owner.dto.OwnerOverviewResponse;
+import com.SWP391.horserace.owner.dto.OwnerRaceReportRow;
 import com.SWP391.horserace.owner.service.OwnerService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
@@ -50,6 +51,19 @@ public class OwnerController {
                 .success(true)
                 .message("Fetched owner race ids")
                 .data(ownerService.getOwnerRaceIds(userId))
+                .build();
+    }
+
+    /**
+     * GET /api/v1/owner/race-report — per-race report rows: every race the caller registered for,
+     * each horse annotated with whether it actually entered the race + its result.
+     */
+    @GetMapping("/race-report")
+    public ApiResponse<List<OwnerRaceReportRow>> getRaceReport(@AuthenticationPrincipal UUID userId) {
+        return ApiResponse.<List<OwnerRaceReportRow>>builder()
+                .success(true)
+                .message("Fetched owner race report")
+                .data(ownerService.getRaceReport(userId))
                 .build();
     }
 }

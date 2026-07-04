@@ -2,12 +2,14 @@ package com.SWP391.horserace.assignments.service.impl;
 
 import com.SWP391.horserace.assignments.dto.InvitationResponse;
 import com.SWP391.horserace.assignments.dto.JockeyRideResponse;
+import com.SWP391.horserace.assignments.dto.SendInvitationRequest;
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
 import com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.jockeys.entity.JockeyProfile;
 import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
+import com.SWP391.horserace.notifications.service.NotificationService;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
 import com.SWP391.horserace.races.entity.RaceResult;
@@ -47,6 +49,7 @@ class JockeyAssignmentServiceImplTest {
     @Mock JockeyProfileRepository jockeyProfileRepository;
     @Mock UserRepository userRepository;
     @Mock RaceResultRepository raceResultRepository;
+    @Mock NotificationService notificationService;
 
     private JockeyAssignmentServiceImpl service;
 
@@ -56,7 +59,7 @@ class JockeyAssignmentServiceImplTest {
     void setUp() {
         service = new JockeyAssignmentServiceImpl(
                 assignmentRepository, raceEntryRepository, jockeyProfileRepository,
-                userRepository, raceResultRepository);
+                userRepository, raceResultRepository, notificationService);
     }
 
     // -- builders for a full assignment graph --
@@ -69,7 +72,8 @@ class JockeyAssignmentServiceImplTest {
         Race race = Race.builder()
                 .raceId(UUID.randomUUID()).name("Belmont Stakes").raceCode("R1")
                 .venue("Belmont Park").totalPurse(purse).tournament(tournament)
-                .scheduledStartAt(OffsetDateTime.now().plusDays(1))
+                // 6 days out so withdraw tests clear the 5-day WITHDRAW_TOO_LATE cutoff.
+                .scheduledStartAt(OffsetDateTime.now().plusDays(6))
                 .status(RaceStatus.SCHEDULED)
                 .build();
         TournamentRegistration reg = TournamentRegistration.builder()
@@ -240,5 +244,68 @@ class JockeyAssignmentServiceImplTest {
         List<JockeyRideResponse> rides = service.getMyRides(jockeyId, null);
 
         assertThat(rides).hasSize(1); // only the upcoming one
+    }
+
+    // =========================================================================
+    // One ride per race (JOCKEY_ALREADY_RIDING_RACE, error 2013)
+    // =========================================================================
+
+    @Test
+    void sendInvitation_jockeyAlreadyAcceptedInRace_throws() {
+        UUID entryId = UUID.randomUUID();
+        UUID raceId = UUID.randomUUID();
+        User owner = User.builder().userId(UUID.randomUUID()).build();
+        Race race = Race.builder().raceId(raceId).name("Belmont").raceCode("R1").build();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(UUID.randomUUID()).owner(owner)
+                .horse(Horse.builder().horseId(UUID.randomUUID()).name("H").build())
+                .build();
+        RaceEntry entry = RaceEntry.builder()
+                .entryId(entryId).registration(reg).race(race).entryCode("E1").build();
+        when(raceEntryRepository.findByIdWithDetails(entryId)).thenReturn(Optional.of(entry));
+        JockeyProfile profile = JockeyProfile.builder()
+                .jockeyUserId(jockeyId).jockeyUser(User.builder().userId(jockeyId).build()).build();
+        when(jockeyProfileRepository.findByIdAndUserActive(jockeyId)).thenReturn(Optional.of(profile));
+        // Jockey already ACCEPTED a ride on another horse in this same race.
+        when(assignmentRepository.findJockeyIdsAcceptedInRace(raceId)).thenReturn(List.of(jockeyId));
+
+        SendInvitationRequest request = SendInvitationRequest.builder()
+                .entryId(entryId).jockeyUserId(jockeyId).build();
+
+        assertThatThrownBy(() -> service.sendInvitation(request, owner.getUserId()))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.JOCKEY_ALREADY_RIDING_RACE);
+    }
+
+    @Test
+    void acceptInvitation_jockeyAlreadyAcceptedAnotherRideInRace_throws() {
+        // The invitation being accepted is still INVITED; the jockey already has an ACCEPTED
+        // ride on a different horse in the same race — accepting would break one-ride-per-race.
+        JockeyAssignment a = fullAssignment(JockeyAssignmentStatus.INVITED, new BigDecimal("1000"));
+        UUID raceId = a.getEntry().getRace().getRaceId();
+        when(assignmentRepository.findByIdWithDetails(a.getAssignmentId())).thenReturn(Optional.of(a));
+        when(assignmentRepository.findJockeyIdsAcceptedInRace(raceId)).thenReturn(List.of(jockeyId));
+
+        assertThatThrownBy(() -> service.acceptInvitation(a.getAssignmentId(), jockeyId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.JOCKEY_ALREADY_RIDING_RACE);
+        // Must not have flipped to ACCEPTED.
+        assertThat(a.getStatus()).isEqualTo(JockeyAssignmentStatus.INVITED);
+    }
+
+    @Test
+    void acceptInvitation_noConflict_setsAccepted() {
+        JockeyAssignment a = fullAssignment(JockeyAssignmentStatus.INVITED, new BigDecimal("1000"));
+        UUID raceId = a.getEntry().getRace().getRaceId();
+        when(assignmentRepository.findByIdWithDetails(a.getAssignmentId())).thenReturn(Optional.of(a));
+        when(assignmentRepository.findJockeyIdsAcceptedInRace(raceId)).thenReturn(List.of());
+        lenient().when(jockeyProfileRepository.findById(jockeyId)).thenReturn(Optional.empty());
+        when(assignmentRepository.save(any(JockeyAssignment.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        InvitationResponse r = service.acceptInvitation(a.getAssignmentId(), jockeyId);
+
+        assertThat(a.getStatus()).isEqualTo(JockeyAssignmentStatus.ACCEPTED);
+        assertThat(a.getRespondedAt()).isNotNull();
+        assertThat(r.getStatus()).isEqualTo(JockeyAssignmentStatus.ACCEPTED);
     }
 }

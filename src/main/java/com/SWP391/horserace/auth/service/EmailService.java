@@ -1,17 +1,20 @@
 package com.SWP391.horserace.auth.service;
 
-import com.SWP391.horserace.shared.exception.AppException;
-import com.SWP391.horserace.shared.exception.ErrorCode;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 /**
- * Thin wrapper around {@link JavaMailSender} for sending password-reset emails.
+ * Thin wrapper around {@link JavaMailSender} for sending password-reset / verification emails.
+ *
+ * <p>Sends are {@link Async} and swallow failures (log only): the caller must NOT block on the
+ * SMTP round-trip nor observe a send failure, otherwise the response time / error difference
+ * leaks whether an email is registered (user-enumeration side-channel).
  */
 @Service
 @RequiredArgsConstructor
@@ -21,8 +24,9 @@ public class EmailService {
     private final JavaMailSender mailSender;
 
     /**
-     * Send a password-reset email containing the 6-digit code.
+     * Send a password-reset email containing the 6-digit code (async, best-effort).
      */
+    @Async
     public void sendResetCode(String toEmail, String code) {
         try {
             MimeMessage message = mailSender.createMimeMessage();
@@ -34,15 +38,16 @@ public class EmailService {
 
             mailSender.send(message);
             log.info("Password reset code sent to {}", toEmail);
-        } catch (MessagingException e) {
+        } catch (MessagingException | RuntimeException e) {
+            // Swallow: never surface a send failure to the caller (enumeration side-channel).
             log.error("Failed to send reset email to {}", toEmail, e);
-            throw new AppException(ErrorCode.EMAIL_SEND_FAILED);
         }
     }
 
     /**
-     * Send an email-verification email containing the 6-digit code.
+     * Send an email-verification email containing the 6-digit code (async, best-effort).
      */
+    @Async
     public void sendVerificationCode(String toEmail, String code) {
         try {
             MimeMessage message = mailSender.createMimeMessage();
@@ -54,9 +59,8 @@ public class EmailService {
 
             mailSender.send(message);
             log.info("Email verification code sent to {}", toEmail);
-        } catch (MessagingException e) {
+        } catch (MessagingException | RuntimeException e) {
             log.error("Failed to send verification email to {}", toEmail, e);
-            throw new AppException(ErrorCode.EMAIL_SEND_FAILED);
         }
     }
 

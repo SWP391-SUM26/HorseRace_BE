@@ -34,6 +34,15 @@ public interface RegistrationRepository
     /** Count of APPROVED (i.e. registered/confirmed) entries for a tournament — surfaced in TournamentResponse (§C4). */
     long countByTournament_TournamentIdAndStatus(UUID tournamentId, RegistrationStatus status);
 
+    /** All of an owner's race-targeted registrations (race + horse + tournament fetched) for the per-race report. */
+    @Query("SELECT r FROM TournamentRegistration r "
+            + "JOIN FETCH r.horse h "
+            + "JOIN FETCH r.race rc "
+            + "LEFT JOIN FETCH r.tournament t "
+            + "WHERE r.owner.userId = :ownerUserId AND r.race IS NOT NULL "
+            + "ORDER BY r.createdAt DESC")
+    List<TournamentRegistration> findOwnerRaceRegistrations(@Param("ownerUserId") UUID ownerUserId);
+
     // ---- KPI aggregate (FE-v2 §7 registration stats) ----
 
     /** Status -> count over all registrations (used to build the KPI aggregate). */

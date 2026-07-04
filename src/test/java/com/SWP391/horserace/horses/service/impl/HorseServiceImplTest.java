@@ -10,6 +10,7 @@ import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.entity.HorseGender;
 import com.SWP391.horserace.horses.entity.HorseHealthStatus;
 import com.SWP391.horserace.horses.entity.HorseStatus;
+import com.SWP391.horserace.horses.repository.HorseMedicalRecordRepository;
 import com.SWP391.horserace.horses.repository.HorseRepository;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
 import com.SWP391.horserace.races.entity.Race;
@@ -64,6 +65,8 @@ class HorseServiceImplTest {
         RaceEntryRepository raceEntryRepository;
         @Mock
         RaceResultRepository raceResultRepository;
+        @Mock
+        HorseMedicalRecordRepository medicalRecordRepository;
 
         private HorseServiceImpl service;
 
@@ -79,7 +82,8 @@ class HorseServiceImplTest {
                 // tested here.
                 service = new HorseServiceImpl(horseRepository, userRepository,
                                 new ImageUploadService(Mockito.mock(FileStorageService.class)),
-                                registrationRepository, raceRepository, raceEntryRepository, raceResultRepository);
+                                registrationRepository, raceRepository, raceEntryRepository, raceResultRepository,
+                                medicalRecordRepository);
         }
 
         private static HorseRequest req(String name, HorseGender gender) {
@@ -374,7 +378,7 @@ class HorseServiceImplTest {
                 UUID raceId = UUID.randomUUID();
                 UUID tournamentId = UUID.randomUUID();
                 Tournament t = Tournament.builder().tournamentId(tournamentId).name("Spring Cup").build();
-                Race race = Race.builder().raceId(raceId).status(RaceStatus.SCHEDULED).tournament(t).build();
+                Race race = Race.builder().raceId(raceId).status(RaceStatus.OPEN).tournament(t).build();
                 when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
 
                 TournamentRegistration reg = TournamentRegistration.builder()

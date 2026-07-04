@@ -299,7 +299,8 @@ public class RaceServiceImpl implements RaceService {
 
         Race race = loadRace(raceId);
 
-        if (race.getStatus() != RaceStatus.SCHEDULED && race.getStatus() != RaceStatus.OPEN) {
+        // Only OPEN races accept participant entries.
+        if (race.getStatus() != RaceStatus.OPEN) {
             throw new AppException(ErrorCode.RACE_NOT_OPEN_FOR_ENTRY);
         }
 

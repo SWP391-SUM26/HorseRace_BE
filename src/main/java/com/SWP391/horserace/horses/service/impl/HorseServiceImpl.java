@@ -377,7 +377,8 @@ public class HorseServiceImpl implements HorseService {
         Race race = raceRepository.findByRaceIdAndDeletedFalse(request.raceId())
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
 
-        if (race.getStatus() != RaceStatus.SCHEDULED && race.getStatus() != RaceStatus.OPEN) {
+        // Only OPEN races accept entries.
+        if (race.getStatus() != RaceStatus.OPEN) {
             throw new AppException(ErrorCode.RACE_NOT_OPEN_FOR_ENTRY);
         }
 

@@ -24,8 +24,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AttachmentServiceImpl implements AttachmentService {
 
-    /** Allowed polymorphic owner types for attachments (FE-v2 §6). */
-    private static final Set<String> ALLOWED_OWNER_TYPES = Set.of("RACE_RESULT", "VIOLATION", "RACE", "TOURNAMENT_REGISTRATION");
+    /** Allowed polymorphic owner types for attachments (FE-v2 §6). JOCKEY_PROFILE = sensitive jockey docs. */
+    private static final Set<String> ALLOWED_OWNER_TYPES = Set.of(
+            "RACE_RESULT", "VIOLATION", "RACE", "TOURNAMENT_REGISTRATION", "JOCKEY_PROFILE");
     private static final String STORAGE_FOLDER = "attachments";
 
     private final AttachmentRepository attachmentRepository;
@@ -63,6 +64,18 @@ public class AttachmentServiceImpl implements AttachmentService {
                 .build();
 
         return toResponse(attachmentRepository.save(attachment));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AttachmentDownload download(UUID attachmentId) {
+        Attachment a = attachmentRepository.findById(attachmentId)
+                .orElseThrow(() -> new AppException(ErrorCode.FILE_NOT_FOUND));
+        if (a.getObjectKey() == null) {
+            throw new AppException(ErrorCode.FILE_NOT_FOUND);
+        }
+        return new AttachmentDownload(
+                fileStorageService.load(a.getObjectKey()), a.getFileName(), a.getMimeType());
     }
 
     @Override

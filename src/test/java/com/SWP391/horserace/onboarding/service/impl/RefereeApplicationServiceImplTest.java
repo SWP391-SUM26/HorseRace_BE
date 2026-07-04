@@ -50,6 +50,7 @@ class RefereeApplicationServiceImplTest {
     @Mock UserRepository userRepository;
     @Mock RoleRepository roleRepository;
     @Mock HorseRepository horseRepository;
+    @Mock com.SWP391.horserace.jockeys.repository.JockeyProfileRepository jockeyProfileRepository;
 
     private RefereeApplicationServiceImpl service;
 
@@ -58,7 +59,7 @@ class RefereeApplicationServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new RefereeApplicationServiceImpl(
-                applicationRepository, userRepository, roleRepository, horseRepository);
+                applicationRepository, userRepository, roleRepository, horseRepository, jockeyProfileRepository);
     }
 
     private MembershipApplication pendingOwner() {
