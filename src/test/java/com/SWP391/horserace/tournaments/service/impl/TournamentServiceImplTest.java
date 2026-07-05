@@ -29,6 +29,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,6 +39,7 @@ class TournamentServiceImplTest {
     @Mock UserRepository userRepository;
     @Mock VenueRepository venueRepository;
     @Mock RegistrationRepository registrationRepository;
+    @Mock com.SWP391.horserace.shared.storage.ImageUploadService imageUploadService;
 
     private TournamentServiceImpl service;
 
@@ -46,7 +48,7 @@ class TournamentServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new TournamentServiceImpl(tournamentRepository, userRepository,
-                venueRepository, registrationRepository);
+                venueRepository, registrationRepository, imageUploadService);
     }
 
     private Tournament withStatus(UUID id, TournamentStatus status) {
@@ -194,5 +196,24 @@ class TournamentServiceImplTest {
         TournamentResponse res = service.getTournamentById(id);
 
         assertThat(res.getRegisteredEntriesCount()).isEqualTo(7L);
+    }
+
+    // ── image upload (FR-06) ──
+
+    @Test
+    void uploadImage_storesNewThenBestEffortDeletesOld() {
+        UUID id = UUID.randomUUID();
+        Tournament t = withStatus(id, TournamentStatus.DRAFT);
+        t.setImageUrl("/api/v1/files/tournaments/old.png"); // previous image to clean up
+        var file = new org.springframework.mock.web.MockMultipartFile("file", "x.png", "image/png", new byte[]{1});
+        String newUrl = "https://res.cloudinary.com/c/image/upload/tournaments/new.jpg";
+        when(tournamentRepository.findById(id)).thenReturn(Optional.of(t));
+        when(imageUploadService.storeImageAsUrl(file, "tournaments")).thenReturn(newUrl);
+        when(tournamentRepository.save(any(Tournament.class))).thenAnswer(i -> i.getArgument(0));
+
+        TournamentResponse res = service.uploadImage(id, file);
+
+        assertThat(res.getImageUrl()).isEqualTo(newUrl);
+        verify(imageUploadService).deleteByUrl("/api/v1/files/tournaments/old.png");
     }
 }

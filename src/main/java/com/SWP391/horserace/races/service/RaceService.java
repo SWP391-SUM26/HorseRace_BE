@@ -43,4 +43,10 @@ public interface RaceService {
     List<RaceEntryResponse> listEntries(UUID raceId);
 
     MyEntryResponse getMyEntry(UUID raceId, UUID ownerUserId);
+
+    /** Ids of OPEN races past their cutoff with no cancel proposal yet — driven by the auto-cancel sweeper. */
+    List<UUID> findRacesToProposeCancel();
+
+    /** Propose cancelling one under-filled race (sets cancelProposedAt + notifies admins); idempotent. */
+    void proposeCancel(UUID raceId);
 }

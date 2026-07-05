@@ -1,7 +1,9 @@
 package com.SWP391.horserace.races.service.impl;
 
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
+import com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
+import com.SWP391.horserace.staffing.repository.RefereeAssignmentRepository;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.races.dto.AssignParticipantRequest;
 import com.SWP391.horserace.races.dto.MyEntryResponse;
@@ -61,6 +63,8 @@ public class RaceServiceImpl implements RaceService {
     private final UserRepository userRepository;
     private final JockeyAssignmentRepository jockeyAssignmentRepository;
     private final VenueRepository venueRepository;
+    private final RefereeAssignmentRepository refereeAssignmentRepository;
+    private final com.SWP391.horserace.notifications.service.NotificationService notificationService;
 
     @Override
     @Transactional(readOnly = true)
@@ -226,6 +230,12 @@ public class RaceServiceImpl implements RaceService {
         if (request.predictionCutoffAt() != null) {
             race.setPredictionCutoffAt(request.predictionCutoffAt());
         }
+        // Guard: cutoff must precede start, otherwise the race would be un-startable
+        // (the ready-to-run gate needs now > cutoff AND now <= start).
+        if (race.getPredictionCutoffAt() != null && race.getScheduledStartAt() != null
+                && !race.getPredictionCutoffAt().isBefore(race.getScheduledStartAt())) {
+            throw new AppException(ErrorCode.RACE_INVALID_TIMING);
+        }
         race.setStatus(RaceStatus.OPEN);
 
         return mapToResponse(raceRepository.save(race));
@@ -242,6 +252,36 @@ public class RaceServiceImpl implements RaceService {
         // Conduct the race: only from OPEN (or CLOSED entries). Locks further entries.
         if (race.getStatus() != RaceStatus.OPEN && race.getStatus() != RaceStatus.CLOSED) {
             throw new AppException(ErrorCode.RACE_INVALID_STATUS);
+        }
+
+        // "Ready to run" gate (FR-03): collect ALL unmet conditions so the admin sees every gap.
+        int min = effectiveMinParticipants(race);
+        long entries = raceEntryRepository.countByRace_RaceId(id);
+        long acceptedJockeys = jockeyAssignmentRepository.countAcceptedByRaceId(id);
+        boolean hasReferee = !refereeAssignmentRepository
+                .findByRace_RaceIdAndStatusNot(id, RefereeAssignmentStatus.REVOKED)
+                .isEmpty();
+        OffsetDateTime now = OffsetDateTime.now();
+
+        List<String> unmet = new ArrayList<>();
+        if (entries < min) {
+            unmet.add("needs at least " + min + " participants (has " + entries + ")");
+        }
+        if (acceptedJockeys != entries) {
+            unmet.add("every horse must have a confirmed jockey (" + acceptedJockeys + "/" + entries + ")");
+        }
+        if (!hasReferee) {
+            unmet.add("at least one referee must be assigned");
+        }
+        // null-safe: a race with no registration deadline is treated as "registration not closed"
+        if (race.getPredictionCutoffAt() == null || !now.isAfter(race.getPredictionCutoffAt())) {
+            unmet.add("registration is not closed yet");
+        }
+        if (race.getScheduledStartAt() != null && now.isAfter(race.getScheduledStartAt())) {
+            unmet.add("scheduled start time has already passed");
+        }
+        if (!unmet.isEmpty()) {
+            throw new AppException(ErrorCode.RACE_NOT_READY, "Race is not ready to run: " + String.join("; ", unmet));
         }
 
         race.setStatus(RaceStatus.RUNNING);
@@ -286,8 +326,70 @@ public class RaceServiceImpl implements RaceService {
         }
 
         race.setStatus(RaceStatus.CANCELLED);
+        RaceResponse response = mapToResponse(raceRepository.save(race));
+        notifyRaceCancelled(race); // best-effort notify referee/owner/jockey (FR-07)
+        return response;
+    }
 
-        return mapToResponse(raceRepository.save(race));
+    // =========================================================================
+    // Auto-cancel (semi-automatic) — FR-05
+    // =========================================================================
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UUID> findRacesToProposeCancel() {
+        return raceRepository.findOpenRacesPastCutoffWithoutCancelProposal(OffsetDateTime.now());
+    }
+
+    @Override
+    @Transactional
+    public void proposeCancel(UUID raceId) {
+        Race race = raceRepository.findByRaceIdAndDeletedFalse(raceId).orElse(null);
+        // Re-check under the transaction; idempotent (cancelProposedAt already set → skip).
+        if (race == null || race.getStatus() != RaceStatus.OPEN || race.getCancelProposedAt() != null
+                || race.getPredictionCutoffAt() == null
+                || !OffsetDateTime.now().isAfter(race.getPredictionCutoffAt())) {
+            return;
+        }
+        int min = effectiveMinParticipants(race);
+        long confirmed = jockeyAssignmentRepository.countAcceptedByRaceId(raceId);
+        if (confirmed >= min) {
+            return; // enough runners — no proposal
+        }
+        // Atomic, conditional flag: writes ONLY cancel_proposed_at and only while the race is still
+        // OPEN + unproposed, so a concurrent cancelRace is never reverted by a stale full-row update.
+        int flagged = raceRepository.markCancelProposed(raceId, OffsetDateTime.now());
+        if (flagged == 0) {
+            return; // lost the race to a concurrent writer (already cancelled or already proposed)
+        }
+        String title = "Race under-filled — cancel proposed";
+        String msg = "Race \"" + race.getName() + "\" is past its registration cutoff with only "
+                + confirmed + "/" + min + " confirmed runners. Please review and confirm cancellation.";
+        for (User admin : userRepository.findByRole_RoleCodeAndDeletedFalse("ADMIN")) {
+            notificationService.notifyUser(admin.getUserId(), title, msg); // REQUIRES_NEW + best-effort
+        }
+    }
+
+    /** Minimum runners required to run a race — the configured floor, never below 1. */
+    private int effectiveMinParticipants(Race race) {
+        return race.getMinParticipants() != null ? Math.max(race.getMinParticipants(), 1) : 1;
+    }
+
+    /** Best-effort notification of referee(s), owner(s), and jockey(s) when a race is cancelled. */
+    private void notifyRaceCancelled(Race race) {
+        String title = "Race cancelled";
+        String msg = "Race \"" + race.getName() + "\" has been cancelled.";
+        java.util.Set<UUID> recipients = new java.util.HashSet<>();
+        refereeAssignmentRepository.findByRace_RaceIdAndStatusNot(race.getRaceId(), RefereeAssignmentStatus.REVOKED)
+                .forEach(ra -> { if (ra.getReferee() != null) recipients.add(ra.getReferee().getUserId()); });
+        recipients.addAll(jockeyAssignmentRepository.findJockeyIdsAcceptedInRace(race.getRaceId()));
+        raceEntryRepository.findByRace_RaceId(race.getRaceId()).forEach(e -> {
+            if (e.getRegistration() != null && e.getRegistration().getOwner() != null) {
+                recipients.add(e.getRegistration().getOwner().getUserId());
+            }
+        });
+        recipients.stream().filter(java.util.Objects::nonNull)
+                .forEach(uid -> notificationService.notifyUser(uid, title, msg));
     }
 
     @Override
@@ -457,6 +559,7 @@ public class RaceServiceImpl implements RaceService {
                 .actualStartAt(r.getActualStartAt())
                 .actualEndAt(r.getActualEndAt())
                 .predictionCutoffAt(r.getPredictionCutoffAt())
+                .cancelProposedAt(r.getCancelProposedAt())
                 .maxParticipants(r.getMaxParticipants())
                 .minParticipants(r.getMinParticipants())
                 .venue(r.getVenue())

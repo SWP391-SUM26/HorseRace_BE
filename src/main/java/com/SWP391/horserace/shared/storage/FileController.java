@@ -1,6 +1,7 @@
 package com.SWP391.horserace.shared.storage;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -23,6 +24,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class FileController {
 
+    // This endpoint only serves LOCAL-disk files (/api/v1/files/…); Cloudinary images go straight
+    // to the CDN. Pin to local so the wrong impl can't be injected when Cloudinary is @Primary.
+    @Qualifier(LocalFileStorageService.BEAN_NAME)
     private final FileStorageService fileStorageService;
 
     @GetMapping("/{folder}/{filename:.+}")

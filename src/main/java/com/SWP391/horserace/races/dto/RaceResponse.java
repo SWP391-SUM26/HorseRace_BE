@@ -23,6 +23,8 @@ public class RaceResponse {
     private OffsetDateTime actualStartAt;
     private OffsetDateTime actualEndAt;
     private OffsetDateTime predictionCutoffAt;
+    /** Set by the auto-cancel sweeper when the race is under-filled past its cutoff; null otherwise. */
+    private OffsetDateTime cancelProposedAt;
     private Integer maxParticipants;
     private Integer minParticipants;
     private String venue;

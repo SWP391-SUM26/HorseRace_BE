@@ -46,6 +46,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -58,6 +61,8 @@ class RaceServiceImplTest {
     @Mock UserRepository userRepository;
     @Mock JockeyAssignmentRepository jockeyAssignmentRepository;
     @Mock com.SWP391.horserace.venues.repository.VenueRepository venueRepository;
+    @Mock com.SWP391.horserace.staffing.repository.RefereeAssignmentRepository refereeAssignmentRepository;
+    @Mock com.SWP391.horserace.notifications.service.NotificationService notificationService;
 
     private RaceServiceImpl service;
 
@@ -70,7 +75,8 @@ class RaceServiceImplTest {
     void setUp() {
         service = new RaceServiceImpl(
                 raceRepository, raceEntryRepository, registrationRepository, tournamentRepository,
-                userRepository, jockeyAssignmentRepository, venueRepository);
+                userRepository, jockeyAssignmentRepository, venueRepository, refereeAssignmentRepository,
+                notificationService);
         tournament = Tournament.builder().tournamentId(tournamentId).name("Spring Cup").build();
     }
 
@@ -171,6 +177,22 @@ class RaceServiceImplTest {
         assertThat(res.getScheduledStartAt()).isEqualTo(start);
         // omitted cutoff must not wipe the one set at create time
         assertThat(res.getPredictionCutoffAt()).isEqualTo(existingCutoff);
+    }
+
+    @Test
+    void schedule_cutoffNotBeforeStart_throwsInvalidTiming() {
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.SCHEDULED).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+
+        OffsetDateTime start = OffsetDateTime.now().plusDays(1);
+        OffsetDateTime cutoff = start.plusHours(1); // cutoff AFTER start → race would be un-startable
+
+        assertThatThrownBy(() -> service.scheduleRace(currentUserId, id, new ScheduleRaceRequest(start, cutoff)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_TIMING);
+        verify(raceRepository, never()).save(any(Race.class));
     }
 
     @Test
@@ -515,5 +537,171 @@ class RaceServiceImplTest {
         assertThatThrownBy(() -> service.getMyEntry(raceId, ownerId))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ENTRY_NOT_FOUND);
+    }
+
+    // ── startRace: ready-to-run enforcement (FR-03) ──
+
+    private Race readyRace(UUID id) {
+        return Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.OPEN).maxParticipants(8).minParticipants(2)
+                .predictionCutoffAt(OffsetDateTime.now().minusMinutes(10)) // registration closed
+                .scheduledStartAt(OffsetDateTime.now().plusHours(1))       // not past yet
+                .build();
+    }
+
+    private void stubReady(UUID id, long entries, long accepted, boolean hasReferee) {
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(readyRace(id)));
+        when(raceEntryRepository.countByRace_RaceId(id)).thenReturn(entries);
+        when(jockeyAssignmentRepository.countAcceptedByRaceId(id)).thenReturn(accepted);
+        when(refereeAssignmentRepository.findByRace_RaceIdAndStatusNot(any(), any()))
+                .thenReturn(hasReferee
+                        ? java.util.List.of(new com.SWP391.horserace.assignments.entity.RefereeAssignment())
+                        : java.util.List.of());
+    }
+
+    private void assertStartNotReady(UUID id) {
+        assertThatThrownBy(() -> service.startRace(currentUserId, id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY);
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void startRace_allConditionsMet_setsRunning() {
+        UUID id = UUID.randomUUID();
+        stubReady(id, 2, 2, true);
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+
+        RaceResponse res = service.startRace(currentUserId, id);
+
+        assertThat(res.getStatus()).isEqualTo(RaceStatus.RUNNING);
+    }
+
+    @Test
+    void startRace_notEnoughParticipants_notReady() {
+        UUID id = UUID.randomUUID();
+        stubReady(id, 1, 1, true); // 1 < min 2
+        assertStartNotReady(id);
+    }
+
+    @Test
+    void startRace_notEveryEntryHasJockey_notReady() {
+        UUID id = UUID.randomUUID();
+        stubReady(id, 2, 1, true); // accepted 1 != entries 2
+        assertStartNotReady(id);
+    }
+
+    @Test
+    void startRace_noRefereeAssigned_notReady() {
+        UUID id = UUID.randomUUID();
+        stubReady(id, 2, 2, false);
+        assertStartNotReady(id);
+    }
+
+    @Test
+    void startRace_nullPredictionCutoff_notReady_noNpe() {
+        UUID id = UUID.randomUUID();
+        Race r = readyRace(id);
+        r.setPredictionCutoffAt(null); // red-team: must not NPE
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(r));
+        when(raceEntryRepository.countByRace_RaceId(id)).thenReturn(2L);
+        when(jockeyAssignmentRepository.countAcceptedByRaceId(id)).thenReturn(2L);
+        when(refereeAssignmentRepository.findByRace_RaceIdAndStatusNot(any(), any()))
+                .thenReturn(java.util.List.of(new com.SWP391.horserace.assignments.entity.RefereeAssignment()));
+        assertStartNotReady(id);
+    }
+
+    // ── auto-cancel proposal (FR-05) ──
+
+    private Race underfilledRace(UUID id) {
+        return Race.builder().raceId(id).name("The Dusty Handicap").status(RaceStatus.OPEN)
+                .minParticipants(2)
+                .predictionCutoffAt(OffsetDateTime.now().minusMinutes(5)) // cutoff passed
+                .build();
+    }
+
+    @Test
+    void proposeCancel_underfilledPastCutoff_flagsAtomicallyAndNotifiesAdmins() {
+        UUID id = UUID.randomUUID();
+        Race r = underfilledRace(id);
+        User admin = User.builder().userId(UUID.randomUUID()).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(r));
+        when(jockeyAssignmentRepository.countAcceptedByRaceId(id)).thenReturn(0L); // < min 2
+        when(raceRepository.markCancelProposed(eq(id), any())).thenReturn(1); // won the atomic flag
+        when(userRepository.findByRole_RoleCodeAndDeletedFalse("ADMIN")).thenReturn(java.util.List.of(admin));
+
+        service.proposeCancel(id);
+
+        verify(raceRepository).markCancelProposed(eq(id), any());
+        verify(raceRepository, never()).save(any()); // no full-row save — can't clobber a concurrent cancel
+        verify(notificationService).notifyUser(eq(admin.getUserId()), any(), any());
+    }
+
+    @Test
+    void proposeCancel_lostRaceToConcurrentWriter_noNotify() {
+        UUID id = UUID.randomUUID();
+        Race r = underfilledRace(id);
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(r));
+        when(jockeyAssignmentRepository.countAcceptedByRaceId(id)).thenReturn(0L);
+        when(raceRepository.markCancelProposed(eq(id), any())).thenReturn(0); // already cancelled/proposed
+
+        service.proposeCancel(id);
+
+        verify(notificationService, never()).notifyUser(any(), any(), any());
+    }
+
+    @Test
+    void proposeCancel_enoughRunners_noProposalNoNotify() {
+        UUID id = UUID.randomUUID();
+        Race r = underfilledRace(id);
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(r));
+        when(jockeyAssignmentRepository.countAcceptedByRaceId(id)).thenReturn(2L); // meets min
+
+        service.proposeCancel(id);
+
+        verify(raceRepository, never()).markCancelProposed(any(), any());
+        verify(notificationService, never()).notifyUser(any(), any(), any());
+    }
+
+    @Test
+    void proposeCancel_alreadyProposed_idempotentSkip() {
+        UUID id = UUID.randomUUID();
+        Race r = underfilledRace(id);
+        r.setCancelProposedAt(OffsetDateTime.now().minusMinutes(1)); // already flagged
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(r));
+
+        service.proposeCancel(id);
+
+        verify(jockeyAssignmentRepository, never()).countAcceptedByRaceId(any());
+        verify(raceRepository, never()).markCancelProposed(any(), any());
+        verify(notificationService, never()).notifyUser(any(), any(), any());
+    }
+
+    // ── cancelRace notifies affected parties (FR-07) ──
+
+    @Test
+    void cancelRace_notifiesRefereeOwnerJockey() {
+        UUID id = UUID.randomUUID();
+        UUID refId = UUID.randomUUID();
+        UUID jockeyId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(openRace(id)));
+        when(raceRepository.save(any(Race.class))).thenAnswer(inv -> inv.getArgument(0));
+        var refAssign = com.SWP391.horserace.assignments.entity.RefereeAssignment.builder()
+                .referee(User.builder().userId(refId).build()).build();
+        when(refereeAssignmentRepository.findByRace_RaceIdAndStatusNot(eq(id), any()))
+                .thenReturn(java.util.List.of(refAssign));
+        when(jockeyAssignmentRepository.findJockeyIdsAcceptedInRace(id)).thenReturn(java.util.List.of(jockeyId));
+        var entry = com.SWP391.horserace.races.entity.RaceEntry.builder()
+                .registration(com.SWP391.horserace.registrations.entity.TournamentRegistration.builder()
+                        .owner(User.builder().userId(ownerId).build()).build())
+                .build();
+        when(raceEntryRepository.findByRace_RaceId(id)).thenReturn(java.util.List.of(entry));
+
+        service.cancelRace(currentUserId, id);
+
+        verify(notificationService).notifyUser(eq(refId), any(), any());
+        verify(notificationService).notifyUser(eq(jockeyId), any(), any());
+        verify(notificationService).notifyUser(eq(ownerId), any(), any());
     }
 }

@@ -51,14 +51,20 @@ public class UserServiceImpl implements UserService {
             "lastloginat", "lastLoginAt",
             "status", "status");
 
-    /** Default temporary password applied when the admin omits {@code tempPassword}. */
-    private static final String DEFAULT_TEMP_PASSWORD = "123456";
+    /** Character pool for generated passwords (ensures upper/lower/digit/symbol coverage). */
+    private static final String PW_UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    private static final String PW_LOWER = "abcdefghijkmnpqrstuvwxyz";
+    private static final String PW_DIGIT = "23456789";
+    private static final String PW_SYMBOL = "!@#$%^&*?";
+    private static final java.security.SecureRandom PW_RANDOM = new java.security.SecureRandom();
 
     private final UserRepository userRepository;
     private final ImageUploadService imageUploadService;
     private final PermissionRepository permissionRepository;
     private final RoleRepository roleRepository;
     private final com.SWP391.horserace.races.repository.RaceResultRepository raceResultRepository;
+    private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+    private final com.SWP391.horserace.auth.service.EmailService emailService;
 
     @Override
     @Transactional(readOnly = true)
@@ -164,12 +170,16 @@ public class UserServiceImpl implements UserService {
             throw new AppException(ErrorCode.EMAIL_ALREADY_EXISTS);
         }
 
-        Role role = roleRepository.findByRoleCode(request.roleCode().trim().toUpperCase())
+        String normalizedRole = request.roleCode().trim().toUpperCase();
+        if ("ADMIN".equals(normalizedRole)) {
+            // Admins cannot provision another ADMIN via this endpoint (privilege-escalation guard).
+            throw new AppException(ErrorCode.CANNOT_CREATE_ADMIN);
+        }
+        Role role = roleRepository.findByRoleCode(normalizedRole)
                 .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
 
-        String tempPassword = (request.tempPassword() != null && !request.tempPassword().isBlank())
-                ? request.tempPassword()
-                : DEFAULT_TEMP_PASSWORD;
+        // Generate a strong random password, store it bcrypt-hashed, email the raw value to the user.
+        String rawPassword = generatePassword();
 
         User user = User.builder()
                 .role(role)
@@ -177,12 +187,46 @@ public class UserServiceImpl implements UserService {
                 .fullName(request.fullName().trim())
                 .email(normalizedEmail)
                 .phone(request.phone() != null ? request.phone().trim() : null)
-                // Stored {noop}-prefixed so the DelegatingPasswordEncoder can verify it; rotate later.
-                .passwordHash("{noop}" + tempPassword)
+                .passwordHash(passwordEncoder.encode(rawPassword))
                 .status(UserStatus.ACTIVE)
                 .build();
 
-        return mapToResponse(userRepository.save(user));
+        UserResponse response = mapToResponse(userRepository.save(user));
+        emailService.sendNewAccountPassword(normalizedEmail, rawPassword);
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public void resendPassword(UUID id) {
+        // Intentionally allowed for any target (incl. ADMIN): the new password is emailed to the
+        // TARGET's inbox, not the caller — so it's not a credential-takeover, just an operator
+        // action. (Unlike createUser's ADMIN block, this does not escalate privilege.)
+        User user = loadActiveUser(id);
+        String rawPassword = generatePassword();
+        user.setPasswordHash(passwordEncoder.encode(rawPassword));
+        userRepository.save(user);
+        emailService.sendNewAccountPassword(user.getEmail(), rawPassword);
+    }
+
+    /** Generates a 12-char password with at least one upper, lower, digit, and symbol. */
+    private String generatePassword() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(PW_UPPER.charAt(PW_RANDOM.nextInt(PW_UPPER.length())));
+        sb.append(PW_LOWER.charAt(PW_RANDOM.nextInt(PW_LOWER.length())));
+        sb.append(PW_DIGIT.charAt(PW_RANDOM.nextInt(PW_DIGIT.length())));
+        sb.append(PW_SYMBOL.charAt(PW_RANDOM.nextInt(PW_SYMBOL.length())));
+        String all = PW_UPPER + PW_LOWER + PW_DIGIT + PW_SYMBOL;
+        for (int i = 4; i < 12; i++) {
+            sb.append(all.charAt(PW_RANDOM.nextInt(all.length())));
+        }
+        // shuffle so the guaranteed chars aren't always at the front
+        char[] chars = sb.toString().toCharArray();
+        for (int i = chars.length - 1; i > 0; i--) {
+            int j = PW_RANDOM.nextInt(i + 1);
+            char t = chars[i]; chars[i] = chars[j]; chars[j] = t;
+        }
+        return new String(chars);
     }
 
     @Override

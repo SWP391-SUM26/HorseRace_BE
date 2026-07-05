@@ -45,6 +45,28 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
     private final RaceRepository raceRepository;
     private final UserRepository userRepository;
 
+    /** ± window (hours) around a race's scheduledStartAt within which a referee is considered busy. */
+    @org.springframework.beans.factory.annotation.Value("${app.staffing.referee-conflict-window-hours:2}")
+    private long conflictWindowHours;
+
+    /**
+     * Rejects assigning {@code refereeUserId} to {@code race} if the referee already officiates
+     * another race whose scheduledStartAt is within ±{@link #conflictWindowHours} of this race.
+     * No-op for a race without a scheduled start (not published yet).
+     */
+    private void guardNoTimeConflict(Race race, UUID refereeUserId) {
+        OffsetDateTime start = race.getScheduledStartAt();
+        if (start == null) {
+            return;
+        }
+        OffsetDateTime windowStart = start.minusHours(conflictWindowHours);
+        OffsetDateTime windowEnd = start.plusHours(conflictWindowHours);
+        if (refereeAssignmentRepository.existsRefereeConflictInWindow(
+                refereeUserId, race.getRaceId(), windowStart, windowEnd)) {
+            throw new AppException(ErrorCode.REFEREE_TIME_CONFLICT);
+        }
+    }
+
     // =========================================================================
     // DASHBOARD
     // =========================================================================
@@ -158,6 +180,9 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
             throw new AppException(ErrorCode.REFEREE_ALREADY_ASSIGNED);
         }
 
+        // Block if the referee is busy at another race within the ±window (FR-04).
+        guardNoTimeConflict(race, request.getRefereeUserId());
+
         User createdBy = currentUserId != null
                 ? userRepository.findByUserIdAndDeletedFalse(currentUserId).orElse(null)
                 : null;
@@ -194,6 +219,9 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 raceId, request.getNewRefereeUserId(), REVOKED)) {
             throw new AppException(ErrorCode.REFEREE_ALREADY_ASSIGNED);
         }
+
+        // Block if the NEW referee is busy at another race within the ±window (FR-04).
+        guardNoTimeConflict(existing.getRace(), request.getNewRefereeUserId());
 
         existing.setStatus(REVOKED);
         refereeAssignmentRepository.save(existing);
@@ -247,6 +275,19 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
             code = "REF-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase();
         } while (refereeAssignmentRepository.existsByRefCode(code));
         return code;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UUID> conflictingRefereeIds(UUID raceId) {
+        Race race = raceRepository.findById(raceId)
+                .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
+        OffsetDateTime start = race.getScheduledStartAt();
+        if (start == null) {
+            return List.of();
+        }
+        return refereeAssignmentRepository.findRefereeIdsWithConflictInWindow(
+                raceId, start.minusHours(conflictWindowHours), start.plusHours(conflictWindowHours));
     }
 
     private User loadReferee(UUID userId) {

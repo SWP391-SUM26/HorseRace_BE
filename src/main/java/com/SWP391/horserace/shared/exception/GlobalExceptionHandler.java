@@ -36,9 +36,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(value = AppException.class)
     public ResponseEntity<ApiResponse<Void>> handlingAppException(AppException exception) {
         ErrorCode errorCode = exception.getErrorCode();
+        // Prefer the exception's own message: it equals the ErrorCode default for single-arg
+        // AppException, but carries the specific detail for AppException(errorCode, message)
+        // (e.g. RACE_NOT_READY listing which conditions are unmet).
+        String message = exception.getMessage() != null ? exception.getMessage() : errorCode.getMessage();
         ApiResponse<Void> apiResponse = ApiResponse.<Void>builder()
                 .success(false)
-                .message(errorCode.getMessage())
+                .message(message)
                 .build();
         return ResponseEntity.status(errorCode.getStatusCode()).body(apiResponse);
     }

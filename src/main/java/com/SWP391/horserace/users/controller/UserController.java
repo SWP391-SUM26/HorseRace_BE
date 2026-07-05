@@ -121,8 +121,9 @@ public class UserController {
                 .build();
     }
 
-    /** GET /api/v1/users/{id}/permissions — permission codes for a given user (admin/lookup). */
+    /** GET /api/v1/users/{id}/permissions — permission codes for a given user (ADMIN only). */
     @GetMapping("/{id}/permissions")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<List<String>> getUserPermissions(@PathVariable UUID id) {
         return ApiResponse.<List<String>>builder()
                 .success(true)
@@ -170,13 +171,25 @@ public class UserController {
     public ApiResponse<UserResponse> createUser(@Valid @RequestBody CreateUserRequest request) {
         return ApiResponse.<UserResponse>builder()
                 .success(true)
-                .message("User created")
+                .message("User created; a password has been emailed to the user")
                 .data(userService.createUser(request))
                 .build();
     }
 
-    /** GET /api/v1/users/{id} — one user by UUID. */
+    /** POST /api/v1/users/{id}/resend-password — admin: regenerate + re-email a user's password. */
+    @PostMapping("/{id}/resend-password")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<Void> resendPassword(@PathVariable UUID id) {
+        userService.resendPassword(id);
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("A new password has been emailed to the user")
+                .build();
+    }
+
+    /** GET /api/v1/users/{id} — one user by UUID (ADMIN only; self-service uses /users/me). */
     @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<UserResponse> getUserById(@PathVariable UUID id) {
         return ApiResponse.<UserResponse>builder()
                 .success(true)
@@ -185,8 +198,9 @@ public class UserController {
                 .build();
     }
 
-    /** GET /api/v1/users/{id}/wins — first-place finishes of this user's horses (admin user-detail). */
+    /** GET /api/v1/users/{id}/wins — first-place finishes of this user's horses (ADMIN user-detail). */
     @GetMapping("/{id}/wins")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<java.util.List<com.SWP391.horserace.users.dto.UserWinResponse>> getUserWins(@PathVariable UUID id) {
         return ApiResponse.<java.util.List<com.SWP391.horserace.users.dto.UserWinResponse>>builder()
                 .success(true)
@@ -221,10 +235,10 @@ public class UserController {
 
     /**
      * PUT /api/v1/users/{id} — admin updates a user's display profile by id
-     * (fullName / phone / avatarUrl). Admin-intended; role enforcement is deferred to the
-     * RBAC phase (consistent with the rest of the API's current dev posture).
+     * (fullName / phone / avatarUrl). ADMIN-only (was previously unguarded → IDOR).
      */
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<UserResponse> updateUserById(@PathVariable UUID id,
                                                     @Valid @RequestBody UpdateProfileRequest request) {
         return ApiResponse.<UserResponse>builder()

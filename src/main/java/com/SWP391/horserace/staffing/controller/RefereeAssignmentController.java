@@ -126,6 +126,20 @@ public class RefereeAssignmentController {
                 .build();
     }
 
+    /**
+     * GET /api/v1/staffing/races/{raceId}/referee-conflicts — referee ids busy at an overlapping
+     * time (±window) with this race; the FE excludes these from the assignable dropdown.
+     */
+    @GetMapping("/races/{raceId}/referee-conflicts")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<java.util.List<UUID>> refereeConflicts(@PathVariable("raceId") UUID raceId) {
+        return ApiResponse.<java.util.List<UUID>>builder()
+                .success(true)
+                .message("Fetched conflicting referees")
+                .data(assignmentService.conflictingRefereeIds(raceId))
+                .build();
+    }
+
     // -------------------------------------------------------------------------
     // POST /api/v1/staffing/assignments — Assign Referee
     // -------------------------------------------------------------------------
