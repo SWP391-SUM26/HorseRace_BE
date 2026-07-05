@@ -68,4 +68,33 @@ public interface RaceRepository extends JpaRepository<Race, UUID>, JpaSpecificat
          ORDER BY r.scheduledStartAt ASC
         """)
     List<Race> findUpcomingByStatuses(@Param("statuses") Collection<RaceStatus> statuses, Pageable pageable);
+
+    /**
+     * OPEN races whose registration cutoff has passed and that have not yet had a cancel proposed —
+     * candidates for the auto-cancel sweeper. Returns ids so each is processed in its own transaction.
+     */
+    @Query("""
+        SELECT r.raceId FROM Race r
+         WHERE r.status = com.SWP391.horserace.races.entity.RaceStatus.OPEN
+           AND r.deleted = false
+           AND r.predictionCutoffAt IS NOT NULL
+           AND r.predictionCutoffAt < :now
+           AND r.cancelProposedAt IS NULL
+        """)
+    List<java.util.UUID> findOpenRacesPastCutoffWithoutCancelProposal(@Param("now") java.time.OffsetDateTime now);
+
+    /**
+     * Atomically flag one race as cancel-proposed. Conditional on the race still being OPEN with no
+     * prior proposal, and it writes ONLY {@code cancel_proposed_at} — so a concurrent {@code cancelRace}
+     * (status → CANCELLED) is never clobbered by a stale full-row update. Returns rows affected
+     * (0 = lost the race to a concurrent writer / already proposed, 1 = flagged).
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+        UPDATE Race r SET r.cancelProposedAt = :now
+         WHERE r.raceId = :raceId
+           AND r.status = com.SWP391.horserace.races.entity.RaceStatus.OPEN
+           AND r.cancelProposedAt IS NULL
+        """)
+    int markCancelProposed(@Param("raceId") java.util.UUID raceId, @Param("now") java.time.OffsetDateTime now);
 }

@@ -20,4 +20,7 @@ public interface TournamentService {
     TournamentResponse openRegistration(UUID id);
     TournamentResponse startTournament(UUID id);
     TournamentResponse completeTournament(UUID id);
+
+    /** Upload/replace the tournament's public cover image (multipart); returns the updated tournament. */
+    TournamentResponse uploadImage(UUID id, org.springframework.web.multipart.MultipartFile file);
 }

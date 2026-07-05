@@ -4,6 +4,7 @@ import com.SWP391.horserace.registrations.entity.RegistrationStatus;
 import com.SWP391.horserace.registrations.repository.RegistrationRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
+import com.SWP391.horserace.shared.storage.ImageUploadService;
 import com.SWP391.horserace.tournaments.dto.EligibilityDto;
 import com.SWP391.horserace.tournaments.dto.TournamentFilterRequest;
 import com.SWP391.horserace.tournaments.dto.TournamentRequest;
@@ -42,6 +43,7 @@ public class TournamentServiceImpl implements TournamentService {
     private final UserRepository userRepository;
     private final VenueRepository venueRepository;
     private final RegistrationRepository registrationRepository;
+    private final ImageUploadService imageUploadService;
 
     @Override
     @Transactional
@@ -261,6 +263,18 @@ public class TournamentServiceImpl implements TournamentService {
         return mapToResponse(tournamentRepository.save(tournament));
     }
 
+    @Override
+    @Transactional
+    public TournamentResponse uploadImage(UUID id, org.springframework.web.multipart.MultipartFile file) {
+        Tournament tournament = loadActive(id);
+        String oldImageUrl = tournament.getImageUrl();
+        // Validates (type/size) and stores via the active provider (Cloudinary CDN or local disk).
+        tournament.setImageUrl(imageUploadService.storeImageAsUrl(file, "tournaments"));
+        TournamentResponse response = mapToResponse(tournamentRepository.save(tournament));
+        imageUploadService.deleteByUrl(oldImageUrl); // best-effort cleanup of the replaced image
+        return response;
+    }
+
     // =========================================================================
     // PRIVATE HELPERS
     // =========================================================================
@@ -354,6 +368,7 @@ public class TournamentServiceImpl implements TournamentService {
                 .venues(mapVenues(tournament))
                 .registeredEntriesCount(registeredCount)
                 .status(tournament.getStatus())
+                .imageUrl(tournament.getImageUrl())
                 .createdAt(tournament.getCreatedAt())
                 .updatedAt(tournament.getUpdatedAt())
                 .build();

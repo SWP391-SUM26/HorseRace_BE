@@ -329,6 +329,8 @@ CREATE TABLE tournament (
     status                VARCHAR(50) NOT NULL DEFAULT 'DRAFT'
                           CHECK (status IN ('DRAFT', 'PUBLISHED', 'REGISTRATION_OPEN',
                                             'REGISTRATION_CLOSED', 'ONGOING', 'COMPLETED', 'CANCELLED')),
+    -- Public cover image (Cloudinary CDN URL when app.storage.provider=cloudinary, else /api/v1/files/…)
+    image_url             TEXT,
     created_by_user_id    UUID REFERENCES app_user(user_id),
     created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -384,6 +386,9 @@ CREATE TABLE race (
     actual_start_at      TIMESTAMPTZ,
     actual_end_at        TIMESTAMPTZ,
     prediction_cutoff_at TIMESTAMPTZ,
+    -- Set by the auto-cancel sweeper when an OPEN race is past its cutoff with too few runners;
+    -- notifies admins and awaits their confirmation (semi-auto cancel). NULL = no proposal.
+    cancel_proposed_at   TIMESTAMPTZ,
     max_participants     INT CHECK (max_participants IS NULL OR max_participants > 0),
     min_participants      INT CHECK (min_participants IS NULL OR min_participants > 0),
     venue                VARCHAR(255),

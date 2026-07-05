@@ -42,6 +42,7 @@ public enum ErrorCode {
 
     // ---- admin user management ----
     INVALID_USER_STATUS(1023, "Invalid user status. Allowed: ACTIVE, INACTIVE, SUSPENDED, BANNED", HttpStatus.BAD_REQUEST),
+    CANNOT_CREATE_ADMIN(1026, "Cannot create an ADMIN account via user provisioning", HttpStatus.FORBIDDEN),
 
     // ---- jockey ----
     JOCKEY_NOT_FOUND(2001, "Jockey profile not found", HttpStatus.NOT_FOUND),
@@ -71,6 +72,7 @@ public enum ErrorCode {
     STAFF_NOT_REFEREE(4002, "User is not a referee", HttpStatus.BAD_REQUEST),
     RACE_NOT_FOUND(4003, "Race not found", HttpStatus.NOT_FOUND),
     REFEREE_ALREADY_ASSIGNED(4004, "Referee is already assigned to this race", HttpStatus.CONFLICT),
+    REFEREE_TIME_CONFLICT(4015, "Referee is already assigned to another race at an overlapping time", HttpStatus.CONFLICT),
     REFEREE_ASSIGNMENT_NOT_FOUND(4005, "Referee assignment not found", HttpStatus.NOT_FOUND),
     ASSIGNMENT_ALREADY_REVOKED(4006, "Assignment has already been revoked", HttpStatus.BAD_REQUEST),
     STAFF_EMAIL_EXISTED(4007, "Email is already registered", HttpStatus.CONFLICT),
@@ -111,6 +113,8 @@ public enum ErrorCode {
     RACE_TOURNAMENT_MISMATCH(8004, "Registration and race belong to different tournaments", HttpStatus.BAD_REQUEST),
     RACE_FULL(8005, "Race has reached its maximum number of participants", HttpStatus.BAD_REQUEST),
     REGISTRATION_NOT_APPROVED(8006, "Registration is not approved", HttpStatus.BAD_REQUEST),
+    RACE_NOT_READY(8007, "Race is not ready to run", HttpStatus.BAD_REQUEST),
+    RACE_INVALID_TIMING(8008, "Registration cutoff must be before the scheduled start time", HttpStatus.BAD_REQUEST),
 
     // ---- prediction system ----
     PREDICTION_NOT_FOUND(9001, "Prediction not found", HttpStatus.NOT_FOUND),

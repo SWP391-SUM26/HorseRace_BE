@@ -25,8 +25,14 @@ import java.util.UUID;
  * Both store and load are guarded against path traversal, and the stored extension is derived
  * from the MIME type (not the client filename) to prevent stored-XSS via e.g. {@code evil.svg}.
  */
-@Service
+@Service(LocalFileStorageService.BEAN_NAME)
 public class LocalFileStorageService implements FileStorageService {
+
+    /** Bean name so callers that must always use local disk (jockey docs, file server) can qualify. */
+    public static final String BEAN_NAME = "localFileStorage";
+
+    /** Public URL prefix served by {@code FileController}; also the marker for local-owned URLs. */
+    public static final String PUBLIC_URL_PREFIX = "/api/v1/files/";
 
     /** Safe extension per (validated) MIME type — never trust the client-supplied filename. */
     private static final Map<String, String> CONTENT_TYPE_EXTENSION = Map.of(
@@ -95,6 +101,19 @@ public class LocalFileStorageService implements FileStorageService {
         } catch (IOException ignored) {
             // best-effort: an orphaned file is preferable to failing the request
         }
+    }
+
+    @Override
+    public String publicUrl(String key) {
+        return PUBLIC_URL_PREFIX + key;
+    }
+
+    @Override
+    public String resolveKey(String publicUrl) {
+        if (publicUrl == null || !publicUrl.startsWith(PUBLIC_URL_PREFIX)) {
+            return null; // external / CDN / legacy URL — not ours to delete
+        }
+        return publicUrl.substring(PUBLIC_URL_PREFIX.length());
     }
 
     /**

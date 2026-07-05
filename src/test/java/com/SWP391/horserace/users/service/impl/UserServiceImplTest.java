@@ -28,6 +28,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import com.SWP391.horserace.auth.service.EmailService;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -54,6 +56,10 @@ class UserServiceImplTest {
     RoleRepository roleRepository;
     @Mock
     RaceResultRepository raceResultRepository;
+    @Mock
+    PasswordEncoder passwordEncoder;
+    @Mock
+    EmailService emailService;
 
     private UserServiceImpl service;
 
@@ -66,7 +72,9 @@ class UserServiceImplTest {
                 new ImageUploadService(Mockito.mock(FileStorageService.class)),
                 permissionRepository,
                 roleRepository,
-                raceResultRepository);
+                raceResultRepository,
+                passwordEncoder,
+                emailService);
     }
 
     // ── update user by id (admin) ──
@@ -310,14 +318,15 @@ class UserServiceImplTest {
     // ── createUser / provision (B7) ──
 
     @Test
-    void createUser_provisionsActiveUserWithRoleAndNoopPassword() {
+    void createUser_bcryptsGeneratedPassword_andEmailsIt() {
         Role role = Role.builder().roleCode("JOCKEY").roleName("Jockey").build();
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
         when(roleRepository.findByRoleCode("JOCKEY")).thenReturn(Optional.of(role));
+        when(passwordEncoder.encode(any())).thenReturn("{bcrypt}$2a$HASH");
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
 
         UserResponse res = service.createUser(
-                new CreateUserRequest("New User", "New@Example.com", "jockey", null, null));
+                new CreateUserRequest("New User", "New@Example.com", "jockey", null));
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(userCaptor.capture());
@@ -325,24 +334,43 @@ class UserServiceImplTest {
 
         assertThat(saved.getEmail()).isEqualTo("new@example.com");
         assertThat(saved.getStatus()).isEqualTo(UserStatus.ACTIVE);
-        assertThat(saved.getPasswordHash()).isEqualTo("{noop}123456");
-        assertThat(saved.getUserCode()).startsWith("USR-");
+        assertThat(saved.getPasswordHash()).isEqualTo("{bcrypt}$2a$HASH"); // bcrypt, NOT {noop}
+        assertThat(saved.getPasswordHash()).doesNotStartWith("{noop}");
         assertThat(saved.getRole()).isSameAs(role);
         assertThat(res.getRoleCode()).isEqualTo("JOCKEY");
+        // the generated (raw) password is emailed to the new user
+        verify(emailService).sendNewAccountPassword(org.mockito.ArgumentMatchers.eq("new@example.com"),
+                org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
-    void createUser_usesProvidedTempPassword() {
-        Role role = Role.builder().roleCode("VET").roleName("Vet").build();
-        when(userRepository.existsByEmail("vet@example.com")).thenReturn(false);
-        when(roleRepository.findByRoleCode("VET")).thenReturn(Optional.of(role));
+    void createUser_generatedPassword_meetsComplexityRules() {
+        Role role = Role.builder().roleCode("SPECTATOR").build();
+        when(userRepository.existsByEmail(any())).thenReturn(false);
+        when(roleRepository.findByRoleCode("SPECTATOR")).thenReturn(Optional.of(role));
+        when(passwordEncoder.encode(any())).thenReturn("{bcrypt}x");
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
 
-        service.createUser(new CreateUserRequest("Doc", "vet@example.com", "VET", null, "Secret99"));
+        service.createUser(new CreateUserRequest("N", "n@example.com", "SPECTATOR", null));
 
-        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
-        verify(userRepository).save(userCaptor.capture());
-        assertThat(userCaptor.getValue().getPasswordHash()).isEqualTo("{noop}Secret99");
+        ArgumentCaptor<String> pwCaptor = ArgumentCaptor.forClass(String.class);
+        verify(emailService).sendNewAccountPassword(any(), pwCaptor.capture());
+        String raw = pwCaptor.getValue();
+        assertThat(raw.length()).isGreaterThanOrEqualTo(8);
+        assertThat(raw).matches(".*[A-Z].*").matches(".*[a-z].*")
+                .matches(".*\\d.*").matches(".*[^A-Za-z0-9].*");
+    }
+
+    @Test
+    void createUser_adminRole_isBlocked() {
+        when(userRepository.existsByEmail("boss@example.com")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.createUser(
+                new CreateUserRequest("Boss", "boss@example.com", "admin", null)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.CANNOT_CREATE_ADMIN);
+        verify(userRepository, never()).save(any(User.class));
+        verify(emailService, never()).sendNewAccountPassword(any(), any());
     }
 
     @Test
@@ -350,7 +378,7 @@ class UserServiceImplTest {
         when(userRepository.existsByEmail("dup@example.com")).thenReturn(true);
 
         assertThatThrownBy(() -> service.createUser(
-                new CreateUserRequest("Dup", "dup@example.com", "ADMIN", null, null)))
+                new CreateUserRequest("Dup", "dup@example.com", "JOCKEY", null)))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.EMAIL_ALREADY_EXISTS);
         verify(userRepository, never()).save(any(User.class));
@@ -362,9 +390,24 @@ class UserServiceImplTest {
         when(roleRepository.findByRoleCode("NOPE")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.createUser(
-                new CreateUserRequest("X", "x@example.com", "NOPE", null, null)))
+                new CreateUserRequest("X", "x@example.com", "NOPE", null)))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ROLE_NOT_EXISTED);
         verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void resendPassword_regeneratesBcryptAndEmails() {
+        UUID id = UUID.randomUUID();
+        User user = User.builder().userId(id).email("u@example.com").passwordHash("{bcrypt}old").build();
+        when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode(any())).thenReturn("{bcrypt}new");
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.resendPassword(id);
+
+        assertThat(user.getPasswordHash()).isEqualTo("{bcrypt}new");
+        verify(emailService).sendNewAccountPassword(org.mockito.ArgumentMatchers.eq("u@example.com"),
+                org.mockito.ArgumentMatchers.anyString());
     }
 }

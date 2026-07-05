@@ -35,4 +35,7 @@ public interface StaffRefereeAssignmentService {
 
     /** Remove (revoke) a referee assignment (task 152). */
     void removeAssignment(UUID refAssignmentId);
+
+    /** Referee ids that have a time-conflict (±window) with this race — for FE to hide/exclude them. */
+    java.util.List<UUID> conflictingRefereeIds(UUID raceId);
 }

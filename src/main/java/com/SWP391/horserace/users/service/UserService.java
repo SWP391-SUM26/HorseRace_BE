@@ -38,6 +38,9 @@ public interface UserService {
     /** Admin: provision a new ACTIVE user with the given role; rejects duplicate emails. */
     UserResponse createUser(CreateUserRequest request);
 
+    /** Admin: regenerate a user's password (bcrypt) and re-email it (e.g. when the first email failed). */
+    void resendPassword(UUID id);
+
     /** The current authenticated user's own profile. */
     UserResponse getMyProfile(UUID userId);
 

@@ -9,9 +9,11 @@ import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.shared.storage.FileStorageService;
 import com.SWP391.horserace.shared.storage.ImageUploadService;
+import com.SWP391.horserace.shared.storage.LocalFileStorageService;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -30,6 +32,8 @@ public class AttachmentServiceImpl implements AttachmentService {
     private static final String STORAGE_FOLDER = "attachments";
 
     private final AttachmentRepository attachmentRepository;
+    // Jockey docs / evidence are RESTRICTED and auth-gated (4B) — ALWAYS local disk, never public CDN.
+    @Qualifier(LocalFileStorageService.BEAN_NAME)
     private final FileStorageService fileStorageService;
     private final UserRepository userRepository;
 

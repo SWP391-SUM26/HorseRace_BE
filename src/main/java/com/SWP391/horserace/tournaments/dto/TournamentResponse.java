@@ -28,6 +28,8 @@ public class TournamentResponse {
     private OffsetDateTime registrationCloseAt;
     private String location;
     private TournamentStatus status;
+    /** Public cover image URL (Cloudinary CDN or local /api/v1/files/…); null if none uploaded. */
+    private String imageUrl;
 
     // §C1 — enrichment fields
     private CircuitTier circuitTier;

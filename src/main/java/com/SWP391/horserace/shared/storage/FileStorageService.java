@@ -21,4 +21,18 @@ public interface FileStorageService {
 
     /** Best-effort delete of a stored file by its key; no-op if it does not exist. */
     void delete(String key);
+
+    /**
+     * The public URL a browser uses to fetch the file for a given storage {@link #store key}.
+     * Local disk returns a relative {@code /api/v1/files/...} path served by this app; a CDN-backed
+     * implementation returns its own absolute URL. Callers persist this value as the image URL.
+     */
+    String publicUrl(String key);
+
+    /**
+     * Reverse of {@link #publicUrl}: recover the storage key from a public URL this implementation
+     * produced, or {@code null} if the URL is not one it owns (e.g. an external/legacy URL). Used
+     * for best-effort cleanup when an image is replaced — an unrecognised URL is simply left alone.
+     */
+    String resolveKey(String publicUrl);
 }

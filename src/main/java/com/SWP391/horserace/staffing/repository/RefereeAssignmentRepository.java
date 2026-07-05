@@ -54,4 +54,29 @@ public interface RefereeAssignmentRepository extends JpaRepository<RefereeAssign
     @Query("SELECT ra.referee.userId, COUNT(ra) FROM RefereeAssignment ra "
             + "WHERE ra.status <> com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.REVOKED GROUP BY ra.referee.userId")
     List<Object[]> countActiveAssignmentsPerReferee();
+
+    /**
+     * True if this referee is already actively assigned to ANOTHER race whose scheduled start falls
+     * within [windowStart, windowEnd] — a time-conflict (location doesn't matter, only time).
+     */
+    @Query("SELECT COUNT(ra) > 0 FROM RefereeAssignment ra "
+            + "WHERE ra.referee.userId = :refereeUserId "
+            + "AND ra.race.raceId <> :excludeRaceId "
+            + "AND ra.status <> com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.REVOKED "
+            + "AND ra.race.scheduledStartAt IS NOT NULL "
+            + "AND ra.race.scheduledStartAt BETWEEN :windowStart AND :windowEnd")
+    boolean existsRefereeConflictInWindow(@Param("refereeUserId") UUID refereeUserId,
+                                          @Param("excludeRaceId") UUID excludeRaceId,
+                                          @Param("windowStart") java.time.OffsetDateTime windowStart,
+                                          @Param("windowEnd") java.time.OffsetDateTime windowEnd);
+
+    /** Distinct referee ids that have a time-conflict in [windowStart, windowEnd] (excluding this race). */
+    @Query("SELECT DISTINCT ra.referee.userId FROM RefereeAssignment ra "
+            + "WHERE ra.race.raceId <> :excludeRaceId "
+            + "AND ra.status <> com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.REVOKED "
+            + "AND ra.race.scheduledStartAt IS NOT NULL "
+            + "AND ra.race.scheduledStartAt BETWEEN :windowStart AND :windowEnd")
+    List<UUID> findRefereeIdsWithConflictInWindow(@Param("excludeRaceId") UUID excludeRaceId,
+                                                  @Param("windowStart") java.time.OffsetDateTime windowStart,
+                                                  @Param("windowEnd") java.time.OffsetDateTime windowEnd);
 }
