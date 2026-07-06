@@ -189,6 +189,10 @@ public class UserServiceImpl implements UserService {
                 .phone(request.phone() != null ? request.phone().trim() : null)
                 .passwordHash(passwordEncoder.encode(rawPassword))
                 .status(UserStatus.ACTIVE)
+                // Admin-provisioned: the generated password is emailed to this exact address, so an
+                // admin who creates the account vouches for the email — mark it verified so staff
+                // (e.g. referees, whose assignment requires a verified email) are usable immediately.
+                .emailVerified(true)
                 .build();
 
         UserResponse response = mapToResponse(userRepository.save(user));
