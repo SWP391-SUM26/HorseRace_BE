@@ -137,22 +137,20 @@ public class RefereeServiceImpl implements RefereeService {
         return mapToResponse(refereeReportRepository.save(report));
     }
 
+    /**
+     * @deprecated (FR-20) The RefereeReport DRAFT→SUBMITTED track is deprecated in favour of the
+     * unified race report (results + {@code RaceViolation}) submitted via the CN3 flow. Existing
+     * DRAFT reports remain readable, but the SUBMITTED transition is now blocked. No data is deleted.
+     */
+    @Deprecated
     @Override
     @Transactional
     public ReportResponse submitReport(UUID currentUserId, UUID reportId) {
         if (currentUserId == null) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
-        RefereeReport report = loadReport(reportId);
-
-        if (report.getReportStatus() != ReportStatus.DRAFT) {
-            throw new AppException(ErrorCode.REPORT_INVALID_STATUS);
-        }
-
-        report.setReportStatus(ReportStatus.SUBMITTED);
-        report.setSubmittedAt(OffsetDateTime.now());
-
-        return mapToResponse(refereeReportRepository.save(report));
+        loadReport(reportId); // 404 if missing, so the caller gets a consistent error
+        throw new AppException(ErrorCode.REFEREE_REPORT_DEPRECATED);
     }
 
     // ── helpers ──

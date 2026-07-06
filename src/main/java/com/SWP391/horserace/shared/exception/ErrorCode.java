@@ -83,6 +83,14 @@ public enum ErrorCode {
     TOURNAMENT_INVITATION_NOT_FOUND(4012, "Tournament referee invitation not found", HttpStatus.NOT_FOUND),
     NOT_INVITED_REFEREE(4013, "This invitation does not belong to you", HttpStatus.FORBIDDEN),
     TOURNAMENT_INVITATION_NOT_PENDING(4014, "Only pending (INVITED) invitations can be changed", HttpStatus.BAD_REQUEST),
+    // ---- referee race-assignment accept/decline (CN1) — 4014/4015 taken, use 4016+ ----
+    REFEREE_ASSIGNMENT_NOT_OWNED(4016, "This assignment does not belong to you", HttpStatus.FORBIDDEN),
+    REFEREE_ASSIGNMENT_NOT_PENDING(4017, "Only an ASSIGNED assignment can be accepted or declined", HttpStatus.CONFLICT),
+    REFEREE_EMAIL_UNVERIFIED(4018, "Referee must verify their email before being assigned to a race", HttpStatus.BAD_REQUEST),
+    REFEREE_REPORT_DEPRECATED(4019, "The referee report workflow is deprecated; use race violations instead", HttpStatus.BAD_REQUEST),
+    // ---- referee emailed OTP submission code (CN3 / referee-flow Phase 3) ----
+    REFEREE_CODE_THROTTLED(4020, "Please wait before requesting another code", HttpStatus.TOO_MANY_REQUESTS),
+    REFEREE_CODE_LOCKED(4021, "Too many invalid attempts; request a new code", HttpStatus.TOO_MANY_REQUESTS),
 
     // ---- horse management ----
     HORSE_NOT_FOUND(5001, "Horse not found", HttpStatus.NOT_FOUND),
@@ -140,12 +148,19 @@ public enum ErrorCode {
     INSPECTION_ENTRY_RACE_MISMATCH(9401, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
     INSPECTION_CONFIRM_REQUIRED(9402, "Submission must be confirmed", HttpStatus.BAD_REQUEST),
 
+    // ---- per-race document review (CN2 / referee-flow Phase 2) ----
+    ENTRY_RACE_MISMATCH(9403, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+    ENTRY_REVIEW_REASON_REQUIRED(9404, "A rejection reason is required", HttpStatus.BAD_REQUEST),
+
     // ---- results record/read/edit/certify (FE-v2 §5) ----
     RESULT_NOT_FOUND(9501, "Race result not found", HttpStatus.NOT_FOUND),
     RESULT_INQUIRIES_UNRESOLVED(9502, "All inquiries must be resolved before certification", HttpStatus.BAD_REQUEST),
     RESULT_ENTRY_RACE_MISMATCH(9503, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
     RESULT_ALREADY_OFFICIAL(9504, "Official results can no longer be deleted", HttpStatus.BAD_REQUEST),
     RACE_NOT_FINISHED(9505, "Results and violations can only be filed after the race has finished", HttpStatus.BAD_REQUEST),
+    RESULT_ALREADY_SUBMITTED(9506, "This race report has already been submitted by the referee", HttpStatus.CONFLICT),
+    RESULT_UNDER_REVIEW_BLOCKS_CERTIFY(9507, "Cannot certify while a result is under review", HttpStatus.BAD_REQUEST),
+    REPORT_RESULTS_REQUIRED(9508, "A race report must include at least one result", HttpStatus.BAD_REQUEST),
 
     // ---- violations / inquiries (FE-v2 §3) ----
     VIOLATION_NOT_FOUND(9601, "Violation not found", HttpStatus.NOT_FOUND),
@@ -153,7 +168,7 @@ public enum ErrorCode {
     VIOLATION_ALREADY_RULED(9603, "This violation has already been ruled on", HttpStatus.BAD_REQUEST),
 
     // ---- attachments (FE-v2 §6) ----
-    ATTACHMENT_INVALID_OWNER_TYPE(9701, "Invalid ownerEntityType. Allowed: RACE_RESULT, VIOLATION, RACE", HttpStatus.BAD_REQUEST),
+    ATTACHMENT_INVALID_OWNER_TYPE(9701, "Invalid ownerEntityType. Allowed: RACE_RESULT, VIOLATION, RACE, TOURNAMENT_REGISTRATION, JOCKEY_PROFILE (owner/horse papers must go through /api/v1/owner/documents)", HttpStatus.BAD_REQUEST),
     ATTACHMENT_INVALID_SENSITIVITY(9702, "Invalid sensitivityLevel. Allowed: PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED", HttpStatus.BAD_REQUEST),
 
     // ---- referee applicant onboarding (FE-v2 Registration Approval) ----

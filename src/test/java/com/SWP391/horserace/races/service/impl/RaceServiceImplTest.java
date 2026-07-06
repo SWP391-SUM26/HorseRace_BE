@@ -63,6 +63,8 @@ class RaceServiceImplTest {
     @Mock com.SWP391.horserace.venues.repository.VenueRepository venueRepository;
     @Mock com.SWP391.horserace.staffing.repository.RefereeAssignmentRepository refereeAssignmentRepository;
     @Mock com.SWP391.horserace.notifications.service.NotificationService notificationService;
+    @Mock com.SWP391.horserace.inspections.repository.EntryDocumentReviewRepository entryDocumentReviewRepository;
+    @Mock com.SWP391.horserace.inspections.repository.RaceEntryInspectionRepository raceEntryInspectionRepository;
 
     private RaceServiceImpl service;
 
@@ -76,7 +78,7 @@ class RaceServiceImplTest {
         service = new RaceServiceImpl(
                 raceRepository, raceEntryRepository, registrationRepository, tournamentRepository,
                 userRepository, jockeyAssignmentRepository, venueRepository, refereeAssignmentRepository,
-                notificationService);
+                notificationService, entryDocumentReviewRepository, raceEntryInspectionRepository);
         tournament = Tournament.builder().tournamentId(tournamentId).name("Spring Cup").build();
     }
 
@@ -549,14 +551,48 @@ class RaceServiceImplTest {
                 .build();
     }
 
+    /** Fully-ready stub: CONFIRMED referee + all entries doc-ACCEPTED + vet-CLEARED. */
     private void stubReady(UUID id, long entries, long accepted, boolean hasReferee) {
+        stubReady(id, entries, accepted, hasReferee, true, true);
+    }
+
+    /**
+     * Extended startRace gate stub (FR-18): builds {@code entries} non-scratched entries, each with a
+     * document review (ACCEPTED iff {@code allDocsAccepted}) and an inspection (CLEARED iff
+     * {@code allVetCleared}), plus a CONFIRMED-referee flag.
+     */
+    private void stubReady(UUID id, long entries, long accepted, boolean hasConfirmedReferee,
+                           boolean allDocsAccepted, boolean allVetCleared) {
         when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(readyRace(id)));
         when(raceEntryRepository.countByRace_RaceId(id)).thenReturn(entries);
         when(jockeyAssignmentRepository.countAcceptedByRaceId(id)).thenReturn(accepted);
-        when(refereeAssignmentRepository.findByRace_RaceIdAndStatusNot(any(), any()))
-                .thenReturn(hasReferee
-                        ? java.util.List.of(new com.SWP391.horserace.assignments.entity.RefereeAssignment())
-                        : java.util.List.of());
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndStatus(
+                any(), eq(com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED)))
+                .thenReturn(hasConfirmedReferee);
+
+        List<RaceEntry> list = new java.util.ArrayList<>();
+        List<com.SWP391.horserace.inspections.entity.EntryDocumentReview> reviews = new java.util.ArrayList<>();
+        List<com.SWP391.horserace.inspections.entity.RaceEntryInspection> inspections = new java.util.ArrayList<>();
+        for (int i = 0; i < entries; i++) {
+            RaceEntry e = RaceEntry.builder().entryId(UUID.randomUUID())
+                    .status(RaceEntryStatus.ENTERED).build();
+            list.add(e);
+            reviews.add(com.SWP391.horserace.inspections.entity.EntryDocumentReview.builder()
+                    .entry(e)
+                    .documentStatus(allDocsAccepted
+                            ? com.SWP391.horserace.inspections.entity.DocumentReviewStatus.ACCEPTED
+                            : com.SWP391.horserace.inspections.entity.DocumentReviewStatus.PENDING)
+                    .build());
+            inspections.add(com.SWP391.horserace.inspections.entity.RaceEntryInspection.builder()
+                    .entry(e)
+                    .inspectionStatus(allVetCleared
+                            ? com.SWP391.horserace.inspections.entity.InspectionStatus.CLEARED
+                            : com.SWP391.horserace.inspections.entity.InspectionStatus.PENDING)
+                    .build());
+        }
+        when(raceEntryRepository.findByRace_RaceId(id)).thenReturn(list);
+        when(entryDocumentReviewRepository.findByEntry_EntryIdIn(any())).thenReturn(reviews);
+        when(raceEntryInspectionRepository.findByEntry_EntryIdIn(any())).thenReturn(inspections);
     }
 
     private void assertStartNotReady(UUID id) {
@@ -599,16 +635,115 @@ class RaceServiceImplTest {
     }
 
     @Test
+    void startRace_onlyDeclinedReferee_blocked() {
+        // RT-HIGH-1: a DECLINED assignment must NOT satisfy the referee gate. The gate queries only
+        // ASSIGNED/CONFIRMED, so a declined-only race resolves to hasReferee=false → not ready.
+        UUID id = UUID.randomUUID();
+        stubReady(id, 2, 2, false);
+        assertStartNotReady(id);
+    }
+
+    @Test
     void startRace_nullPredictionCutoff_notReady_noNpe() {
         UUID id = UUID.randomUUID();
+        // Fully ready EXCEPT the null cutoff — must not NPE and must report not-ready.
         Race r = readyRace(id);
         r.setPredictionCutoffAt(null); // red-team: must not NPE
         when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(r));
         when(raceEntryRepository.countByRace_RaceId(id)).thenReturn(2L);
         when(jockeyAssignmentRepository.countAcceptedByRaceId(id)).thenReturn(2L);
-        when(refereeAssignmentRepository.findByRace_RaceIdAndStatusNot(any(), any()))
-                .thenReturn(java.util.List.of(new com.SWP391.horserace.assignments.entity.RefereeAssignment()));
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndStatus(
+                any(), eq(com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED)))
+                .thenReturn(true);
+        when(raceEntryRepository.findByRace_RaceId(id)).thenReturn(List.of());
+        // No entries → doc/vet gates are trivially satisfied; only the null cutoff blocks.
         assertStartNotReady(id);
+    }
+
+    // ── startRace: Phase 2 unified gate (FR-18 / CN2) ──
+
+    @Test
+    void startRace_noConfirmedReferee_blocked() {
+        // An ASSIGNED-but-not-CONFIRMED referee no longer satisfies the gate.
+        UUID id = UUID.randomUUID();
+        stubReady(id, 2, 2, false, true, true);
+        assertThatThrownBy(() -> service.startRace(currentUserId, id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY)
+                .hasMessageContaining("confirmed referee");
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void startRace_entryDocumentsNotAccepted_blocked() {
+        // One (of two) non-scratched entries has a PENDING document review.
+        UUID id = UUID.randomUUID();
+        stubReady(id, 2, 2, true, false, true);
+        assertThatThrownBy(() -> service.startRace(currentUserId, id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY)
+                .hasMessageContaining("documents accepted");
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void startRace_entryWithNoDocumentReview_blocked() {
+        // RT-HIGH-2: an entry with NO review row at all must count as not-accepted (missing rows).
+        UUID id = UUID.randomUUID();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(readyRace(id)));
+        when(raceEntryRepository.countByRace_RaceId(id)).thenReturn(2L);
+        when(jockeyAssignmentRepository.countAcceptedByRaceId(id)).thenReturn(2L);
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndStatus(
+                any(), eq(com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED)))
+                .thenReturn(true);
+        List<RaceEntry> list = List.of(
+                RaceEntry.builder().entryId(UUID.randomUUID()).status(RaceEntryStatus.ENTERED).build(),
+                RaceEntry.builder().entryId(UUID.randomUUID()).status(RaceEntryStatus.ENTERED).build());
+        when(raceEntryRepository.findByRace_RaceId(id)).thenReturn(list);
+        // ZERO review rows and ZERO inspection rows exist.
+        when(entryDocumentReviewRepository.findByEntry_EntryIdIn(any())).thenReturn(List.of());
+        when(raceEntryInspectionRepository.findByEntry_EntryIdIn(any())).thenReturn(List.of());
+        assertThatThrownBy(() -> service.startRace(currentUserId, id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY)
+                .hasMessageContaining("documents accepted (0/2)");
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void startRace_entryNotVetCleared_blocked() {
+        UUID id = UUID.randomUUID();
+        stubReady(id, 2, 2, true, true, false);
+        assertThatThrownBy(() -> service.startRace(currentUserId, id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY)
+                .hasMessageContaining("vet-cleared");
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void startRace_allGapsCollected_notFirstFail() {
+        // No confirmed referee + docs not accepted + not vet-cleared → the message lists ALL gaps.
+        UUID id = UUID.randomUUID();
+        stubReady(id, 2, 2, false, false, false);
+        assertThatThrownBy(() -> service.startRace(currentUserId, id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY)
+                .hasMessageContaining("confirmed referee")
+                .hasMessageContaining("documents accepted")
+                .hasMessageContaining("vet-cleared");
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void startRace_allConditionsMet_transitionsToRunning() {
+        UUID id = UUID.randomUUID();
+        stubReady(id, 2, 2, true, true, true);
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+
+        RaceResponse res = service.startRace(currentUserId, id);
+
+        assertThat(res.getStatus()).isEqualTo(RaceStatus.RUNNING);
     }
 
     // ── auto-cancel proposal (FR-05) ──

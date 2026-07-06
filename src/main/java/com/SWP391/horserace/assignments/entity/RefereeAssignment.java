@@ -48,7 +48,7 @@ public class RefereeAssignment {
     @Column(name = "ref_code", length = 50)
     private String refCode;
 
-    /** ASSIGNED | CONFIRMED | REVOKED */
+    /** ASSIGNED | CONFIRMED | DECLINED | REVOKED */
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
@@ -56,6 +56,14 @@ public class RefereeAssignment {
 
     @Column(name = "assigned_at")
     private OffsetDateTime assignedAt;
+
+    /** When the referee accepted/declined this assignment (CN1). */
+    @Column(name = "responded_at")
+    private OffsetDateTime respondedAt;
+
+    /** Reason the referee gave when declining (CN1). */
+    @Column(name = "decline_reason", columnDefinition = "text")
+    private String declineReason;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by_user_id")

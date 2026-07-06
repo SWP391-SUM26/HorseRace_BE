@@ -97,6 +97,7 @@ public class RefereeAssignmentController {
     // -------------------------------------------------------------------------
     /** GET /api/v1/staffing/my-races — race IDs the signed-in referee is assigned to officiate. */
     @GetMapping("/my-races")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<java.util.List<UUID>> getMyAssignedRaces(
             @org.springframework.security.core.annotation.AuthenticationPrincipal UUID userId) {
         return ApiResponse.<java.util.List<UUID>>builder()
@@ -108,6 +109,7 @@ public class RefereeAssignmentController {
 
     /** GET /api/v1/staffing/my-assignments — the signed-in referee's own assignments + per-race codes. */
     @GetMapping("/my-assignments")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<java.util.List<RefereeAssignmentResponse>> getMyAssignments(
             @org.springframework.security.core.annotation.AuthenticationPrincipal UUID userId) {
         return ApiResponse.<java.util.List<RefereeAssignmentResponse>>builder()

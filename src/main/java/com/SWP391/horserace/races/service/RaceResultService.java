@@ -5,6 +5,8 @@ import com.SWP391.horserace.races.dto.CertifyResultsResponse;
 import com.SWP391.horserace.races.dto.RaceResultsResponse;
 import com.SWP391.horserace.races.dto.RecordResultsRequest;
 import com.SWP391.horserace.races.dto.ResultRowResponse;
+import com.SWP391.horserace.races.dto.SubmitReportRequest;
+import com.SWP391.horserace.races.dto.SubmitReportResponse;
 import com.SWP391.horserace.races.dto.UpdateResultRequest;
 import com.SWP391.horserace.races.dto.UpdateResultResponse;
 
@@ -14,8 +16,23 @@ import java.util.UUID;
 /** Results record/read/edit/certify for a race — FE-v2 §5. */
 public interface RaceResultService {
 
-    /** Bulk upsert the finish order (one race_result per entry, status PROVISIONAL). */
+    /** Bulk upsert the finish order (one race_result per entry, status PROVISIONAL). ADMIN-only. */
     List<ResultRowResponse> recordResults(UUID currentUserId, UUID raceId, RecordResultsRequest request);
+
+    /**
+     * CN3: the referee's combined results+violations report, unlocked by the emailed OTP. Atomic —
+     * upserts results, one-time-locks the report, creates violations, and writes an audit snapshot.
+     */
+    SubmitReportResponse submitReport(UUID currentUserId, UUID raceId, SubmitReportRequest request);
+
+    /**
+     * CN3 escape hatch: an ADMIN publishes the prepared report WITHOUT an OTP (used when OTP email
+     * delivery fails). Admins are not blocked by the one-time lock.
+     */
+    SubmitReportResponse adminOverridePublish(UUID adminUserId, UUID raceId, SubmitReportRequest request);
+
+    /** FR-19: flag one result as UNDER_REVIEW (blocks certify). Rejected once the result is OFFICIAL. */
+    void flagUnderReview(UUID currentUserId, UUID raceId, UUID resultId);
 
     /** Read the full result sheet for a race, ordered by finish position. */
     RaceResultsResponse getResults(UUID raceId);

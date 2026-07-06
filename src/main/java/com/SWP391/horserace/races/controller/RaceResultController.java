@@ -33,9 +33,12 @@ public class RaceResultController {
 
     private final RaceResultService raceResultService;
 
-    /** POST — bulk upsert the finish order (one result per entry, status PROVISIONAL). */
+    /**
+     * POST — bulk upsert the finish order (one result per entry, status PROVISIONAL). ADMIN-only:
+     * referees now publish via POST /api/v1/races/{raceId}/report (OTP-gated, CN3).
+     */
     @PostMapping
-    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<List<ResultRowResponse>> recordResults(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID raceId,
@@ -74,9 +77,29 @@ public class RaceResultController {
                 .build();
     }
 
-    /** PATCH /{resultId} — inline-edit one result row; writes a version audit (AMENDED). */
-    @PatchMapping("/{resultId}")
+    /**
+     * PATCH /{resultId}/inquiry — flag one result as UNDER_REVIEW (FR-19). Blocks certification until
+     * resolved. Rejected once the result is OFFICIAL.
+     */
+    @PatchMapping("/{resultId}/inquiry")
     @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
+    public ApiResponse<Void> flagUnderReview(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID raceId,
+            @PathVariable UUID resultId) {
+        raceResultService.flagUnderReview(userId, raceId, resultId);
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("Result flagged under review")
+                .build();
+    }
+
+    /**
+     * PATCH /{resultId} — inline-edit one result row; writes a version audit (AMENDED). ADMIN-only:
+     * the referee's report is locked after their one-time publish (FR-15 / RT-CRITICAL-2).
+     */
+    @PatchMapping("/{resultId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<UpdateResultResponse> updateResult(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID raceId,
@@ -89,9 +112,9 @@ public class RaceResultController {
                 .build();
     }
 
-    /** DELETE /{resultId} — remove one provisional result row (and its version history). */
+    /** DELETE /{resultId} — remove one provisional result row (and its version history). ADMIN-only. */
     @DeleteMapping("/{resultId}")
-    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<Void> deleteResult(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID raceId,

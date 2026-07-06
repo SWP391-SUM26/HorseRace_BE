@@ -20,6 +20,35 @@ public interface RefereeAssignmentRepository extends JpaRepository<RefereeAssign
     /** Check if a referee is already assigned to a race (non-REVOKED). */
     boolean existsByRace_RaceIdAndReferee_UserIdAndStatusNot(UUID raceId, UUID refereeUserId, RefereeAssignmentStatus status);
 
+    /**
+     * True if the race has at least one assignment in the given statuses. startRace gate (RT-HIGH-1
+     * stopgap): a DECLINED assignment must NOT count as "has a referee" — pass [ASSIGNED, CONFIRMED].
+     * Phase 2 tightens this to CONFIRMED-only.
+     */
+    boolean existsByRace_RaceIdAndStatusIn(UUID raceId, java.util.Collection<RefereeAssignmentStatus> statuses);
+
+    /** True if the race has at least one assignment in the given status — startRace gate needs CONFIRMED (Phase 2). */
+    boolean existsByRace_RaceIdAndStatus(UUID raceId, RefereeAssignmentStatus status);
+
+    /**
+     * True if this referee has an assignment for the race in the given status. Used to authorize a
+     * referee to review a race's entries (RT-CRITICAL-4): require a CONFIRMED assignment for that race.
+     */
+    boolean existsByRace_RaceIdAndReferee_UserIdAndStatus(UUID raceId, UUID refereeUserId, RefereeAssignmentStatus status);
+
+    /** The signed-in referee's UPCOMING races they've CONFIRMED, soonest first (FR-17 dashboard scope). */
+    @Query("SELECT ra.race FROM RefereeAssignment ra "
+            + "WHERE ra.referee.userId = :refereeUserId "
+            + "AND ra.status = com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED "
+            + "AND ra.race.deleted = false "
+            + "AND ra.race.status IN :statuses "
+            + "AND ra.race.scheduledStartAt IS NOT NULL "
+            + "ORDER BY ra.race.scheduledStartAt ASC")
+    List<com.SWP391.horserace.races.entity.Race> findUpcomingConfirmedRacesByReferee(
+            @Param("refereeUserId") UUID refereeUserId,
+            @Param("statuses") java.util.Collection<com.SWP391.horserace.races.entity.RaceStatus> statuses,
+            org.springframework.data.domain.Pageable pageable);
+
     /** Count active (non-REVOKED) assignments for a specific referee. */
     long countByReferee_UserIdAndStatusNot(UUID refereeUserId, RefereeAssignmentStatus status);
 

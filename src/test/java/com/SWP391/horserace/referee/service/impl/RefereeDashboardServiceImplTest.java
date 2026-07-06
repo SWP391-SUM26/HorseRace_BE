@@ -37,6 +37,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -47,6 +51,7 @@ class RefereeDashboardServiceImplTest {
     @Mock RaceEntryInspectionRepository inspectionRepository;
     @Mock RaceViolationRepository violationRepository;
     @Mock RefereeAssignmentRepository refereeAssignmentRepository;
+    @Mock com.SWP391.horserace.users.repository.UserRepository userRepository;
 
     private RefereeDashboardServiceImpl service;
 
@@ -59,7 +64,12 @@ class RefereeDashboardServiceImplTest {
     void setUp() {
         service = new RefereeDashboardServiceImpl(
                 raceRepository, raceEntryRepository, inspectionRepository,
-                violationRepository, refereeAssignmentRepository);
+                violationRepository, refereeAssignmentRepository, userRepository);
+
+        // Default: the caller IS assigned to the requested race (raceId-path authorization passes).
+        // Individual tests override this to exercise the not-assigned case.
+        lenient().when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusNot(
+                any(), any(), any())).thenReturn(true);
 
         race = Race.builder()
                 .raceId(raceId)
@@ -99,7 +109,7 @@ class RefereeDashboardServiceImplTest {
 
     @Test
     void noUpcomingRace_returnsEmptyDashboard() {
-        when(raceRepository.findUpcomingByStatuses(any(), any())).thenReturn(List.of());
+        when(refereeAssignmentRepository.findUpcomingConfirmedRacesByReferee(any(), any(), any())).thenReturn(List.of());
 
         RefereeDashboardResponse result = service.getDashboard(userId, null);
 
@@ -111,7 +121,7 @@ class RefereeDashboardServiceImplTest {
 
     @Test
     void noRaceId_picksSoonestUpcoming_andComputesCountdown() {
-        when(raceRepository.findUpcomingByStatuses(any(), any())).thenReturn(List.of(race));
+        when(refereeAssignmentRepository.findUpcomingConfirmedRacesByReferee(any(), any(), any())).thenReturn(List.of(race));
         when(raceEntryRepository.findByRaceIdWithHorse(raceId)).thenReturn(List.of());
         when(violationRepository.findByRaceIdAndStatusWithDetails(raceId, ViolationStatus.PENDING))
                 .thenReturn(List.of());
@@ -126,6 +136,23 @@ class RefereeDashboardServiceImplTest {
         // ~30 minutes out, allow for test execution slack.
         assertThat(result.getNextRace().getPostTimeCountdownSeconds())
                 .isBetween(1700L, 1800L);
+    }
+
+    @Test
+    void noRaceId_scopesNextRaceToCallersConfirmedRaces() {
+        // FR-17: the no-raceId path must query the caller's CONFIRMED races, NOT the global soonest.
+        when(refereeAssignmentRepository.findUpcomingConfirmedRacesByReferee(eq(userId), any(), any()))
+                .thenReturn(List.of(race));
+        when(raceEntryRepository.findByRaceIdWithHorse(raceId)).thenReturn(List.of());
+        when(violationRepository.findByRaceIdAndStatusWithDetails(raceId, ViolationStatus.PENDING))
+                .thenReturn(List.of());
+        when(refereeAssignmentRepository.findByRace_RaceId(raceId)).thenReturn(List.of());
+
+        RefereeDashboardResponse result = service.getDashboard(userId, null);
+
+        assertThat(result.getNextRace().getRaceId()).isEqualTo(raceId);
+        verify(refereeAssignmentRepository).findUpcomingConfirmedRacesByReferee(eq(userId), any(), any());
+        verify(raceRepository, never()).findUpcomingByStatuses(any(), any());
     }
 
     @Test
@@ -152,9 +179,23 @@ class RefereeDashboardServiceImplTest {
     }
 
     @Test
+    void givenRaceId_refereeNotAssignedAndNotAdmin_throwsNotFound() {
+        // HIGH fix: a referee may only view a race dashboard they're assigned to; else not-found.
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusNot(any(), any(), any()))
+                .thenReturn(false);
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.empty()); // not admin
+
+        assertThatThrownBy(() -> service.getDashboard(userId, raceId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.RACE_NOT_FOUND);
+    }
+
+    @Test
     void nextRace_pastStart_countdownClampedToZero() {
         race.setScheduledStartAt(OffsetDateTime.now().minusMinutes(5));
-        when(raceRepository.findUpcomingByStatuses(any(), any())).thenReturn(List.of(race));
+        when(refereeAssignmentRepository.findUpcomingConfirmedRacesByReferee(any(), any(), any())).thenReturn(List.of(race));
         when(raceEntryRepository.findByRaceIdWithHorse(raceId)).thenReturn(List.of());
         when(violationRepository.findByRaceIdAndStatusWithDetails(raceId, ViolationStatus.PENDING))
                 .thenReturn(List.of());

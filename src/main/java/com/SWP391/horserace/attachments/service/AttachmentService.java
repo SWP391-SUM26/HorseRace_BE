@@ -31,6 +31,25 @@ public interface AttachmentService {
     AttachmentResponse upload(UUID userId, MultipartFile file, String ownerEntityType,
                               UUID ownerEntityId, String sensitivityLevel);
 
+    /**
+     * Upload an owner/horse document (owner-types {@code OWNER} / {@code HORSE}). These are ALWAYS
+     * stored RESTRICTED (referee/admin download only). Ownership of the {@code ownerEntityId} must be
+     * enforced by the caller (the /owner/documents endpoint). The generic {@link #upload} path rejects
+     * these owner-types so every owner/horse doc is forced through the ownership-checked endpoint.
+     *
+     * @param ownerEntityType OWNER | HORSE
+     * @param ownerEntityId   the owner's userId (OWNER) or the horse's horseId (HORSE)
+     */
+    AttachmentResponse uploadOwnerDocument(UUID userId, MultipartFile file, String ownerEntityType,
+                                           UUID ownerEntityId);
+
     /** All attachments for a polymorphic owner, newest first. */
     List<AttachmentResponse> listByOwner(String ownerEntityType, UUID ownerEntityId);
+
+    /**
+     * List owner/horse documents ({@code OWNER}/{@code HORSE} owner-types) — the generic
+     * {@link #listByOwner} rejects those types. Ownership must be enforced by the caller
+     * (the /owner/documents endpoint). Newest first.
+     */
+    List<AttachmentResponse> listOwnerDocuments(String ownerEntityType, UUID ownerEntityId);
 }

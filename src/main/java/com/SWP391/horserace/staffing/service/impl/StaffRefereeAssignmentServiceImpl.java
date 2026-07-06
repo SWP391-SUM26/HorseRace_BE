@@ -8,6 +8,7 @@ import com.SWP391.horserace.races.repository.RaceRepository;
 import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
+import com.SWP391.horserace.notifications.service.NotificationService;
 import com.SWP391.horserace.staffing.dto.AssignRefereeRequest;
 import com.SWP391.horserace.staffing.dto.RaceAssignmentFilterRequest;
 import com.SWP391.horserace.staffing.dto.RaceAssignmentResponse;
@@ -39,11 +40,14 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
 
     private static final RefereeAssignmentStatus REVOKED = RefereeAssignmentStatus.REVOKED;
     private static final RefereeAssignmentStatus ASSIGNED = RefereeAssignmentStatus.ASSIGNED;
+    private static final RefereeAssignmentStatus CONFIRMED = RefereeAssignmentStatus.CONFIRMED;
+    private static final RefereeAssignmentStatus DECLINED = RefereeAssignmentStatus.DECLINED;
     private static final String REFEREE_ROLE_CODE = "RACE_REFEREE";
 
     private final RefereeAssignmentRepository refereeAssignmentRepository;
     private final RaceRepository raceRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
     /** ± window (hours) around a race's scheduledStartAt within which a referee is considered busy. */
     @org.springframework.beans.factory.annotation.Value("${app.staffing.referee-conflict-window-hours:2}")
@@ -197,7 +201,9 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 .createdBy(createdBy)
                 .build();
 
-        return mapToAssignmentResponse(refereeAssignmentRepository.save(assignment));
+        RefereeAssignmentResponse response = mapToAssignmentResponse(refereeAssignmentRepository.save(assignment));
+        notifyRefereeAssigned(referee, race); // FR-06 best-effort
+        return response;
     }
 
     // =========================================================================
@@ -225,6 +231,7 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
 
         existing.setStatus(REVOKED);
         refereeAssignmentRepository.save(existing);
+        notifyRefereeRemoved(existing.getReferee(), existing.getRace()); // FR-06: tell the outgoing referee
 
         User createdBy = currentUserId != null
                 ? userRepository.findByUserIdAndDeletedFalse(currentUserId).orElse(null)
@@ -244,7 +251,9 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 .createdBy(createdBy)
                 .build();
 
-        return mapToAssignmentResponse(refereeAssignmentRepository.save(newAssignment));
+        RefereeAssignmentResponse response = mapToAssignmentResponse(refereeAssignmentRepository.save(newAssignment));
+        notifyRefereeAssigned(newReferee, existing.getRace()); // FR-06 best-effort
+        return response;
     }
 
     // =========================================================================
@@ -262,6 +271,89 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
 
         assignment.setStatus(REVOKED);
         refereeAssignmentRepository.save(assignment);
+        notifyRefereeRemoved(assignment.getReferee(), assignment.getRace()); // FR-06
+    }
+
+    /** Best-effort notify a referee they were removed/swapped out of a race panel (FR-06). */
+    private void notifyRefereeRemoved(User referee, Race race) {
+        if (referee == null) {
+            return;
+        }
+        notificationService.notifyUser(referee.getUserId(), "Removed from race panel",
+                "You have been removed from the officiating panel"
+                        + (race != null ? " for race \"" + race.getName() + "\"." : "."));
+    }
+
+    // =========================================================================
+    // REFEREE ACCEPT / DECLINE (CN1) — the referee's own actions
+    // =========================================================================
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<RefereeAssignmentResponse> getMyRaceAssignments(UUID refereeUserId) {
+        if (refereeUserId == null) {
+            return List.of();
+        }
+        return refereeAssignmentRepository.findByReferee_UserIdAndStatusNot(refereeUserId, REVOKED).stream()
+                .map(this::mapToAssignmentResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public RefereeAssignmentResponse acceptAssignment(UUID refereeUserId, UUID refAssignmentId) {
+        RefereeAssignment assignment = loadOwnedPendingAssignment(refereeUserId, refAssignmentId);
+        assignment.setStatus(CONFIRMED);
+        assignment.setRespondedAt(OffsetDateTime.now());
+        return mapToAssignmentResponse(refereeAssignmentRepository.save(assignment));
+    }
+
+    @Override
+    @Transactional
+    public RefereeAssignmentResponse declineAssignment(UUID refereeUserId, UUID refAssignmentId, String reason) {
+        RefereeAssignment assignment = loadOwnedPendingAssignment(refereeUserId, refAssignmentId);
+        assignment.setStatus(DECLINED);
+        assignment.setRespondedAt(OffsetDateTime.now());
+        assignment.setDeclineReason(reason);
+        RefereeAssignmentResponse response = mapToAssignmentResponse(refereeAssignmentRepository.save(assignment));
+
+        // FR-04: notify the admin who assigned so they can reassign the freed slot (best-effort).
+        User admin = assignment.getCreatedBy();
+        Race race = assignment.getRace();
+        User referee = assignment.getReferee();
+        if (admin != null) {
+            String who = referee != null ? referee.getFullName() : "A referee";
+            String where = race != null ? " for race \"" + race.getName() + "\"" : "";
+            String why = (reason != null && !reason.isBlank()) ? " Reason: " + reason : "";
+            notificationService.notifyUser(admin.getUserId(), "Referee declined an assignment",
+                    who + " declined the officiating assignment" + where + "." + why);
+        }
+        return response;
+    }
+
+    /** Load an assignment that must exist, belong to the caller, and still be ASSIGNED (pending). */
+    private RefereeAssignment loadOwnedPendingAssignment(UUID refereeUserId, UUID refAssignmentId) {
+        RefereeAssignment assignment = refereeAssignmentRepository.findById(refAssignmentId)
+                .orElseThrow(() -> new AppException(ErrorCode.REFEREE_ASSIGNMENT_NOT_FOUND));
+        if (assignment.getReferee() == null
+                || !assignment.getReferee().getUserId().equals(refereeUserId)) {
+            throw new AppException(ErrorCode.REFEREE_ASSIGNMENT_NOT_OWNED);
+        }
+        if (assignment.getStatus() != ASSIGNED) {
+            throw new AppException(ErrorCode.REFEREE_ASSIGNMENT_NOT_PENDING);
+        }
+        return assignment;
+    }
+
+    /** Best-effort notify a referee they were assigned/reassigned to officiate a race (FR-06). */
+    private void notifyRefereeAssigned(User referee, Race race) {
+        if (referee == null) {
+            return;
+        }
+        notificationService.notifyUser(referee.getUserId(), "New race assignment",
+                "You have been assigned to officiate"
+                        + (race != null ? " race \"" + race.getName() + "\"." : " a race.")
+                        + " Please accept or decline it.");
     }
 
     // =========================================================================
@@ -298,6 +390,11 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
         if (role == null || !REFEREE_ROLE_CODE.equals(role.getRoleCode())) {
             throw new AppException(ErrorCode.STAFF_NOT_REFEREE);
         }
+        // Risk (a): a referee with an unverified email can't receive the post-race OTP → block at
+        // assignment time (locked decision 2026-07-06) so the failure surfaces early, not post-race.
+        if (!user.isEmailVerified()) {
+            throw new AppException(ErrorCode.REFEREE_EMAIL_UNVERIFIED);
+        }
         return user;
     }
 
@@ -319,6 +416,8 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 .refCode(ra.getRefCode())
                 .status(ra.getStatus() != null ? ra.getStatus().name() : null)
                 .assignedAt(ra.getAssignedAt())
+                .respondedAt(ra.getRespondedAt())
+                .declineReason(ra.getDeclineReason())
                 .createdAt(ra.getCreatedAt())
                 .createdByUserId(createdBy != null ? createdBy.getUserId() : null)
                 .createdByName(createdBy != null ? createdBy.getFullName() : null)
