@@ -113,6 +113,41 @@ class RaceServiceImplTest {
         assertThat(res.getTournamentName()).isEqualTo("Spring Cup");
     }
 
+    // ── #2 date validation ──
+
+    private RaceRequest reqDates(OffsetDateTime start, OffsetDateTime cutoff) {
+        return new RaceRequest(tournamentId, "R", "FLAT", 1200, "GOOD", "SUNNY", start, cutoff, 8, null, null, null);
+    }
+
+    @Test
+    void createRace_predictionCutoffAfterStart_throwsInvalidDateRange() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        var now = OffsetDateTime.now();
+        assertThatThrownBy(() -> service.createRace(currentUserId, reqDates(now.plusDays(1), now.plusDays(3))))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.INVALID_DATE_RANGE);
+    }
+
+    @Test
+    void createRace_scheduledStartInPast_throwsDateInPast() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        assertThatThrownBy(() -> service.createRace(currentUserId, reqDates(OffsetDateTime.now().minusDays(2), null)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.DATE_IN_PAST);
+    }
+
+    @Test
+    void createRace_scheduledStartToday_passes() {
+        // Boundary (Risk c): today accepted.
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(raceRepository.count()).thenReturn(0L);
+        when(raceRepository.existsByRaceCode(any())).thenReturn(false);
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+        var now = OffsetDateTime.now();
+        RaceResponse res = service.createRace(currentUserId, reqDates(now, now));
+        assertThat(res).isNotNull();
+    }
+
     // ── update ──
 
     @Test

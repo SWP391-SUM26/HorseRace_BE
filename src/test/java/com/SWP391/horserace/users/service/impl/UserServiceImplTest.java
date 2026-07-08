@@ -388,6 +388,62 @@ class UserServiceImplTest {
     }
 
     @Test
+    void createUser_duplicatePhone_throwsPhoneAlreadyExists() {
+        Role role = Role.builder().roleCode("JOCKEY").build();
+        when(userRepository.existsByEmail("p@example.com")).thenReturn(false);
+        when(roleRepository.findByRoleCode("JOCKEY")).thenReturn(Optional.of(role));
+        when(userRepository.existsByPhone("0912345678")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.createUser(
+                new CreateUserRequest("P", "p@example.com", "JOCKEY", "0912345678")))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void createUser_nullPhone_skipsCheck() {
+        Role role = Role.builder().roleCode("JOCKEY").build();
+        when(userRepository.existsByEmail(any())).thenReturn(false);
+        when(roleRepository.findByRoleCode("JOCKEY")).thenReturn(Optional.of(role));
+        when(passwordEncoder.encode(any())).thenReturn("{bcrypt}x");
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.createUser(new CreateUserRequest("N", "n@example.com", "JOCKEY", null));
+
+        verify(userRepository, never()).existsByPhone(any());
+    }
+
+    @Test
+    void updateUserById_phoneTakenByAnother_throws() {
+        UUID id = UUID.randomUUID();
+        User user = User.builder().userId(id).build();
+        when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
+        when(userRepository.existsByPhoneAndUserIdNot("0912345678", id)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.updateUserById(id,
+                new UpdateProfileRequest(null, "0912345678", null)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void updateMyProfile_keepingOwnPhone_succeeds() {
+        UUID id = UUID.randomUUID();
+        User user = User.builder().userId(id).phone("0912345678").build();
+        when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
+        // The user's own phone is not "taken by another" -> guard passes.
+        when(userRepository.existsByPhoneAndUserIdNot("0912345678", id)).thenReturn(false);
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        UserResponse res = service.updateMyProfile(id,
+                new UpdateProfileRequest(null, "0912345678", null));
+
+        assertThat(res.getPhone()).isEqualTo("0912345678");
+    }
+
+    @Test
     void createUser_badRoleCode_throwsRoleNotExisted() {
         when(userRepository.existsByEmail("x@example.com")).thenReturn(false);
         when(roleRepository.findByRoleCode("NOPE")).thenReturn(Optional.empty());

@@ -23,6 +23,8 @@ public class RaceResultsResponse {
     /** Stewards' report / race notes — published with the results (FE-v2 race report). */
     private String stewardsReport;
     private List<OrderRow> order;
+    /** Horses APPROVED into this tournament that did NOT get an entry in this race (#8). */
+    private List<RegisteredNotEnteredRow> registeredNotEntered;
 
     /** One row of the finish order. */
     @Data
@@ -37,5 +39,16 @@ public class RaceResultsResponse {
         private Long finishTimeMs;
         private BigDecimal lengthsBehind;
         private String odds;
+    }
+
+    /** A horse APPROVED into this tournament that did NOT get an entry in this race (#8). */
+    @Data
+    @Builder
+    public static class RegisteredNotEnteredRow {
+        private UUID registrationId;
+        private String registrationCode;
+        private UUID horseId;
+        private String horseName;
+        private String ownerName;
     }
 }

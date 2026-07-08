@@ -13,6 +13,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -114,6 +115,19 @@ public class RegistrationController {
                 .success(true)
                 .message("Registration withdrawn")
                 .data(registrationService.withdrawRegistration(userId, id))
+                .build();
+    }
+
+    /** DELETE /api/v1/registrations/{id} — referee/admin soft-removes a registration (status REMOVED). */
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
+    public ApiResponse<Void> deleteRegistration(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID id) {
+        registrationService.deleteRegistration(userId, id);
+        return ApiResponse.<Void>builder()
+                .success(true)
+                .message("Registration removed")
                 .build();
     }
 }

@@ -2,6 +2,7 @@ package com.SWP391.horserace.auth.service.impl;
 
 import com.SWP391.horserace.auth.dto.RegisterJockeyRequest;
 import com.SWP391.horserace.auth.dto.RegisterResponse;
+import com.SWP391.horserace.auth.dto.RegisterSpectatorRequest;
 import com.SWP391.horserace.attachments.service.AttachmentService;
 import com.SWP391.horserace.auth.service.GoogleTokenVerifier;
 import com.SWP391.horserace.auth.service.JwtService;
@@ -98,6 +99,20 @@ class AuthServiceImplTest {
         // Crucially: NO tokens issued.
         verify(jwtService, never()).generateAccessToken(any());
         verify(refreshTokenService, never()).issue(any(), any());
+    }
+
+    @Test
+    void registerSpectator_duplicatePhone_throws() {
+        RegisterSpectatorRequest request = new RegisterSpectatorRequest(
+                "Sam Spectator", "Sam@Example.com", "0912345678", "Passw0rd!", "Passw0rd!", true);
+        when(userRepository.existsByEmail("sam@example.com")).thenReturn(false);
+        when(userRepository.existsByPhone("0912345678")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.registerSpectator(request, "ua"))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any());
     }
 
     @Test

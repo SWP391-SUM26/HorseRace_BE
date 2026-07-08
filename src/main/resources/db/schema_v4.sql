@@ -108,7 +108,7 @@ CREATE TABLE app_user (
     user_code     VARCHAR(50) UNIQUE NOT NULL,
     full_name     VARCHAR(255),
     email         VARCHAR(255) UNIQUE NOT NULL,
-    phone         VARCHAR(30),
+    phone         VARCHAR(30) UNIQUE,  -- unique when set; many NULLs allowed (NULLs distinct by default)
     password_hash TEXT NOT NULL,
     avatar_url    TEXT,
     status        VARCHAR(30) NOT NULL DEFAULT 'ACTIVE'
@@ -443,7 +443,7 @@ CREATE TABLE tournament_registration (
     registration_code   VARCHAR(50) UNIQUE NOT NULL,
     status              VARCHAR(50) NOT NULL DEFAULT 'SUBMITTED'
                         CHECK (status IN ('DRAFT', 'SUBMITTED', 'UNDER_REVIEW',
-                                          'APPROVED', 'REJECTED', 'WITHDRAWN')),
+                                          'APPROVED', 'REJECTED', 'WITHDRAWN', 'REMOVED')),
     submitted_at        TIMESTAMPTZ,
     reviewed_at         TIMESTAMPTZ,
     approved_by_user_id UUID REFERENCES app_user(user_id),

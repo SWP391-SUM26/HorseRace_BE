@@ -147,6 +147,23 @@ class RefereeApplicationServiceImplTest {
     }
 
     @Test
+    void approve_duplicatePhone_throws() {
+        MembershipApplication app = pendingOwner();
+        app.setPhone("0912345678");
+        Role ownerRole = Role.builder().roleId(UUID.randomUUID()).roleCode("HORSE_OWNER").build();
+        when(applicationRepository.findById(app.getApplicationId())).thenReturn(Optional.of(app));
+        when(roleRepository.findByRoleCode("HORSE_OWNER")).thenReturn(Optional.of(ownerRole));
+        when(userRepository.findByEmailAndDeletedFalse(app.getEmail())).thenReturn(Optional.empty());
+        when(userRepository.existsByPhone("0912345678")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.approve(app.getApplicationId(), reviewerId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
     void approve_alreadyDecided_throws() {
         MembershipApplication app = pendingOwner();
         app.setStatus(ApplicationStatus.APPROVED);

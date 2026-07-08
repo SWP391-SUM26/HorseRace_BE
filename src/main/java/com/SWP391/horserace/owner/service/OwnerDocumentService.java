@@ -26,4 +26,8 @@ public interface OwnerDocumentService {
 
     /** A horse's documents — the horse must belong to the caller (ownership-checked). */
     java.util.List<AttachmentResponse> listHorseDocuments(UUID callerId, UUID horseId);
+
+    /** Stream one of the caller's own OWNER/HORSE documents; uniform FILE_NOT_FOUND for anything else (#12). */
+    com.SWP391.horserace.attachments.service.AttachmentService.AttachmentDownload downloadOwnerDocument(
+            UUID callerId, UUID attachmentId);
 }

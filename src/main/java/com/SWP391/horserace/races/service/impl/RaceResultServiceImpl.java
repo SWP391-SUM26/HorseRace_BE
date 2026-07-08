@@ -24,6 +24,7 @@ import com.SWP391.horserace.races.repository.RaceRepository;
 import com.SWP391.horserace.races.repository.RaceResultRepository;
 import com.SWP391.horserace.races.repository.RaceResultVersionRepository;
 import com.SWP391.horserace.races.service.RaceResultService;
+import com.SWP391.horserace.registrations.repository.RegistrationRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.users.entity.User;
@@ -55,6 +56,7 @@ public class RaceResultServiceImpl implements RaceResultService {
     private final com.SWP391.horserace.notifications.service.NotificationService notificationService;
     private final com.SWP391.horserace.staffing.service.RefereeSubmissionCodeService refereeSubmissionCodeService;
     private final com.SWP391.horserace.violations.service.ViolationService violationService;
+    private final RegistrationRepository registrationRepository;
 
     private static final String ADMIN_ROLE_CODE = "ADMIN";
 
@@ -346,6 +348,20 @@ public class RaceResultServiceImpl implements RaceResultService {
                 })
                 .toList();
 
+        // #8: horses APPROVED into this tournament but with no entry in THIS race. The NOT-EXISTS /
+        // APPROVED-only filter lives in JPQL (findApprovedNotEnteredInRace) — E2E-covered, not unit-reachable.
+        UUID tournamentId = race.getTournament() != null ? race.getTournament().getTournamentId() : null;
+        List<RaceResultsResponse.RegisteredNotEnteredRow> registeredNotEntered = tournamentId == null ? List.of()
+                : registrationRepository.findApprovedNotEnteredInRace(tournamentId, raceId).stream()
+                    .map(r -> RaceResultsResponse.RegisteredNotEnteredRow.builder()
+                            .registrationId(r.getRegistrationId())
+                            .registrationCode(r.getRegistrationCode())
+                            .horseId(r.getHorse() != null ? r.getHorse().getHorseId() : null)
+                            .horseName(r.getHorse() != null ? r.getHorse().getName() : null)
+                            .ownerName(r.getOwner() != null ? r.getOwner().getFullName() : null)
+                            .build())
+                    .toList();
+
         return RaceResultsResponse.builder()
                 .raceId(raceId)
                 .officialityStatus(representativeStatus(results))
@@ -357,6 +373,7 @@ public class RaceResultServiceImpl implements RaceResultService {
                 .photofinishUrl(race.getPhotofinishUrl())
                 .stewardsReport(race.getStewardsReport())
                 .order(order)
+                .registeredNotEntered(registeredNotEntered)
                 .build();
     }
 

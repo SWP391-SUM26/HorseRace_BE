@@ -1,6 +1,8 @@
 package com.SWP391.horserace.owner.service.impl;
 
 import com.SWP391.horserace.attachments.dto.AttachmentResponse;
+import com.SWP391.horserace.attachments.entity.Attachment;
+import com.SWP391.horserace.attachments.repository.AttachmentRepository;
 import com.SWP391.horserace.attachments.service.AttachmentService;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.repository.HorseRepository;
@@ -33,6 +35,7 @@ class OwnerDocumentServiceImplTest {
     @Mock HorseRepository horseRepository;
     @Mock AttachmentService attachmentService;
     @Mock EntryDocumentReviewService entryDocumentReviewService;
+    @Mock AttachmentRepository attachmentRepository;
 
     private OwnerDocumentServiceImpl service;
 
@@ -41,7 +44,8 @@ class OwnerDocumentServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new OwnerDocumentServiceImpl(horseRepository, attachmentService, entryDocumentReviewService);
+        service = new OwnerDocumentServiceImpl(
+                horseRepository, attachmentService, entryDocumentReviewService, attachmentRepository);
     }
 
     private MultipartFile file() {
@@ -131,5 +135,91 @@ class OwnerDocumentServiceImplTest {
         service.listMyOwnerDocuments(callerId);
 
         verify(attachmentService).listOwnerDocuments("OWNER", callerId);
+    }
+
+    // ── download own OWNER/HORSE document (Feature #12) ──
+
+    private AttachmentService.AttachmentDownload download() {
+        return new AttachmentService.AttachmentDownload(null, "papers.pdf", "application/pdf");
+    }
+
+    @Test
+    void downloadOwnerDocument_ownOwnerDoc_succeeds() {
+        UUID aid = UUID.randomUUID();
+        Attachment att = Attachment.builder()
+                .attachmentId(aid).ownerEntityType("OWNER").ownerEntityId(callerId).build();
+        when(attachmentRepository.findById(aid)).thenReturn(Optional.of(att));
+        when(attachmentService.download(aid)).thenReturn(download());
+
+        AttachmentService.AttachmentDownload d = service.downloadOwnerDocument(callerId, aid);
+
+        assertThat(d.fileName()).isEqualTo("papers.pdf");
+    }
+
+    @Test
+    void downloadOwnerDocument_ownHorseDoc_succeeds() {
+        UUID aid = UUID.randomUUID();
+        Attachment att = Attachment.builder()
+                .attachmentId(aid).ownerEntityType("HORSE").ownerEntityId(horseId).build();
+        Horse horse = Horse.builder().horseId(horseId)
+                .owner(User.builder().userId(callerId).build()).name("Mine").build();
+        when(attachmentRepository.findById(aid)).thenReturn(Optional.of(att));
+        when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
+        when(attachmentService.download(aid)).thenReturn(download());
+
+        AttachmentService.AttachmentDownload d = service.downloadOwnerDocument(callerId, aid);
+
+        assertThat(d.mimeType()).isEqualTo("application/pdf");
+    }
+
+    @Test
+    void downloadOwnerDocument_foreignOwnerDoc_throwsFileNotFound() {
+        UUID aid = UUID.randomUUID();
+        Attachment att = Attachment.builder()
+                .attachmentId(aid).ownerEntityType("OWNER").ownerEntityId(UUID.randomUUID()).build();
+        when(attachmentRepository.findById(aid)).thenReturn(Optional.of(att));
+
+        assertThatThrownBy(() -> service.downloadOwnerDocument(callerId, aid))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.FILE_NOT_FOUND);
+        verify(attachmentService, never()).download(any());
+    }
+
+    @Test
+    void downloadOwnerDocument_foreignHorseDoc_throwsFileNotFound() {
+        UUID aid = UUID.randomUUID();
+        Attachment att = Attachment.builder()
+                .attachmentId(aid).ownerEntityType("HORSE").ownerEntityId(horseId).build();
+        Horse horse = Horse.builder().horseId(horseId)
+                .owner(User.builder().userId(UUID.randomUUID()).build()).name("NotMine").build();
+        when(attachmentRepository.findById(aid)).thenReturn(Optional.of(att));
+        when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
+
+        assertThatThrownBy(() -> service.downloadOwnerDocument(callerId, aid))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.FILE_NOT_FOUND);
+        verify(attachmentService, never()).download(any());
+    }
+
+    @Test
+    void downloadOwnerDocument_wrongType_throwsFileNotFound() {
+        UUID aid = UUID.randomUUID();
+        Attachment att = Attachment.builder()
+                .attachmentId(aid).ownerEntityType("RACE_RESULT").ownerEntityId(UUID.randomUUID()).build();
+        when(attachmentRepository.findById(aid)).thenReturn(Optional.of(att));
+
+        assertThatThrownBy(() -> service.downloadOwnerDocument(callerId, aid))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.FILE_NOT_FOUND);
+    }
+
+    @Test
+    void downloadOwnerDocument_missing_throwsFileNotFound() {
+        UUID aid = UUID.randomUUID();
+        when(attachmentRepository.findById(aid)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.downloadOwnerDocument(callerId, aid))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.FILE_NOT_FOUND);
     }
 }

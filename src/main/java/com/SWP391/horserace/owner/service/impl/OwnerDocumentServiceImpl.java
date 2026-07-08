@@ -22,6 +22,7 @@ public class OwnerDocumentServiceImpl implements OwnerDocumentService {
     private final HorseRepository horseRepository;
     private final AttachmentService attachmentService;
     private final EntryDocumentReviewService entryDocumentReviewService;
+    private final com.SWP391.horserace.attachments.repository.AttachmentRepository attachmentRepository;
 
     @Override
     @Transactional
@@ -74,5 +75,33 @@ public class OwnerDocumentServiceImpl implements OwnerDocumentService {
             throw new AppException(ErrorCode.NOT_HORSE_OWNER);
         }
         return attachmentService.listOwnerDocuments("HORSE", horseId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public com.SWP391.horserace.attachments.service.AttachmentService.AttachmentDownload downloadOwnerDocument(
+            UUID callerId, UUID attachmentId) {
+        if (callerId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        // Uniform FILE_NOT_FOUND for missing / foreign / non-OWNER-HORSE — don't reveal which.
+        com.SWP391.horserace.attachments.entity.Attachment a = attachmentRepository.findById(attachmentId)
+                .orElseThrow(() -> new AppException(ErrorCode.FILE_NOT_FOUND));
+        String type = a.getOwnerEntityType();
+        boolean allowed;
+        if ("OWNER".equals(type)) {
+            allowed = a.getOwnerEntityId() != null && callerId.equals(a.getOwnerEntityId());
+        } else if ("HORSE".equals(type)) {
+            allowed = a.getOwnerEntityId() != null
+                    && horseRepository.findByHorseIdAndDeletedFalse(a.getOwnerEntityId())
+                            .map(h -> h.getOwner() != null && callerId.equals(h.getOwner().getUserId()))
+                            .orElse(false);
+        } else {
+            allowed = false;
+        }
+        if (!allowed) {
+            throw new AppException(ErrorCode.FILE_NOT_FOUND);
+        }
+        return attachmentService.download(attachmentId);
     }
 }
