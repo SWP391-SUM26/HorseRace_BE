@@ -82,6 +82,13 @@ public class StaffServiceImpl implements StaffService {
             throw new AppException(ErrorCode.STAFF_EMAIL_EXISTED);
         }
 
+        // Validate phone uniqueness (only when supplied).
+        String normalizedPhone = request.getPhone() != null ? request.getPhone().trim() : null;
+        if (normalizedPhone != null && !normalizedPhone.isBlank()
+                && userRepository.existsByPhone(normalizedPhone)) {
+            throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+        }
+
         // Resolve the RACE_REFEREE role.
         Role refereeRole = roleRepository.findByRoleCode(REFEREE_ROLE_CODE)
                 .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
@@ -94,7 +101,7 @@ public class StaffServiceImpl implements StaffService {
                 .userCode(userCode)
                 .fullName(request.getFullName().trim())
                 .email(request.getEmail().trim().toLowerCase())
-                .phone(request.getPhone() != null ? request.getPhone().trim() : null)
+                .phone(normalizedPhone)
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .status(UserStatus.ACTIVE)
                 .build();
@@ -122,7 +129,11 @@ public class StaffServiceImpl implements StaffService {
             user.setFullName(request.getFullName().trim());
         }
         if (request.getPhone() != null) {
-            user.setPhone(request.getPhone().trim());
+            String phone = request.getPhone().trim();
+            if (!phone.isBlank() && userRepository.existsByPhoneAndUserIdNot(phone, userId)) {
+                throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+            }
+            user.setPhone(phone);
         }
         if (request.getAvatarUrl() != null) {
             user.setAvatarUrl(request.getAvatarUrl().trim());

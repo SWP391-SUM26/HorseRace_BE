@@ -77,7 +77,7 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
     @Override
     @Transactional(readOnly = true)
     public StaffingDashboardResponse getDashboard() {
-        long totalScheduledRaces = raceRepository.count();
+        long totalScheduledRaces = raceRepository.countByDeletedFalse();
         long assignedRaces = refereeAssignmentRepository.countDistinctAssignedRaces();
         long unassignedRaces = Math.max(0, totalScheduledRaces - assignedRaces);
 
@@ -113,7 +113,9 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
         );
         Pageable pageable = PageRequest.of(filter.getPage(), filter.getSize(), sort);
 
-        Page<Race> racePage = raceRepository.findAll(pageable);
+        // Soft-deleted races must not appear in the staffing list — their detail page 404s (GET
+        // /races/{id} uses findByRaceIdAndDeletedFalse), which reads as "can't load race".
+        Page<Race> racePage = raceRepository.findByDeletedFalse(pageable);
 
         List<UUID> raceIds = racePage.getContent().stream()
                 .map(Race::getRaceId)
@@ -191,17 +193,9 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 ? userRepository.findByUserIdAndDeletedFalse(currentUserId).orElse(null)
                 : null;
 
-        RefereeAssignment assignment = RefereeAssignment.builder()
-                .race(race)
-                .referee(referee)
-                .panelRole(request.getPanelRole())
-                .refCode(generateRefCode())
-                .status(ASSIGNED)
-                .assignedAt(OffsetDateTime.now())
-                .createdBy(createdBy)
-                .build();
+        RefereeAssignment assignment = reactivateOrInsert(race, referee, request.getPanelRole(), createdBy);
 
-        RefereeAssignmentResponse response = mapToAssignmentResponse(refereeAssignmentRepository.save(assignment));
+        RefereeAssignmentResponse response = mapToAssignmentResponse(assignment);
         notifyRefereeAssigned(referee, race); // FR-06 best-effort
         return response;
     }
@@ -241,17 +235,12 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
                 ? request.getPanelRole()
                 : existing.getPanelRole();
 
-        RefereeAssignment newAssignment = RefereeAssignment.builder()
-                .race(existing.getRace())
-                .referee(newReferee)
-                .panelRole(panelRole)
-                .refCode(generateRefCode())
-                .status(ASSIGNED)
-                .assignedAt(OffsetDateTime.now())
-                .createdBy(createdBy)
-                .build();
+        // Reactivate any previously-revoked (race, newReferee) row in place instead of inserting a
+        // duplicate that would collide with UNIQUE(race_id, referee_user_id) (RT-HIGH #6).
+        RefereeAssignment newAssignment = reactivateOrInsert(
+                existing.getRace(), newReferee, panelRole, createdBy);
 
-        RefereeAssignmentResponse response = mapToAssignmentResponse(refereeAssignmentRepository.save(newAssignment));
+        RefereeAssignmentResponse response = mapToAssignmentResponse(newAssignment);
         notifyRefereeAssigned(newReferee, existing.getRace()); // FR-06 best-effort
         return response;
     }
@@ -359,6 +348,44 @@ public class StaffRefereeAssignmentServiceImpl implements StaffRefereeAssignment
     // =========================================================================
     // PRIVATE HELPERS
     // =========================================================================
+
+    /**
+     * Assign {@code referee} to {@code race}: if a prior (race, referee) row exists (INCLUDING a
+     * REVOKED one), reactivate that SAME row in place — preserving its id and audit trail — instead
+     * of inserting a duplicate that would collide with UNIQUE(race_id, referee_user_id). Otherwise
+     * insert a fresh row. Callers must have already rejected an active (non-REVOKED) duplicate.
+     */
+    private RefereeAssignment reactivateOrInsert(Race race, User referee, PanelRole panelRole, User createdBy) {
+        RefereeAssignment assignment = refereeAssignmentRepository
+                .findFirstByRace_RaceIdAndReferee_UserId(race.getRaceId(), referee.getUserId())
+                .orElse(null);
+        if (assignment != null) {
+            // Defensive invariant: callers must have already rejected an ACTIVE (non-REVOKED) duplicate
+            // (REFEREE_ALREADY_ASSIGNED). We only ever reactivate a REVOKED row — never silently reset a
+            // live ASSIGNED/CONFIRMED/DECLINED one.
+            if (assignment.getStatus() != REVOKED) {
+                throw new AppException(ErrorCode.REFEREE_ALREADY_ASSIGNED);
+            }
+            assignment.setStatus(ASSIGNED);
+            assignment.setPanelRole(panelRole);
+            assignment.setRefCode(generateRefCode());
+            assignment.setAssignedAt(OffsetDateTime.now());
+            assignment.setRespondedAt(null);
+            assignment.setDeclineReason(null);
+            assignment.setCreatedBy(createdBy);
+        } else {
+            assignment = RefereeAssignment.builder()
+                    .race(race)
+                    .referee(referee)
+                    .panelRole(panelRole)
+                    .refCode(generateRefCode())
+                    .status(ASSIGNED)
+                    .assignedAt(OffsetDateTime.now())
+                    .createdBy(createdBy)
+                    .build();
+        }
+        return refereeAssignmentRepository.save(assignment);
+    }
 
     /** Generate a unique, human-readable per-race referee code, e.g. {@code REF-3F9A2C}. */
     private String generateRefCode() {
