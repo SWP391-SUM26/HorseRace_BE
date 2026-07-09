@@ -24,7 +24,7 @@ public record CreateUserRequest(
         @NotBlank(message = "roleCode is required")
         String roleCode,
 
-        @Pattern(regexp = "^\\+?[0-9\\-\\s]{7,30}$", message = "Phone number is invalid")
+        @Pattern(regexp = "^$|^(0|\\+84|84)[35789][0-9]{8}$", message = "INVALID_PHONE_FORMAT")
         String phone
 ) {
 }

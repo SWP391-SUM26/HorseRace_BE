@@ -23,6 +23,7 @@ import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.roles.repository.RoleRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
+import com.SWP391.horserace.shared.util.PhoneUtil;
 import com.SWP391.horserace.users.entity.KycStatus;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.entity.UserStatus;
@@ -135,8 +136,10 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public AuthResponse registerSpectator(RegisterSpectatorRequest request, String userAgent) {
         String normalizedEmail = request.email().trim().toLowerCase();
+        // FR-11: normalize the phone (strip spaces/dashes) before the uniqueness check AND store it.
+        String normalizedPhone = PhoneUtil.normalize(request.phone());
         validateEmailAvailable(normalizedEmail);
-        validatePhoneAvailable(request.phone());
+        validatePhoneAvailable(normalizedPhone);
         validatePasswordMatch(request.password(), request.confirmPassword());
 
         Role role = lookupRole("SPECTATOR");
@@ -146,7 +149,7 @@ public class AuthServiceImpl implements AuthService {
                 .userCode(generateUserCode())
                 .fullName(request.fullName().trim())
                 .email(normalizedEmail)
-                .phone(request.phone())
+                .phone(normalizedPhone)
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .status(UserStatus.ACTIVE)
                 .kycStatus(KycStatus.PENDING)
@@ -170,8 +173,10 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public AuthResponse registerOwner(RegisterOwnerRequest request, String userAgent) {
         String normalizedEmail = request.email().trim().toLowerCase();
+        // FR-11: normalize the phone (strip spaces/dashes) before the uniqueness check AND store it.
+        String normalizedPhone = PhoneUtil.normalize(request.contactNumber());
         validateEmailAvailable(normalizedEmail);
-        validatePhoneAvailable(request.contactNumber());
+        validatePhoneAvailable(normalizedPhone);
         validatePasswordMatch(request.password(), request.confirmPassword());
 
         Role role = lookupRole("HORSE_OWNER");
@@ -181,7 +186,7 @@ public class AuthServiceImpl implements AuthService {
                 .userCode(generateUserCode())
                 .fullName(request.fullName().trim())
                 .email(normalizedEmail)
-                .phone(request.contactNumber())
+                .phone(normalizedPhone)
                 .avatarUrl(request.avatarUrl())
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .status(UserStatus.ACTIVE)

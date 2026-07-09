@@ -38,10 +38,15 @@ public record RegisterJockeyRequest(
 
         // ---- Section 1: Personal Identity ----
 
+        // Capped at 120 each so the concatenated "first last" fullName can never exceed the
+        // app_user.full_name VARCHAR(255) column (120 + 1 space + 120 = 241) — else an oversize
+        // combination would slip past validation and die as a raw 409 at persist time.
         @NotBlank(message = "First name is required")
+        @Size(max = 120, message = "First name must not exceed 120 characters")
         String firstName,
 
         @NotBlank(message = "Last name is required")
+        @Size(max = 120, message = "Last name must not exceed 120 characters")
         String lastName,
 
         /** Optional — age in years. */

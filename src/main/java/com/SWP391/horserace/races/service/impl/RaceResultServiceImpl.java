@@ -39,8 +39,10 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -250,6 +252,17 @@ public class RaceResultServiceImpl implements RaceResultService {
     /** Upsert the finish order (one race_result per entry, status PROVISIONAL). */
     private List<RaceResult> upsertResults(Race race, List<RecordResultsRequest.ResultRow> rows) {
         UUID raceId = race.getRaceId();
+
+        // FR-01: guard duplicate finish positions BEFORE any save — under the pessimistic lock so
+        // concurrent writers serialize. Covers within-payload dupes AND payload-vs-persisted.
+        Map<UUID, Integer> desiredByEntry = new HashMap<>();
+        for (RecordResultsRequest.ResultRow row : rows) {
+            if (row.finishPosition() != null) {
+                desiredByEntry.put(row.entryId(), row.finishPosition());
+            }
+        }
+        assertNoDuplicateFinishPositions(raceId, desiredByEntry);
+
         List<RaceResult> saved = new ArrayList<>();
         for (RecordResultsRequest.ResultRow row : rows) {
             RaceEntry entry = raceEntryRepository.findByIdWithDetails(row.entryId())
@@ -284,6 +297,47 @@ public class RaceResultServiceImpl implements RaceResultService {
             saved.add(raceResultRepository.save(result));
         }
         return saved;
+    }
+
+    /**
+     * FR-01: reject duplicate finish positions within a race. Acquires a PESSIMISTIC_WRITE lock on the
+     * parent {@code race} row FIRST (it always exists, so it serializes concurrent writers even when no
+     * {@code race_result} rows exist yet — a {@code FOR UPDATE} over the result rows can't lock
+     * not-yet-inserted rows), then reads the committed results and checks that the union of the desired
+     * positions for THIS operation ({@code desiredByEntry}) plus the persisted positions of every OTHER
+     * entry (not in {@code desiredByEntry}) has no repeated non-null value. A collision →
+     * {@link ErrorCode#DUPLICATE_FINISH_POSITION}. Re-submitting an entry's own position is safe (its
+     * persisted row is excluded because that entry is in {@code desiredByEntry}).
+     */
+    private void assertNoDuplicateFinishPositions(UUID raceId, Map<UUID, Integer> desiredByEntry) {
+        // Serialize on the always-present race row: a second concurrent writer blocks here until the
+        // first commits, then reads the first writer's committed positions below and detects the clash.
+        raceRepository.findByRaceIdForUpdate(raceId);
+
+        List<Integer> effective = new ArrayList<>();
+        // Desired positions from this operation (non-null only).
+        for (Integer pos : desiredByEntry.values()) {
+            if (pos != null) {
+                effective.add(pos);
+            }
+        }
+        // Persisted positions of every OTHER entry (those not being written in this operation).
+        // Read AFTER acquiring the race lock so we see the latest committed rows (READ COMMITTED).
+        for (RaceResult r : raceResultRepository.findByRace_RaceId(raceId)) {
+            UUID entryId = r.getEntry() != null ? r.getEntry().getEntryId() : null;
+            if (entryId != null && desiredByEntry.containsKey(entryId)) {
+                continue; // this entry's position is being (re)set by the current operation
+            }
+            if (r.getFinishPosition() != null) {
+                effective.add(r.getFinishPosition());
+            }
+        }
+        Set<Integer> seen = new HashSet<>();
+        for (Integer pos : effective) {
+            if (!seen.add(pos)) {
+                throw new AppException(ErrorCode.DUPLICATE_FINISH_POSITION);
+            }
+        }
     }
 
     /** Best-effort in-app notification to every active ADMIN (never throws to the caller). */
@@ -394,6 +448,14 @@ public class RaceResultServiceImpl implements RaceResultService {
         // Result must belong to the race named in the path.
         if (result.getRace() == null || !race.getRaceId().equals(result.getRace().getRaceId())) {
             throw new AppException(ErrorCode.RESULT_ENTRY_RACE_MISMATCH);
+        }
+
+        // FR-01: a new finish position must not collide with another result in the race (checked under
+        // the pessimistic lock, BEFORE any version/row write). Re-submitting this row's own position is
+        // fine — the guard excludes the target entry's persisted row.
+        if (request != null && request.finishPosition() != null && result.getEntry() != null) {
+            assertNoDuplicateFinishPositions(raceId,
+                    Map.of(result.getEntry().getEntryId(), request.finishPosition()));
         }
 
         User changedBy = userRepository.findByUserIdAndDeletedFalse(currentUserId)

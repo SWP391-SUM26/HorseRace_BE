@@ -25,6 +25,13 @@ public interface RaceResultRepository extends JpaRepository<RaceResult, UUID>, J
     Optional<RaceResult> findByEntry_EntryId(UUID entryId);
 
     /**
+     * All result rows of a race with the entry fetched — settlement reads {@code entry.entryId} +
+     * {@code finishPosition} to build the finishing order without triggering lazy loads.
+     */
+    @Query("SELECT rr FROM RaceResult rr JOIN FETCH rr.entry e WHERE rr.race.raceId = :raceId")
+    List<RaceResult> findByRace_RaceId(@Param("raceId") UUID raceId);
+
+    /**
      * All result rows of a race, with entry + registration + horse eagerly fetched so the
      * read endpoint can build the finish order without lazy-loading (FE-v2 Results, mục 5).
      */

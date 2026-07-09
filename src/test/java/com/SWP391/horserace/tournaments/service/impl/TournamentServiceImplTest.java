@@ -18,6 +18,7 @@ import com.SWP391.horserace.venues.repository.VenueRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -318,5 +319,76 @@ class TournamentServiceImplTest {
         // RT-HIGH: dates optional — null-safe validation must not NPE/400.
         TournamentResponse res = service.createTournament(TournamentRequest.builder().name("Cup").build(), userId);
         assertThat(res).isNotNull();
+    }
+
+    // ── FR-12: registration window within event window ──
+
+    @Test
+    void createTournament_rejectsRegistrationWindowOutsideEventWindow() {
+        stubCreateOk();
+        var now = java.time.OffsetDateTime.now();
+        TournamentRequest req = TournamentRequest.builder().name("Cup")
+                .startDate(now.plusDays(5)).endDate(now.plusDays(10))
+                .registrationOpenAt(now.plusDays(1)) // opens BEFORE the tournament starts
+                .build();
+        assertThatThrownBy(() -> service.createTournament(req, userId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.INVALID_REGISTRATION_WINDOW);
+    }
+
+    @Test
+    void createTournament_allowsRegistrationWindowInsideEventWindow() {
+        stubCreateOk();
+        var now = java.time.OffsetDateTime.now();
+        TournamentRequest req = TournamentRequest.builder().name("Cup")
+                .startDate(now.plusDays(5)).endDate(now.plusDays(10))
+                .registrationOpenAt(now.plusDays(5)).registrationCloseAt(now.plusDays(9))
+                .build();
+        assertThat(service.createTournament(req, userId)).isNotNull();
+    }
+
+    @Test
+    void updateTournament_appliesSameRegistrationWindowRule() {
+        UUID id = UUID.randomUUID();
+        Tournament existing = Tournament.builder()
+                .tournamentId(id).tournamentCode("TRN00007").name("Old").status(TournamentStatus.DRAFT).build();
+        when(tournamentRepository.findById(id)).thenReturn(Optional.of(existing));
+        var now = java.time.OffsetDateTime.now();
+        TournamentRequest req = TournamentRequest.builder().name("New")
+                .startDate(now.plusDays(5)).endDate(now.plusDays(10))
+                .registrationCloseAt(now.plusDays(20)) // closes AFTER the tournament ends
+                .build();
+        assertThatThrownBy(() -> service.updateTournament(id, req))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.INVALID_REGISTRATION_WINDOW);
+    }
+
+    // ── FR-03: forced DRAFT on create ──
+
+    @Test
+    void createTournament_forcesDraftStatus_ignoringClientStatus() {
+        stubCreateOk();
+        // Client tries to create directly in COMPLETED — the service must ignore it and force DRAFT.
+        TournamentRequest req = TournamentRequest.builder()
+                .name("Cup").status(TournamentStatus.COMPLETED).build();
+
+        service.createTournament(req, userId);
+
+        ArgumentCaptor<Tournament> captor = ArgumentCaptor.forClass(Tournament.class);
+        verify(tournamentRepository).save(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo(TournamentStatus.DRAFT);
+    }
+
+    // ── FR-02: non-negative purse persists unchanged (never silently coerced) ──
+
+    @Test
+    void createTournament_persistsNonNegativePurse() {
+        stubCreateOk();
+        TournamentRequest req = TournamentRequest.builder()
+                .name("Cup").totalPurse(new BigDecimal("500000.00")).build();
+
+        TournamentResponse res = service.createTournament(req, userId);
+
+        assertThat(res.getTotalPurse()).isEqualByComparingTo("500000.00");
     }
 }

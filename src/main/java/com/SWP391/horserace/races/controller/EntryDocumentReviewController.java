@@ -4,6 +4,7 @@ import com.SWP391.horserace.races.dto.EntryReviewResponse;
 import com.SWP391.horserace.races.dto.RejectEntryRequest;
 import com.SWP391.horserace.races.service.EntryDocumentReviewService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -61,7 +62,7 @@ public class EntryDocumentReviewController {
             @AuthenticationPrincipal UUID callerId,
             @PathVariable("raceId") UUID raceId,
             @PathVariable("entryId") UUID entryId,
-            @RequestBody RejectEntryRequest request) {
+            @Valid @RequestBody RejectEntryRequest request) {
         return ApiResponse.<EntryReviewResponse>builder()
                 .success(true)
                 .message("Entry documents rejected")

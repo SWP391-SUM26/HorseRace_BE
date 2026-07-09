@@ -6,6 +6,7 @@ import com.SWP391.horserace.roles.repository.RoleRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.shared.storage.ImageUploadService;
+import com.SWP391.horserace.shared.util.PhoneUtil;
 import com.SWP391.horserace.users.dto.ChangeRoleRequest;
 import com.SWP391.horserace.users.dto.ChangeStatusRequest;
 import com.SWP391.horserace.users.dto.CreateUserRequest;
@@ -179,7 +180,8 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
 
         // Reject a duplicate phone before the DB UNIQUE is the last resort (only when supplied).
-        String normalizedPhone = request.phone() != null ? request.phone().trim() : null;
+        // FR-11: normalize (strip spaces/dashes) before the check AND store the normalized value.
+        String normalizedPhone = PhoneUtil.normalize(request.phone());
         if (normalizedPhone != null && !normalizedPhone.isBlank()
                 && userRepository.existsByPhone(normalizedPhone)) {
             throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
@@ -256,7 +258,7 @@ public class UserServiceImpl implements UserService {
             user.setFullName(request.fullName().trim());
         }
         if (request.phone() != null) {
-            String phone = request.phone().trim();
+            String phone = PhoneUtil.normalize(request.phone());
             if (!phone.isBlank() && userRepository.existsByPhoneAndUserIdNot(phone, userId)) {
                 throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
             }
@@ -280,7 +282,7 @@ public class UserServiceImpl implements UserService {
             user.setFullName(request.fullName().trim());
         }
         if (request.phone() != null) {
-            String phone = request.phone().trim();
+            String phone = PhoneUtil.normalize(request.phone());
             if (!phone.isBlank() && userRepository.existsByPhoneAndUserIdNot(phone, id)) {
                 throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
             }

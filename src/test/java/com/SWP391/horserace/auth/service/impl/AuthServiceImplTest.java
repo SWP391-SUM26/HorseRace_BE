@@ -116,6 +116,22 @@ class AuthServiceImplTest {
     }
 
     @Test
+    void registerSpectator_normalizesPhone_soFormattingCannotBypassUnique() {
+        // FR-11: dashed/spaced phone stripped to digits before existsByPhone, so a formatted
+        // variant of an already-registered number is still rejected as a duplicate.
+        RegisterSpectatorRequest request = new RegisterSpectatorRequest(
+                "Sam Spectator", "Sam@Example.com", "09 12-345-678", "Passw0rd!", "Passw0rd!", true);
+        when(userRepository.existsByEmail("sam@example.com")).thenReturn(false);
+        when(userRepository.existsByPhone("0912345678")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.registerSpectator(request, "ua"))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     void login_pendingJockey_isBlockedWithPendingApprovalError() {
         User pending = User.builder()
                 .email("jockey@example.com").passwordHash("{bcrypt}hash")

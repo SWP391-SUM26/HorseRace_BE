@@ -32,6 +32,18 @@ public interface RaceRepository extends JpaRepository<Race, UUID>, JpaSpecificat
     Optional<Race> findByIdWithTournament(@Param("id") UUID id);
 
     /**
+     * Pessimistic-write lock on the parent race row — used to serialize concurrent finish-position
+     * writers (record / referee report / admin override / single update). Locking the always-present
+     * {@code race} row (not the {@code race_result} rows) is what actually serializes: {@code SELECT
+     * ... FOR UPDATE} over {@code race_result} cannot lock rows that don't exist yet, so the
+     * first-write case would otherwise take no lock and two concurrent writers could each insert a
+     * duplicate finish position.
+     */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM Race r WHERE r.raceId = :id")
+    Optional<Race> findByRaceIdForUpdate(@Param("id") UUID id);
+
+    /**
      * Races a horse can still be entered into (Enter Race modal): an APPROVED registration exists
      * for the horse in the race's tournament, the race is open (SCHEDULED/OPEN), and the horse is
      * not already entered in that race.

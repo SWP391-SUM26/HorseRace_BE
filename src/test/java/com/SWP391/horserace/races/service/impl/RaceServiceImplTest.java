@@ -148,6 +148,57 @@ class RaceServiceImplTest {
         assertThat(res).isNotNull();
     }
 
+    // ── FR-12 min ≤ max participant range ──
+
+    @Test
+    void createRace_rejectsMinGreaterThanMax() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        // params: (…, maxParticipants=4, minParticipants=8, …) → min > max
+        RaceRequest req = new RaceRequest(tournamentId, "R", "FLAT", 1200, "GOOD", "SUNNY",
+                null, null, 4, 8, null, null);
+        assertThatThrownBy(() -> service.createRace(currentUserId, req))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_PARTICIPANT_RANGE);
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void createRace_allowsMinEqualMax() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(raceRepository.count()).thenReturn(0L);
+        when(raceRepository.existsByRaceCode(any())).thenReturn(false);
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+        RaceRequest req = new RaceRequest(tournamentId, "R", "FLAT", 1200, "GOOD", "SUNNY",
+                null, null, 5, 5, null, null); // max == min
+        assertThat(service.createRace(currentUserId, req)).isNotNull();
+    }
+
+    @Test
+    void createRace_allowsMinLessThanMax() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(raceRepository.count()).thenReturn(0L);
+        when(raceRepository.existsByRaceCode(any())).thenReturn(false);
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+        RaceRequest req = new RaceRequest(tournamentId, "R", "FLAT", 1200, "GOOD", "SUNNY",
+                null, null, 8, 2, null, null); // max=8, min=2
+        assertThat(service.createRace(currentUserId, req)).isNotNull();
+    }
+
+    @Test
+    void updateRace_rejectsMinGreaterThanMax_onEffectiveValues() {
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.SCHEDULED).maxParticipants(4).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+        // supply only min=8 (max stays existing 4) → effective min > max
+        RaceRequest req = new RaceRequest(tournamentId, null, null, null, null, null,
+                null, null, null, 8, null, null);
+        assertThatThrownBy(() -> service.updateRace(currentUserId, id, req))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_PARTICIPANT_RANGE);
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
     // ── update ──
 
     @Test
@@ -225,6 +276,56 @@ class RaceServiceImplTest {
 
         OffsetDateTime start = OffsetDateTime.now().plusDays(1);
         OffsetDateTime cutoff = start.plusHours(1); // cutoff AFTER start → race would be un-startable
+
+        assertThatThrownBy(() -> service.scheduleRace(currentUserId, id, new ScheduleRaceRequest(start, cutoff)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_TIMING);
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void scheduleRace_rejectsPastStart() {
+        // FR-04: a past scheduledStartAt is rejected; status is not flipped to OPEN and nothing is saved.
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.SCHEDULED).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+
+        OffsetDateTime pastStart = OffsetDateTime.now().minusDays(1);
+
+        assertThatThrownBy(() -> service.scheduleRace(currentUserId, id, new ScheduleRaceRequest(pastStart, null)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.DATE_IN_PAST);
+        assertThat(race.getStatus()).isEqualTo(RaceStatus.SCHEDULED);
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void scheduleRace_allowsTodayOrFutureStart() {
+        // Boundary: today must pass the past-check (mirrors validateDates day-granularity).
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.SCHEDULED).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+
+        OffsetDateTime today = OffsetDateTime.now();
+        RaceResponse res = service.scheduleRace(currentUserId, id, new ScheduleRaceRequest(today, null));
+
+        assertThat(res.getStatus()).isEqualTo(RaceStatus.OPEN);
+        assertThat(res.getScheduledStartAt()).isEqualTo(today);
+    }
+
+    @Test
+    void scheduleRace_stillEnforcesCutoffBeforeStart() {
+        // Regression: the past-check must not pre-empt the existing cutoff-before-start guard.
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.SCHEDULED).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+
+        OffsetDateTime start = OffsetDateTime.now().plusDays(1);
+        OffsetDateTime cutoff = start.plusHours(1); // cutoff AFTER start → un-startable
 
         assertThatThrownBy(() -> service.scheduleRace(currentUserId, id, new ScheduleRaceRequest(start, cutoff)))
                 .isInstanceOf(AppException.class)

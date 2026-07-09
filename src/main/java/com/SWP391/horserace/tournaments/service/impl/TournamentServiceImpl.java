@@ -66,7 +66,9 @@ public class TournamentServiceImpl implements TournamentService {
                 .totalPurse(request.getTotalPurse())
                 .entryCap(request.getEntryCap())
                 .eligibility(toEligibilityEntity(request.getEligibility()))
-                .status(request.getStatus() != null ? request.getStatus() : TournamentStatus.DRAFT)
+                // FR-03: a tournament is ALWAYS created in DRAFT — any client-supplied status is ignored.
+                // The publish→open→…→complete state machine is the only legal path onward.
+                .status(TournamentStatus.DRAFT)
                 .createdBy(user)
                 .build();
 
@@ -305,6 +307,16 @@ public class TournamentServiceImpl implements TournamentService {
         requireNotPast(r.getEndDate(), today);
         requireNotPast(r.getRegistrationOpenAt(), today);
         requireNotPast(r.getRegistrationCloseAt(), today);
+        // FR-12: the registration window must fall WITHIN the tournament window (day granularity).
+        // Only compared when the relevant operands are present (dates are optional).
+        if (r.getStartDate() != null && r.getRegistrationOpenAt() != null
+                && appDate(r.getRegistrationOpenAt()).isBefore(appDate(r.getStartDate()))) {
+            throw new AppException(ErrorCode.INVALID_REGISTRATION_WINDOW);
+        }
+        if (r.getEndDate() != null && r.getRegistrationCloseAt() != null
+                && appDate(r.getRegistrationCloseAt()).isAfter(appDate(r.getEndDate()))) {
+            throw new AppException(ErrorCode.INVALID_REGISTRATION_WINDOW);
+        }
     }
 
     private void requireNotPast(OffsetDateTime date, java.time.LocalDate today) {

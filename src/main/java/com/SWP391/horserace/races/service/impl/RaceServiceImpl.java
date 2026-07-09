@@ -134,6 +134,12 @@ public class RaceServiceImpl implements RaceService {
 
         validateDates(request.scheduledStartAt(), request.predictionCutoffAt());
 
+        // FR-12: min must not exceed max when both are supplied.
+        if (request.minParticipants() != null && request.maxParticipants() != null
+                && request.minParticipants() > request.maxParticipants()) {
+            throw new AppException(ErrorCode.RACE_INVALID_PARTICIPANT_RANGE);
+        }
+
         Race race = Race.builder()
                 .tournament(tournament)
                 .raceCode(generateRaceCode())
@@ -205,6 +211,13 @@ public class RaceServiceImpl implements RaceService {
             throw new AppException(ErrorCode.DATE_IN_PAST);
         }
 
+        // FR-12: min must not exceed max on the EFFECTIVE (new-or-existing) values.
+        Integer effMin = request.minParticipants() != null ? request.minParticipants() : race.getMinParticipants();
+        Integer effMax = request.maxParticipants() != null ? request.maxParticipants() : race.getMaxParticipants();
+        if (effMin != null && effMax != null && effMin > effMax) {
+            throw new AppException(ErrorCode.RACE_INVALID_PARTICIPANT_RANGE);
+        }
+
         // Partial update: apply only non-null fields. Tournament and code are immutable.
         if (request.name() != null) race.setName(request.name());
         if (request.raceType() != null) race.setRaceType(request.raceType());
@@ -247,6 +260,12 @@ public class RaceServiceImpl implements RaceService {
         }
 
         race.setScheduledStartAt(request.scheduledStartAt());
+        // FR-04: reject a past start (mirrors create/update). Day-granularity in APP_ZONE so a
+        // same-day (today) start sent as T00:00:00Z is accepted, not rejected.
+        if (race.getScheduledStartAt() != null
+                && appDate(race.getScheduledStartAt()).isBefore(java.time.LocalDate.now(APP_ZONE))) {
+            throw new AppException(ErrorCode.DATE_IN_PAST);
+        }
         // predictionCutoffAt is optional — only overwrite when supplied so an omitted
         // value doesn't wipe a cutoff already set at create time.
         if (request.predictionCutoffAt() != null) {

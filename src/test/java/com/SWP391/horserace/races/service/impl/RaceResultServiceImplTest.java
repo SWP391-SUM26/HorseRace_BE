@@ -54,6 +54,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -216,6 +217,160 @@ class RaceResultServiceImplTest {
                 .isInstanceOf(AppException.class)
                 .extracting(e -> ((AppException) e).getErrorCode())
                 .isEqualTo(ErrorCode.RACE_NOT_FOUND);
+    }
+
+    // ── FR-01: duplicate finish-position dedup (loaded under the pessimistic lock) ──
+
+    @Test
+    void recordResults_rejectsDuplicateFinishPositionWithinPayload() {
+        // Two rows in one payload share finishPosition 1 → reject, persist nothing.
+        RecordResultsRequest req = new RecordResultsRequest(List.of(
+                new RecordResultsRequest.ResultRow(entryId, 1, 91230L, BigDecimal.ZERO, new BigDecimal("100.0")),
+                new RecordResultsRequest.ResultRow(entryId2, 1, 91500L, BigDecimal.ONE, new BigDecimal("90.0"))),
+                "4821");
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(raceResultRepository.findByRace_RaceId(raceId)).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.recordResults(userId, raceId, req))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.DUPLICATE_FINISH_POSITION);
+
+        verify(raceResultRepository, never()).save(any());
+    }
+
+    @Test
+    void recordResults_rejectsFinishPositionClashWithPersistedRow() {
+        // Payload puts entry-B at position 1, but entry-A (not in this payload) already holds position 1.
+        RaceResult persistedA = RaceResult.builder()
+                .resultId(UUID.randomUUID()).race(race).entry(entry)
+                .finishPosition(1).officialityStatus(OfficialityStatus.PROVISIONAL).build();
+
+        RecordResultsRequest req = new RecordResultsRequest(List.of(
+                new RecordResultsRequest.ResultRow(entryId2, 1, 91500L, BigDecimal.ONE, new BigDecimal("90.0"))),
+                "4821");
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(raceResultRepository.findByRace_RaceId(raceId)).thenReturn(List.of(persistedA));
+
+        assertThatThrownBy(() -> service.recordResults(userId, raceId, req))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.DUPLICATE_FINISH_POSITION);
+
+        verify(raceResultRepository, never()).save(any());
+    }
+
+    @Test
+    void recordResults_allowsDistinctFinishPositions() {
+        UUID entryId3 = UUID.randomUUID();
+        RaceEntry entry3 = RaceEntry.builder()
+                .entryId(entryId3).race(race)
+                .registration(TournamentRegistration.builder()
+                        .horse(Horse.builder().horseId(UUID.randomUUID()).name("Dawn Raider").build()).build())
+                .entryNo(5).build();
+
+        RecordResultsRequest req = new RecordResultsRequest(List.of(
+                new RecordResultsRequest.ResultRow(entryId, 1, 91230L, BigDecimal.ZERO, new BigDecimal("100.0")),
+                new RecordResultsRequest.ResultRow(entryId2, 2, 91500L, BigDecimal.ONE, new BigDecimal("90.0")),
+                new RecordResultsRequest.ResultRow(entryId3, 3, 91800L, new BigDecimal("2.0"), new BigDecimal("80.0"))),
+                "4821");
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(raceResultRepository.findByRace_RaceId(raceId)).thenReturn(List.of());
+        when(raceEntryRepository.findByIdWithDetails(entryId)).thenReturn(Optional.of(entry));
+        when(raceEntryRepository.findByIdWithDetails(entryId2)).thenReturn(Optional.of(entry2));
+        when(raceEntryRepository.findByIdWithDetails(entryId3)).thenReturn(Optional.of(entry3));
+        when(raceResultRepository.findByEntry_EntryId(any())).thenReturn(Optional.empty());
+        when(raceResultRepository.save(any(RaceResult.class))).thenAnswer(inv -> {
+            RaceResult r = inv.getArgument(0);
+            if (r.getResultId() == null) r.setResultId(UUID.randomUUID());
+            return r;
+        });
+        lenient().when(jockeyAssignmentRepository.findAcceptedByEntryIds(any())).thenReturn(List.of());
+
+        List<ResultRowResponse> rows = service.recordResults(userId, raceId, req);
+
+        assertThat(rows).hasSize(3);
+        verify(raceResultRepository, times(3)).save(any(RaceResult.class));
+    }
+
+    @Test
+    void updateResult_rejectsFinishPositionCollidingWithAnotherResult() {
+        // Target result (entry A) is being moved to position 1, but another result (entry B) already has 1.
+        RaceResult target = RaceResult.builder()
+                .resultId(resultId).race(race).entry(entry)
+                .currentVersionNo(1).finishPosition(5)
+                .officialityStatus(OfficialityStatus.PROVISIONAL).build();
+        RaceResult other = RaceResult.builder()
+                .resultId(UUID.randomUUID()).race(race).entry(entry2)
+                .finishPosition(1).officialityStatus(OfficialityStatus.PROVISIONAL).build();
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(raceResultRepository.findById(resultId)).thenReturn(Optional.of(target));
+        when(raceResultRepository.findByRace_RaceId(raceId)).thenReturn(List.of(target, other));
+
+        assertThatThrownBy(() -> service.updateResult(userId, raceId, resultId,
+                new UpdateResultRequest(1, null, null, "Re-read")))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.DUPLICATE_FINISH_POSITION);
+
+        verify(raceResultRepository, never()).save(any());
+        verify(raceResultVersionRepository, never()).save(any());
+    }
+
+    @Test
+    void updateResult_allowsSamePositionOnSameResult() {
+        // Re-submitting the row's OWN current position is not a self-collision.
+        RaceResult target = RaceResult.builder()
+                .resultId(resultId).race(race).entry(entry)
+                .currentVersionNo(1).finishPosition(1)
+                .officialityStatus(OfficialityStatus.PROVISIONAL).build();
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(raceResultRepository.findById(resultId)).thenReturn(Optional.of(target));
+        when(raceResultRepository.findByRace_RaceId(raceId)).thenReturn(List.of(target));
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(certifier));
+        when(raceResultRepository.save(any(RaceResult.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        UpdateResultResponse resp = service.updateResult(userId, raceId, resultId,
+                new UpdateResultRequest(1, null, null, "No change to position"));
+
+        assertThat(resp.getFinishPosition()).isEqualTo(1);
+        verify(raceResultRepository).save(any(RaceResult.class));
+    }
+
+    @Test
+    void recordResults_and_updateResult_serializeViaRaceRowLock() {
+        // The dedup path must acquire the PESSIMISTIC_WRITE lock on the PARENT race row (which always
+        // exists, so it serializes even when no result rows exist yet — a FOR UPDATE over race_result
+        // rows can't lock not-yet-inserted rows), then read the committed results.
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        lenient().when(raceRepository.findByRaceIdForUpdate(raceId)).thenReturn(Optional.of(race));
+        when(raceResultRepository.findByRace_RaceId(raceId)).thenReturn(List.of());
+        when(raceEntryRepository.findByIdWithDetails(entryId)).thenReturn(Optional.of(entry));
+        when(raceResultRepository.findByEntry_EntryId(entryId)).thenReturn(Optional.empty());
+        when(raceResultRepository.save(any(RaceResult.class))).thenAnswer(inv -> {
+            RaceResult r = inv.getArgument(0);
+            if (r.getResultId() == null) r.setResultId(resultId);
+            return r;
+        });
+        lenient().when(jockeyAssignmentRepository.findAcceptedByEntryIds(any())).thenReturn(List.of());
+
+        service.recordResults(userId, raceId, recordReq());
+        verify(raceRepository).findByRaceIdForUpdate(raceId);
+
+        RaceResult target = RaceResult.builder()
+                .resultId(resultId).race(race).entry(entry)
+                .currentVersionNo(1).finishPosition(1)
+                .officialityStatus(OfficialityStatus.PROVISIONAL).build();
+        when(raceResultRepository.findById(resultId)).thenReturn(Optional.of(target));
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(certifier));
+
+        service.updateResult(userId, raceId, resultId, new UpdateResultRequest(2, null, null, "x"));
+        verify(raceRepository, times(2)).findByRaceIdForUpdate(raceId);
     }
 
     // ── get (order + winningTimeMs + fractions) ──

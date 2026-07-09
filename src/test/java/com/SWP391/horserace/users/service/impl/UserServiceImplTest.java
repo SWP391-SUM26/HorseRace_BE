@@ -402,6 +402,22 @@ class UserServiceImplTest {
     }
 
     @Test
+    void createUser_normalizesPhoneBeforeUniquenessCheck() {
+        // FR-11: a dashed/spaced phone is stripped to its digits before the uniqueness check,
+        // so formatting cannot bypass the dedupe against a stored "0912345678".
+        Role role = Role.builder().roleCode("JOCKEY").build();
+        when(userRepository.existsByEmail("p@example.com")).thenReturn(false);
+        when(roleRepository.findByRoleCode("JOCKEY")).thenReturn(Optional.of(role));
+        when(userRepository.existsByPhone("0912345678")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.createUser(
+                new CreateUserRequest("P", "p@example.com", "JOCKEY", "09 12-345-678")))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
     void createUser_nullPhone_skipsCheck() {
         Role role = Role.builder().roleCode("JOCKEY").build();
         when(userRepository.existsByEmail(any())).thenReturn(false);
