@@ -125,6 +125,7 @@ public enum ErrorCode {
     RACE_NOT_READY(8007, "Race is not ready to run", HttpStatus.BAD_REQUEST),
     RACE_INVALID_TIMING(8008, "Registration cutoff must be before the scheduled start time", HttpStatus.BAD_REQUEST),
     RACE_ALREADY_FINALIZED(8009, "Cannot remove a registration whose race has already finished or been made official", HttpStatus.CONFLICT),
+    RACE_INVALID_PARTICIPANT_RANGE(8010, "Minimum participants cannot exceed maximum participants", HttpStatus.BAD_REQUEST),
 
     // ---- prediction system ----
     PREDICTION_NOT_FOUND(9001, "Prediction not found", HttpStatus.NOT_FOUND),
@@ -135,6 +136,8 @@ public enum ErrorCode {
     PREDICTION_CANNOT_CANCEL(9006, "Prediction cannot be cancelled at this stage", HttpStatus.BAD_REQUEST),
     IDEMPOTENCY_KEY_EXISTED(9007, "Idempotency key already exists", HttpStatus.CONFLICT),
     BETTING_POOL_CLOSED(9008, "Betting pool is not open", HttpStatus.BAD_REQUEST),
+    PREDICTION_ENTRY_REQUIRED(9009, "A predicted runner is required for WIN/PLACE/SHOW bets", HttpStatus.BAD_REQUEST),
+    PREDICTION_ENTRY_SCRATCHED(9010, "Cannot bet on a scratched runner", HttpStatus.BAD_REQUEST),
 
     // ---- referee management ----
     REPORT_NOT_FOUND(9101, "Referee report not found", HttpStatus.NOT_FOUND),
@@ -157,6 +160,7 @@ public enum ErrorCode {
     INVALID_DATE_RANGE(9405, "End date cannot be before start date", HttpStatus.BAD_REQUEST),
     DATE_IN_PAST(9406, "Date cannot be in the past", HttpStatus.BAD_REQUEST),
     REGISTRATION_DOCUMENT_REQUIRED(9407, "A vaccination/medical document must be attached before approval", HttpStatus.BAD_REQUEST),
+    INVALID_REGISTRATION_WINDOW(9408, "Registration window must fall within the tournament window", HttpStatus.BAD_REQUEST),
 
     // ---- results record/read/edit/certify (FE-v2 §5) ----
     RESULT_NOT_FOUND(9501, "Race result not found", HttpStatus.NOT_FOUND),
@@ -167,6 +171,7 @@ public enum ErrorCode {
     RESULT_ALREADY_SUBMITTED(9506, "This race report has already been submitted by the referee", HttpStatus.CONFLICT),
     RESULT_UNDER_REVIEW_BLOCKS_CERTIFY(9507, "Cannot certify while a result is under review", HttpStatus.BAD_REQUEST),
     REPORT_RESULTS_REQUIRED(9508, "A race report must include at least one result", HttpStatus.BAD_REQUEST),
+    DUPLICATE_FINISH_POSITION(9509, "Two entries cannot share the same finish position", HttpStatus.BAD_REQUEST),
 
     // ---- violations / inquiries (FE-v2 §3) ----
     VIOLATION_NOT_FOUND(9601, "Violation not found", HttpStatus.NOT_FOUND),
@@ -181,7 +186,23 @@ public enum ErrorCode {
     APPLICATION_NOT_FOUND(9301, "Membership application not found", HttpStatus.NOT_FOUND),
     APPLICATION_ALREADY_DECIDED(9302, "Application has already been decided", HttpStatus.BAD_REQUEST),
     APPLICATION_INVALID_STATUS(9303, "Invalid status transition for this application", HttpStatus.BAD_REQUEST),
-    APPLICATION_ROLE_NOT_FOUND(9304, "Target role for the requested role mapping was not found", HttpStatus.INTERNAL_SERVER_ERROR);
+    APPLICATION_ROLE_NOT_FOUND(9304, "Target role for the requested role mapping was not found", HttpStatus.INTERNAL_SERVER_ERROR),
+
+    // ---- wallet / pari-mutuel betting (pari-mutuel Phase 01) ----
+    WALLET_NOT_FOUND(9801, "Wallet not found", HttpStatus.NOT_FOUND),
+    INSUFFICIENT_BALANCE(9802, "Insufficient wallet balance", HttpStatus.BAD_REQUEST),
+    WALLET_INACTIVE(9803, "Wallet is not active", HttpStatus.BAD_REQUEST),
+    BET_AMOUNT_TOO_LOW(9804, "Minimum bet is 10,000 VND", HttpStatus.BAD_REQUEST),
+    BET_TYPE_UNSUPPORTED(9805, "Only WIN, PLACE, SHOW bets are supported", HttpStatus.BAD_REQUEST),
+    VNPAY_CHECKSUM_INVALID(9806, "VNPay checksum verification failed", HttpStatus.BAD_REQUEST),
+    VNPAY_TXN_NOT_FOUND(9807, "Payment transaction not found", HttpStatus.NOT_FOUND),
+    VNPAY_AMOUNT_MISMATCH(9808, "Payment amount does not match", HttpStatus.BAD_REQUEST),
+    PAYMENT_ALREADY_PROCESSED(9809, "Payment already processed", HttpStatus.CONFLICT),
+    WITHDRAWAL_NOT_FOUND(9810, "Withdrawal request not found", HttpStatus.NOT_FOUND),
+    WITHDRAWAL_INVALID_STATE(9811, "Withdrawal is not in a PENDING state", HttpStatus.BAD_REQUEST),
+    TOPUP_AMOUNT_INVALID(9812, "Top-up amount is invalid", HttpStatus.BAD_REQUEST),
+    WITHDRAWAL_AMOUNT_INVALID(9813, "Withdrawal amount must be at least 10,000 VND", HttpStatus.BAD_REQUEST),
+    PAYMENT_GATEWAY_NOT_CONFIGURED(9814, "Payment gateway is not configured", HttpStatus.SERVICE_UNAVAILABLE);
 
     private final int code;
     private final String message;

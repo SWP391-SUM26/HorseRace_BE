@@ -7,10 +7,12 @@ import com.SWP391.horserace.races.dto.RecordResultsRequest;
 import com.SWP391.horserace.races.dto.ResultRowResponse;
 import com.SWP391.horserace.races.dto.UpdateResultRequest;
 import com.SWP391.horserace.races.dto.UpdateResultResponse;
+import com.SWP391.horserace.predictions.service.SettlementService;
 import com.SWP391.horserace.races.service.RaceResultService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -29,9 +31,11 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/races/{raceId}/results")
 @RequiredArgsConstructor
+@Slf4j
 public class RaceResultController {
 
     private final RaceResultService raceResultService;
+    private final SettlementService settlementService;
 
     /**
      * POST — bulk upsert the finish order (one result per entry, status PROVISIONAL). ADMIN-only:
@@ -69,11 +73,22 @@ public class RaceResultController {
     public ApiResponse<CertifyResultsResponse> certify(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID raceId,
-            @RequestBody CertifyResultsRequest request) {
+            @Valid @RequestBody CertifyResultsRequest request) {
+        CertifyResultsResponse response = raceResultService.certify(userId, raceId, request);
+        // Follow-on, OUTSIDE certify's transaction (it has now committed): settle every pool of the
+        // race. Idempotent + retriable — a failure here leaves the race OFFICIAL with unsettled pools,
+        // which the admin resettle endpoint and the sweep job will drain. Guard it so a settlement blip
+        // can NEVER turn an already-committed certification into an apparent failure to the caller
+        // (retrying certify would then hit RACE_NOT_FINISHED — a misleading dead end).
+        try {
+            settlementService.settleRace(raceId);
+        } catch (RuntimeException e) {
+            log.error("Settlement after certifying race {} failed; sweep/resettle will retry", raceId, e);
+        }
         return ApiResponse.<CertifyResultsResponse>builder()
                 .success(true)
                 .message("Results certified")
-                .data(raceResultService.certify(userId, raceId, request))
+                .data(response)
                 .build();
     }
 
@@ -104,7 +119,7 @@ public class RaceResultController {
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID raceId,
             @PathVariable UUID resultId,
-            @RequestBody UpdateResultRequest request) {
+            @Valid @RequestBody UpdateResultRequest request) {
         return ApiResponse.<UpdateResultResponse>builder()
                 .success(true)
                 .message("Result updated")
