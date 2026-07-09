@@ -56,5 +56,21 @@ public interface JockeyService {
 
     /** Invitation analytics for the caller (FE-v2 jockey contract #11). */
     InvitationInsightsResponse getMyInvitationInsights(UUID callerUserId);
+
+    /**
+     * ADMIN action — approve a PENDING jockey: activates the account
+     * ({@code status=ACTIVE}, {@code kycStatus=VERIFIED}) and marks the matching JOCKEY
+     * {@code membership_application} APPROVED. Throws {@code JOCKEY_NOT_FOUND} if the jockey
+     * is missing/inactive, {@code APPLICATION_NOT_FOUND} if no JOCKEY application exists, or
+     * {@code APPLICATION_ALREADY_DECIDED} if the application is already terminal.
+     */
+    JockeyResponse approveJockey(UUID jockeyUserId, UUID adminUserId);
+
+    /**
+     * ADMIN action — reject a jockey: marks the matching JOCKEY {@code membership_application}
+     * REJECTED with the given (required) reason; the account stays non-active (never ACTIVE),
+     * so the jockey still cannot log in. Same guards as {@link #approveJockey}.
+     */
+    JockeyResponse rejectJockey(UUID jockeyUserId, String reason, UUID adminUserId);
 }
 

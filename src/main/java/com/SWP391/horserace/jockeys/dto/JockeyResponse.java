@@ -43,4 +43,9 @@ public class JockeyResponse {
     private BigDecimal baseFee;
     private BigDecimal prizePercent;
     private String lastTrophy;
+
+    // -- Credential documents (uploaded at jockey registration; admin-reviewed).
+    //    These are auth-gated download PATHS (not bytes) served by /api/v1/attachments/{id}/download. --
+    private String jockeyLicenseUrl;
+    private String fitnessCertificateUrl;
 }

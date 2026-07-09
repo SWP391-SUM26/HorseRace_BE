@@ -15,6 +15,10 @@ import com.SWP391.horserace.jockeys.entity.JockeyProfile;
 import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
 import com.SWP391.horserace.jockeys.repository.JockeyProfileSpecification;
 import com.SWP391.horserace.jockeys.service.JockeyService;
+import com.SWP391.horserace.onboarding.entity.ApplicationStatus;
+import com.SWP391.horserace.onboarding.entity.MembershipApplication;
+import com.SWP391.horserace.onboarding.entity.RequestedRole;
+import com.SWP391.horserace.onboarding.repository.MembershipApplicationRepository;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
 import com.SWP391.horserace.races.entity.RaceResult;
@@ -23,7 +27,10 @@ import com.SWP391.horserace.races.repository.RaceResultRepository;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
+import com.SWP391.horserace.users.entity.KycStatus;
 import com.SWP391.horserace.users.entity.User;
+import com.SWP391.horserace.users.entity.UserStatus;
+import com.SWP391.horserace.users.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -55,6 +62,8 @@ public class JockeyServiceImpl implements JockeyService {
     private final RaceRepository raceRepository;
     private final HorseRepository horseRepository;
     private final RaceResultRepository raceResultRepository;
+    private final MembershipApplicationRepository membershipApplicationRepository;
+    private final UserRepository userRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -141,6 +150,8 @@ public class JockeyServiceImpl implements JockeyService {
                 .baseFee(profile.getBaseFee())
                 .prizePercent(profile.getPrizePercent())
                 .lastTrophy(profile.getLastTrophy())
+                .jockeyLicenseUrl(profile.getJockeyLicenseUrl())
+                .fitnessCertificateUrl(profile.getFitnessCertificateUrl())
                 .build();
     }
 
@@ -417,5 +428,74 @@ public class JockeyServiceImpl implements JockeyService {
     /** Round a double to 1 decimal place (half-up). */
     private double round1(double value) {
         return BigDecimal.valueOf(value).setScale(1, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    // =========================================================================
+    // ADMIN jockey lifecycle (registration-flow-fixes Phase 01)
+    //
+    // Focused admin path: the jockey account already exists (created PENDING by
+    // AuthServiceImpl.registerJockey), so — unlike RefereeApplicationServiceImpl.approve — this does
+    // NOT create-or-activate a user by email; it only flips the existing account + application status.
+    // =========================================================================
+
+    @Override
+    @Transactional
+    public JockeyResponse approveJockey(UUID jockeyUserId, UUID adminUserId) {
+        JockeyProfile profile = jockeyProfileRepository.findByIdAndUserActive(jockeyUserId)
+                .orElseThrow(() -> new AppException(ErrorCode.JOCKEY_NOT_FOUND));
+        User user = profile.getJockeyUser();
+
+        MembershipApplication app = findLatestJockeyApplication(user.getEmail());
+        ensureDecidable(app);
+
+        user.setStatus(UserStatus.ACTIVE);
+        user.setKycStatus(KycStatus.VERIFIED);
+        userRepository.save(user);
+
+        app.setStatus(ApplicationStatus.APPROVED);
+        app.setReviewedAt(OffsetDateTime.now());
+        app.setReviewedByUserId(adminUserId);
+        app.setRejectionReason(null);
+        membershipApplicationRepository.save(app);
+
+        return mapToResponse(profile);
+    }
+
+    @Override
+    @Transactional
+    public JockeyResponse rejectJockey(UUID jockeyUserId, String reason, UUID adminUserId) {
+        JockeyProfile profile = jockeyProfileRepository.findByIdAndUserActive(jockeyUserId)
+                .orElseThrow(() -> new AppException(ErrorCode.JOCKEY_NOT_FOUND));
+        User user = profile.getJockeyUser();
+
+        MembershipApplication app = findLatestJockeyApplication(user.getEmail());
+        ensureDecidable(app);
+
+        // A rejection must NOT activate the account — the jockey stays PENDING and cannot log in.
+        app.setStatus(ApplicationStatus.REJECTED);
+        app.setRejectionReason(reason);
+        app.setReviewedAt(OffsetDateTime.now());
+        app.setReviewedByUserId(adminUserId);
+        membershipApplicationRepository.save(app);
+
+        return mapToResponse(profile);
+    }
+
+    /**
+     * Latest JOCKEY application for the given email — status-AGNOSTIC. Returning an already-decided
+     * application here (rather than filtering it out) lets {@link #ensureDecidable} raise
+     * APPLICATION_ALREADY_DECIDED instead of a misleading APPLICATION_NOT_FOUND.
+     */
+    private MembershipApplication findLatestJockeyApplication(String email) {
+        return membershipApplicationRepository
+                .findFirstByEmailAndRequestedRoleOrderBySubmittedAtDesc(email, RequestedRole.JOCKEY)
+                .orElseThrow(() -> new AppException(ErrorCode.APPLICATION_NOT_FOUND));
+    }
+
+    /** Terminal-status guard; mirrors RefereeApplicationServiceImpl via ApplicationStatus.isDecidable(). */
+    private void ensureDecidable(MembershipApplication app) {
+        if (!app.getStatus().isDecidable()) {
+            throw new AppException(ErrorCode.APPLICATION_ALREADY_DECIDED);
+        }
     }
 }

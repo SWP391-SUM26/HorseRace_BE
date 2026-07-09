@@ -28,19 +28,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
-import java.util.EnumSet;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class RefereeApplicationServiceImpl implements RefereeApplicationService {
-
-    /** Statuses from which a referee may still take a decision. */
-    private static final Set<ApplicationStatus> DECIDABLE =
-            EnumSet.of(ApplicationStatus.PENDING, ApplicationStatus.UNDER_REVIEW, ApplicationStatus.INFO_REQUESTED);
 
     private final MembershipApplicationRepository applicationRepository;
     private final UserRepository userRepository;
@@ -160,7 +154,7 @@ public class RefereeApplicationServiceImpl implements RefereeApplicationService 
     }
 
     private void ensureDecidable(MembershipApplication app) {
-        if (!DECIDABLE.contains(app.getStatus())) {
+        if (!app.getStatus().isDecidable()) {
             throw new AppException(ErrorCode.APPLICATION_ALREADY_DECIDED);
         }
     }
