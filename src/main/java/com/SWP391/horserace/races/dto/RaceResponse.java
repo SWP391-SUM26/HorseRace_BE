@@ -41,6 +41,8 @@ public class RaceResponse {
     private RaceStatus status;
     private UUID tournamentId;
     private String tournamentName;
+    /** Cover image of the parent tournament (races have no own image); null if the tournament has none. */
+    private String tournamentImageUrl;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

@@ -23,11 +23,13 @@ import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.wallets.entity.EntryType;
 import com.SWP391.horserace.wallets.entity.TxnCategory;
 import com.SWP391.horserace.wallets.entity.WalletTransaction;
+import com.SWP391.horserace.wallets.service.HouseWalletService;
 import com.SWP391.horserace.wallets.service.WalletLedgerService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
@@ -41,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -56,12 +59,15 @@ class SettlementServiceImplTest {
     @Mock PayoutRepository payoutRepository;
     @Mock RaceResultRepository raceResultRepository;
     @Mock WalletLedgerService walletLedgerService;
+    @Mock HouseWalletService houseWalletService;
     @Mock ObjectProvider<SettlementService> selfProvider;
 
     private SettlementServiceImpl service;
 
     private final UUID raceId = UUID.randomUUID();
     private final UUID poolId = UUID.randomUUID();
+    /** The escrow/house wallet owner — every payout/refund DEBITs this row FIRST. */
+    private final UUID houseId = UUID.randomUUID();
 
     // Entries by finishing position.
     private RaceEntry e1; // 1st
@@ -72,9 +78,11 @@ class SettlementServiceImplTest {
     void setUp() {
         service = new SettlementServiceImpl(
                 raceRepository, bettingPoolRepository, predictionRepository,
-                payoutRepository, raceResultRepository, walletLedgerService, selfProvider);
+                payoutRepository, raceResultRepository, walletLedgerService, houseWalletService, selfProvider);
         // self-invocation of settlePool routes through the (unproxied) same instance in unit tests
         lenient().when(selfProvider.getObject()).thenReturn(service);
+        // Central house resolution — lenient so no-op / claim-lost paths (no money moves) don't fail strict-stub.
+        lenient().when(houseWalletService.houseUserId()).thenReturn(houseId);
 
         e1 = RaceEntry.builder().entryId(UUID.randomUUID()).status(RaceEntryStatus.FINISHED).build();
         e2 = RaceEntry.builder().entryId(UUID.randomUUID()).status(RaceEntryStatus.FINISHED).build();
@@ -172,6 +180,40 @@ class SettlementServiceImplTest {
         verify(walletLedgerService, never()).applyEntry(eq(loser.getSpectator().getUserId()),
                 any(), any(), any(), any(), any());
 
+        // HOUSE FIRST (two-sided payout): the house is DEBITed each payout BEFORE the winner is CREDITed it.
+        InOrder o1 = inOrder(walletLedgerService);
+        o1.verify(walletLedgerService).applyEntry(eq(houseId),
+                eq(EntryType.DEBIT), eq(TxnCategory.BET_PAYOUT),
+                argThat(money("212000")), eq("PREDICTION"), eq(winner.getPredictionId()));
+        o1.verify(walletLedgerService).applyEntry(eq(winner.getSpectator().getUserId()),
+                eq(EntryType.CREDIT), eq(TxnCategory.BET_PAYOUT),
+                argThat(money("212000")), eq("PREDICTION"), eq(winner.getPredictionId()));
+        InOrder o2 = inOrder(walletLedgerService);
+        o2.verify(walletLedgerService).applyEntry(eq(houseId),
+                eq(EntryType.DEBIT), eq(TxnCategory.BET_PAYOUT),
+                argThat(money("637000")), eq("PREDICTION"), eq(winnerBig.getPredictionId()));
+        o2.verify(walletLedgerService).applyEntry(eq(winnerBig.getSpectator().getUserId()),
+                eq(EntryType.CREDIT), eq(TxnCategory.BET_PAYOUT),
+                argThat(money("637000")), eq("PREDICTION"), eq(winnerBig.getPredictionId()));
+
+        // Net conservation: the house pays OUT exactly the two payouts (212,000 + 637,000 = 849,000).
+        // Active stakes = 100k + 300k + 600k = 1,000,000; theoretical net = stakes·(1−rake) = 850,000.
+        // The house's total DEBIT (849,000) never exceeds net (breakage of 1,000 floors DOWN and stays in
+        // the house) — so what the house holds for the race (stakes − payouts = 151,000) is ≥ the 15% rake.
+        ArgumentCaptor<BigDecimal> houseOut = ArgumentCaptor.forClass(BigDecimal.class);
+        verify(walletLedgerService, times(2)).applyEntry(eq(houseId),
+                eq(EntryType.DEBIT), eq(TxnCategory.BET_PAYOUT), houseOut.capture(),
+                eq("PREDICTION"), any());
+        BigDecimal totalHouseOut = houseOut.getAllValues().stream()
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertThat(totalHouseOut).isEqualByComparingTo("849000");
+        BigDecimal stakes = new BigDecimal("1000000");
+        BigDecimal net = stakes.multiply(new BigDecimal("0.85")); // 850,000
+        assertThat(totalHouseOut).usingComparator(BigDecimal::compareTo).isLessThanOrEqualTo(net);
+        BigDecimal houseRetained = stakes.subtract(totalHouseOut); // 151,000
+        assertThat(houseRetained).usingComparator(BigDecimal::compareTo)
+                .isGreaterThanOrEqualTo(stakes.multiply(new BigDecimal("0.15"))); // ≥ 150,000 rake
+
         ArgumentCaptor<Payout> pc = ArgumentCaptor.forClass(Payout.class);
         verify(payoutRepository, times(2)).save(pc.capture());
         Payout paid = pc.getAllValues().stream()
@@ -214,6 +256,37 @@ class SettlementServiceImplTest {
         verify(walletLedgerService).applyEntry(eq(b.getSpectator().getUserId()),
                 eq(EntryType.CREDIT), eq(TxnCategory.BET_PAYOUT),
                 argThat(money("205000")), eq("PREDICTION"), eq(b.getPredictionId()));
+
+        // HOUSE FIRST: house DEBITed each payout BEFORE the winner's CREDIT.
+        InOrder o1 = inOrder(walletLedgerService);
+        o1.verify(walletLedgerService).applyEntry(eq(houseId),
+                eq(EntryType.DEBIT), eq(TxnCategory.BET_PAYOUT),
+                argThat(money("305000")), eq("PREDICTION"), eq(a.getPredictionId()));
+        o1.verify(walletLedgerService).applyEntry(eq(a.getSpectator().getUserId()),
+                eq(EntryType.CREDIT), eq(TxnCategory.BET_PAYOUT),
+                argThat(money("305000")), eq("PREDICTION"), eq(a.getPredictionId()));
+        InOrder o2 = inOrder(walletLedgerService);
+        o2.verify(walletLedgerService).applyEntry(eq(houseId),
+                eq(EntryType.DEBIT), eq(TxnCategory.BET_PAYOUT),
+                argThat(money("205000")), eq("PREDICTION"), eq(b.getPredictionId()));
+        o2.verify(walletLedgerService).applyEntry(eq(b.getSpectator().getUserId()),
+                eq(EntryType.CREDIT), eq(TxnCategory.BET_PAYOUT),
+                argThat(money("205000")), eq("PREDICTION"), eq(b.getPredictionId()));
+
+        // Net conservation (exact here — no breakage): active stakes = 200k+100k+300k = 600,000;
+        // net = 600,000·0.85 = 510,000; house DEBITs 305,000 + 205,000 = 510,000 == net exactly, so the
+        // house's net for the race (stakes − payouts = 90,000) equals the 15% rake to the VND.
+        ArgumentCaptor<BigDecimal> houseOut = ArgumentCaptor.forClass(BigDecimal.class);
+        verify(walletLedgerService, times(2)).applyEntry(eq(houseId),
+                eq(EntryType.DEBIT), eq(TxnCategory.BET_PAYOUT), houseOut.capture(),
+                eq("PREDICTION"), any());
+        BigDecimal totalHouseOut = houseOut.getAllValues().stream()
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal stakes = new BigDecimal("600000");
+        BigDecimal net = stakes.multiply(new BigDecimal("0.85")); // 510,000
+        assertThat(totalHouseOut).isEqualByComparingTo(net);
+        BigDecimal houseRetained = stakes.subtract(totalHouseOut); // 90,000
+        assertThat(houseRetained).isEqualByComparingTo(stakes.multiply(new BigDecimal("0.15"))); // == rake
 
         assertThat(a.getStatus()).isEqualTo(PredictionStatus.WON);
         assertThat(b.getStatus()).isEqualTo(PredictionStatus.WON);
@@ -264,7 +337,13 @@ class SettlementServiceImplTest {
         // predictions loaded exactly once (only the winning claim proceeded)
         verify(predictionRepository, times(1)).findByRace_RaceIdAndPredictionTypeAndStatus(
                 raceId, PredictionType.WIN, PredictionStatus.PENDING);
-        verify(walletLedgerService, times(2)).applyEntry(any(), any(), any(), any(), any(), any());
+        // Two winners, each paid two-sided (house DEBIT + winner CREDIT) => 4 ledger calls total.
+        // (Was times(2) pre-house-wallet; house-first doubles the per-winner call count.)
+        verify(walletLedgerService, times(4)).applyEntry(any(), any(), any(), any(), any(), any());
+        // ...but still exactly ONE CREDIT payout per winner (the "one payout per winner" invariant holds).
+        verify(walletLedgerService, times(2)).applyEntry(
+                argThat(id -> !id.equals(houseId)), eq(EntryType.CREDIT), eq(TxnCategory.BET_PAYOUT),
+                any(), any(), any());
     }
 
     // ---------- no-winner refund-all (no rake) ----------
@@ -294,6 +373,15 @@ class SettlementServiceImplTest {
         verify(walletLedgerService).applyEntry(eq(b2.getSpectator().getUserId()),
                 eq(EntryType.CREDIT), eq(TxnCategory.REFUND),
                 argThat(money("250000")), eq("PREDICTION"), eq(b2.getPredictionId()));
+
+        // HOUSE FIRST on the refund path too: house DEBITed the stake BEFORE the bettor is CREDITed it.
+        InOrder inOrder = inOrder(walletLedgerService);
+        inOrder.verify(walletLedgerService).applyEntry(eq(houseId),
+                eq(EntryType.DEBIT), eq(TxnCategory.REFUND),
+                argThat(money("150000")), eq("PREDICTION"), eq(b1.getPredictionId()));
+        inOrder.verify(walletLedgerService).applyEntry(eq(b1.getSpectator().getUserId()),
+                eq(EntryType.CREDIT), eq(TxnCategory.REFUND),
+                argThat(money("150000")), eq("PREDICTION"), eq(b1.getPredictionId()));
         assertThat(b1.getStatus()).isEqualTo(PredictionStatus.REFUNDED);
         assertThat(b2.getStatus()).isEqualTo(PredictionStatus.REFUNDED);
         verify(payoutRepository, never()).save(any());

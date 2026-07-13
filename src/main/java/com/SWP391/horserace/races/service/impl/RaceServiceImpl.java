@@ -41,6 +41,7 @@ import com.SWP391.horserace.venues.entity.Venue;
 import com.SWP391.horserace.venues.repository.VenueRepository;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -50,6 +51,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -73,6 +75,10 @@ public class RaceServiceImpl implements RaceService {
     private final com.SWP391.horserace.notifications.service.NotificationService notificationService;
     private final EntryDocumentReviewRepository entryDocumentReviewRepository;
     private final RaceEntryInspectionRepository raceEntryInspectionRepository;
+
+    /** Auto-close lead: how far before the prediction cutoff (fallback: start) an OPEN race auto-closes. */
+    @Value("${app.race.auto-close-lead-ms:1800000}")
+    private long autoCloseLeadMs;
 
     @Override
     @Transactional(readOnly = true)
@@ -284,6 +290,23 @@ public class RaceServiceImpl implements RaceService {
 
     @Override
     @Transactional
+    public RaceResponse closeRace(UUID currentUserId, UUID id) {
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        Race race = loadRace(id);
+
+        // Lock the lineup: OPEN → CLOSED. CLOSED is the ONLY state betting is accepted in (FR-01/FR-03).
+        if (race.getStatus() != RaceStatus.OPEN) {
+            throw new AppException(ErrorCode.RACE_INVALID_STATUS);
+        }
+
+        race.setStatus(RaceStatus.CLOSED);
+        return mapToResponse(raceRepository.save(race));
+    }
+
+    @Override
+    @Transactional
     public RaceResponse startRace(UUID currentUserId, UUID id) {
         if (currentUserId == null) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
@@ -291,68 +314,15 @@ public class RaceServiceImpl implements RaceService {
         Race race = loadRace(id);
 
         // Conduct the race: only from OPEN (or CLOSED entries). Locks further entries.
+        // FR-02 (revised): kept lenient OPEN||CLOSED — the now>cutoff gate already ensures betting
+        // closed; requiring CLOSED would strand un-closed races.
         if (race.getStatus() != RaceStatus.OPEN && race.getStatus() != RaceStatus.CLOSED) {
             throw new AppException(ErrorCode.RACE_INVALID_STATUS);
         }
 
-        // "Ready to run" gate (FR-03 / FR-18): collect ALL unmet conditions so the admin sees every gap.
-        int min = effectiveMinParticipants(race);
-        long entries = raceEntryRepository.countByRace_RaceId(id);
-        long acceptedJockeys = jockeyAssignmentRepository.countAcceptedByRaceId(id);
-        // FR-18 (Phase 2): tightened from ASSIGNED/CONFIRMED to CONFIRMED-only — an ASSIGNED-but-not-yet-
-        // confirmed (or DECLINED) referee no longer satisfies the gate.
-        boolean hasConfirmedReferee = refereeAssignmentRepository.existsByRace_RaceIdAndStatus(
-                id, RefereeAssignmentStatus.CONFIRMED);
-        OffsetDateTime now = OffsetDateTime.now();
-
-        // FR-18 / RT-HIGH-2: every NON-SCRATCHED entry must have documents ACCEPTED and be vet-CLEARED.
-        // Count ACCEPTED/CLEARED among the non-scratched entries and compare to the total — a MISSING
-        // review/inspection row counts as not-satisfied (a naive "status != ACCEPTED" count can't see rows
-        // that don't exist, so an unreviewed entry would be invisible and wrongly pass).
-        List<RaceEntry> nonScratched = raceEntryRepository.findByRace_RaceId(id).stream()
-                .filter(e -> e.getStatus() != RaceEntryStatus.SCRATCHED)
-                .toList();
-        List<UUID> nonScratchedIds = nonScratched.stream().map(RaceEntry::getEntryId).toList();
-        Map<UUID, DocumentReviewStatus> docStatusByEntry = nonScratchedIds.isEmpty() ? Map.of()
-                : entryDocumentReviewRepository.findByEntry_EntryIdIn(nonScratchedIds).stream()
-                        .collect(Collectors.toMap(r -> r.getEntry().getEntryId(),
-                                EntryDocumentReview::getDocumentStatus, (a, b) -> a));
-        Map<UUID, InspectionStatus> vetStatusByEntry = nonScratchedIds.isEmpty() ? Map.of()
-                : raceEntryInspectionRepository.findByEntry_EntryIdIn(nonScratchedIds).stream()
-                        .collect(Collectors.toMap(i -> i.getEntry().getEntryId(),
-                                RaceEntryInspection::getInspectionStatus, (a, b) -> a));
-        long docsAccepted = nonScratched.stream()
-                .filter(e -> docStatusByEntry.get(e.getEntryId()) == DocumentReviewStatus.ACCEPTED).count();
-        long vetCleared = nonScratched.stream()
-                .filter(e -> vetStatusByEntry.get(e.getEntryId()) == InspectionStatus.CLEARED).count();
-
-        List<String> unmet = new ArrayList<>();
-        if (entries < min) {
-            unmet.add("needs at least " + min + " participants (has " + entries + ")");
-        }
-        if (acceptedJockeys != entries) {
-            unmet.add("every horse must have a confirmed jockey (" + acceptedJockeys + "/" + entries + ")");
-        }
-        if (!hasConfirmedReferee) {
-            unmet.add("at least one confirmed referee must be assigned");
-        }
-        if (docsAccepted < nonScratched.size()) {
-            unmet.add("all entries must have documents accepted (" + docsAccepted + "/" + nonScratched.size() + ")");
-        }
-        if (vetCleared < nonScratched.size()) {
-            unmet.add("all entries must be vet-cleared (" + vetCleared + "/" + nonScratched.size() + ")");
-        }
-        // null-safe: a race with no registration deadline is treated as "registration not closed"
-        if (race.getPredictionCutoffAt() == null || !now.isAfter(race.getPredictionCutoffAt())) {
-            unmet.add("registration is not closed yet");
-        }
-        if (race.getScheduledStartAt() != null && now.isAfter(race.getScheduledStartAt())) {
-            unmet.add("scheduled start time has already passed");
-        }
-        if (!unmet.isEmpty()) {
-            throw new AppException(ErrorCode.RACE_NOT_READY, "Race is not ready to run: " + String.join("; ", unmet));
-        }
-
+        // Admin override: the admin's decision is final. Starting a race is a deliberate admin action,
+        // so it is NOT gated on the old "ready to run" checks (min participants, confirmed jockeys/referee,
+        // documents accepted, vet-cleared, registration closed, scheduled time). Admin clicks Start → it runs.
         race.setStatus(RaceStatus.RUNNING);
         if (race.getActualStartAt() == null) {
             race.setActualStartAt(OffsetDateTime.now());
@@ -437,6 +407,27 @@ public class RaceServiceImpl implements RaceService {
         for (User admin : userRepository.findByRole_RoleCodeAndDeletedFalse("ADMIN")) {
             notificationService.notifyUser(admin.getUserId(), title, msg); // REQUIRES_NEW + best-effort
         }
+    }
+
+    // =========================================================================
+    // Auto-close sweep — FR-07
+    // =========================================================================
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UUID> findRacesToAutoClose() {
+        // CUTOFF-relative trigger (fallback to start when cutoff is null): a race is due once its cutoff
+        // is within `lead` of now, guaranteeing a non-empty [cutoff − lead, cutoff) betting window.
+        return raceRepository.findOpenRacesToAutoClose(
+                OffsetDateTime.now().plus(autoCloseLeadMs, ChronoUnit.MILLIS));
+    }
+
+    @Override
+    @Transactional
+    public void autoClose(UUID raceId) {
+        // Atomic, conditional OPEN → CLOSED. rows == 0 → already CLOSED/CANCELLED/RUNNING/deleted or lost
+        // to a concurrent writer → silent no-op (idempotent), never a throw.
+        raceRepository.markClosed(raceId);
     }
 
     /** Minimum runners required to run a race — the configured floor, never below 1. */
@@ -666,6 +657,7 @@ public class RaceServiceImpl implements RaceService {
                 .status(r.getStatus())
                 .tournamentId(t != null ? t.getTournamentId() : null)
                 .tournamentName(t != null ? t.getName() : null)
+                .tournamentImageUrl(t != null ? t.getImageUrl() : null)
                 .createdAt(r.getCreatedAt())
                 .updatedAt(r.getUpdatedAt())
                 .build();

@@ -57,9 +57,6 @@ public class AuthServiceImpl implements AuthService {
     private final OwnerProfileRepository ownerProfileRepository;
     private final AttachmentService attachmentService;
 
-    /** lbs → kg factor for storing the form's weight into jockey_profile.body_weight (kg). */
-    private static final double LBS_TO_KG = 0.45359237;
-
     // =========================================================
     // Login / token management
     // =========================================================
@@ -255,7 +252,7 @@ public class AuthServiceImpl implements AuthService {
                 .nationality(request.nationality())
                 .applicationRidingStyle(request.ridingStyle())
                 .experienceYrs(request.yearsActive())
-                .bodyWeight(lbsToKg(request.weight()))
+                .bodyWeight(toBodyWeightKg(request.weight()))
                 .jockeyLicenseUrl(licenseUrl)
                 .fitnessCertificateUrl(fitnessUrl)
                 .build();
@@ -279,10 +276,15 @@ public class AuthServiceImpl implements AuthService {
                 .build();
     }
 
-    /** Convert the form's weight (lbs) to jockey_profile.body_weight (kg, 2dp); null-safe. */
-    private BigDecimal lbsToKg(Double weightLbs) {
-        return weightLbs == null ? null
-                : BigDecimal.valueOf(weightLbs * LBS_TO_KG).setScale(2, RoundingMode.HALF_UP);
+    /**
+     * Store the form's body weight (kg) into jockey_profile.body_weight (kg, 2dp); null-safe.
+     * body_weight is kilograms across the system — the jockey self-profile edit and the admin
+     * review both read/write it as kg — so registration must NOT convert (a lbs→kg conversion here
+     * was what made the reviewed weight look "off" against the entered value).
+     */
+    private BigDecimal toBodyWeightKg(Double weightKg) {
+        return weightKg == null ? null
+                : BigDecimal.valueOf(weightKg).setScale(2, RoundingMode.HALF_UP);
     }
 
     /**

@@ -128,6 +128,19 @@ public class RaceController {
                 .build();
     }
 
+    /** PATCH /api/v1/races/{id}/close — lock the lineup (OPEN → CLOSED; opens betting). */
+    @PatchMapping("/{id}/close")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<RaceResponse> closeRace(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID id) {
+        return ApiResponse.<RaceResponse>builder()
+                .success(true)
+                .message("Race closed")
+                .data(raceService.closeRace(userId, id))
+                .build();
+    }
+
     /** PATCH /api/v1/races/{id}/start — conduct the race (OPEN/CLOSED → RUNNING; locks entries). */
     @PatchMapping("/{id}/start")
     @PreAuthorize("hasRole('ADMIN')")

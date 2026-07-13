@@ -130,7 +130,7 @@ public enum ErrorCode {
     // ---- prediction system ----
     PREDICTION_NOT_FOUND(9001, "Prediction not found", HttpStatus.NOT_FOUND),
     PREDICTION_ALREADY_EXISTS(9002, "You have already made this type of prediction for this race and entry", HttpStatus.CONFLICT),
-    PREDICTION_RACE_NOT_OPEN(9003, "Race is not open for predictions", HttpStatus.BAD_REQUEST),
+    PREDICTION_RACE_NOT_OPEN(9003, "Betting is only open once the race is locked, and before the cutoff", HttpStatus.BAD_REQUEST),
     PREDICTION_ENTRY_NOT_FOUND(9004, "Race entry not found", HttpStatus.NOT_FOUND),
     PREDICTION_ENTRY_MISMATCH(9005, "The predicted entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
     PREDICTION_CANNOT_CANCEL(9006, "Prediction cannot be cancelled at this stage", HttpStatus.BAD_REQUEST),
@@ -202,7 +202,8 @@ public enum ErrorCode {
     WITHDRAWAL_INVALID_STATE(9811, "Withdrawal is not in a PENDING state", HttpStatus.BAD_REQUEST),
     TOPUP_AMOUNT_INVALID(9812, "Top-up amount is invalid", HttpStatus.BAD_REQUEST),
     WITHDRAWAL_AMOUNT_INVALID(9813, "Withdrawal amount must be at least 10,000 VND", HttpStatus.BAD_REQUEST),
-    PAYMENT_GATEWAY_NOT_CONFIGURED(9814, "Payment gateway is not configured", HttpStatus.SERVICE_UNAVAILABLE);
+    PAYMENT_GATEWAY_NOT_CONFIGURED(9814, "Payment gateway is not configured", HttpStatus.SERVICE_UNAVAILABLE),
+    HOUSE_WALLET_UNAVAILABLE(9815, "House wallet is not configured", HttpStatus.SERVICE_UNAVAILABLE);
 
     private final int code;
     private final String message;

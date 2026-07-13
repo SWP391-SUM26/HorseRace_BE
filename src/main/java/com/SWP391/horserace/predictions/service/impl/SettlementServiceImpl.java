@@ -22,6 +22,7 @@ import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.wallets.entity.EntryType;
 import com.SWP391.horserace.wallets.entity.TxnCategory;
 import com.SWP391.horserace.wallets.entity.WalletTransaction;
+import com.SWP391.horserace.wallets.service.HouseWalletService;
 import com.SWP391.horserace.wallets.service.WalletLedgerService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -61,6 +62,7 @@ public class SettlementServiceImpl implements SettlementService {
     private final PayoutRepository payoutRepository;
     private final RaceResultRepository raceResultRepository;
     private final WalletLedgerService walletLedgerService;
+    private final HouseWalletService houseWalletService;
     /** Self-reference so {@link #settlePool} is invoked through the proxy (own tx per pool). */
     private final ObjectProvider<SettlementService> selfProvider;
 
@@ -114,6 +116,12 @@ public class SettlementServiceImpl implements SettlementService {
             return;
         }
 
+        // Resolve the house ONCE for this pool's settle (its getOrCreateWallet write joins this
+        // REQUIRES_NEW tx). Every payout/refund below DEBITs the house row FIRST — a house-DEBIT failure
+        // (frozen house / overdraw backstop) or a winner-CREDIT failure rolls back the whole pool tx, so
+        // the pool stays non-SETTLED and the sweep/resettle retries it (money-safe, no partial pay).
+        UUID house = houseWalletService.houseUserId();
+
         PredictionType type = pool.getPredictionType();
         BigDecimal rake = pool.getRakePercent() != null ? pool.getRakePercent() : BigDecimal.ZERO;
         OffsetDateTime now = OffsetDateTime.now();
@@ -133,7 +141,7 @@ public class SettlementServiceImpl implements SettlementService {
         // (2) CANCELLED race → refund every active stake, no rake.
         if (cancelled) {
             for (Prediction p : all) {
-                refund(p, now);
+                refund(p, now, house);
             }
             return;
         }
@@ -144,7 +152,7 @@ public class SettlementServiceImpl implements SettlementService {
         //      (which is semantically wrong for exotics). Real exotic math belongs to a future phase.
         if (type != PredictionType.WIN && type != PredictionType.PLACE && type != PredictionType.SHOW) {
             for (Prediction p : all) {
-                refund(p, now);
+                refund(p, now, house);
             }
             return;
         }
@@ -155,7 +163,7 @@ public class SettlementServiceImpl implements SettlementService {
         for (Prediction p : all) {
             RaceEntry entry = p.getPredictedEntry();
             if (entry == null || entry.getStatus() == RaceEntryStatus.SCRATCHED) {
-                refund(p, now);
+                refund(p, now, house);
             } else {
                 active.add(p);
             }
@@ -172,7 +180,7 @@ public class SettlementServiceImpl implements SettlementService {
         // (5) No winning active bet → refund all active stakes (no rake taken).
         if (winners.isEmpty()) {
             for (Prediction p : active) {
-                refund(p, now);
+                refund(p, now, house);
             }
             return;
         }
@@ -188,7 +196,7 @@ public class SettlementServiceImpl implements SettlementService {
         for (Prediction p : active) {
             BigDecimal payout = payouts.get(p);
             if (payout != null) {
-                payWinner(p, payout, now);
+                payWinner(p, payout, now, house);
             } else {
                 p.setStatus(PredictionStatus.LOST);
                 p.setSettledAt(now);
@@ -252,8 +260,9 @@ public class SettlementServiceImpl implements SettlementService {
 
     // ---------- ledger + status mutations ----------
 
-    private void payWinner(Prediction p, BigDecimal payout, OffsetDateTime now) {
-        // Idempotency belt: a Payout already exists for this prediction → never pay twice.
+    private void payWinner(Prediction p, BigDecimal payout, OffsetDateTime now, UUID house) {
+        // Idempotency belt: a Payout already exists for this prediction → never pay twice (and never
+        // DEBIT the house twice — the house move rides inside this same guarded path).
         if (payoutRepository.existsByPrediction_PredictionId(p.getPredictionId())) {
             return;
         }
@@ -261,10 +270,14 @@ public class SettlementServiceImpl implements SettlementService {
         p.setSettledAt(now);
         predictionRepository.save(p);
 
-        // Skip zero payouts — the ledger rejects non-positive amounts.
+        // Skip zero payouts — the ledger rejects non-positive amounts (no house move either).
         if (payout.signum() <= 0) {
             return;
         }
+        // Two-sided payout, HOUSE FIRST (house -> winner): DEBIT the house wallet BEFORE crediting the
+        // winner. Both calls share this pool tx; a throw on either rolls the pool back (stays unsettled).
+        walletLedgerService.applyEntry(
+                house, EntryType.DEBIT, TxnCategory.BET_PAYOUT, payout, "PREDICTION", p.getPredictionId());
         WalletTransaction txn = walletLedgerService.applyEntry(
                 userId(p), EntryType.CREDIT, TxnCategory.BET_PAYOUT, payout, "PREDICTION", p.getPredictionId());
         Payout payoutRow = Payout.builder()
@@ -278,7 +291,7 @@ public class SettlementServiceImpl implements SettlementService {
         payoutRepository.save(payoutRow);
     }
 
-    private void refund(Prediction p, OffsetDateTime now) {
+    private void refund(Prediction p, OffsetDateTime now, UUID house) {
         p.setStatus(PredictionStatus.REFUNDED);
         p.setSettledAt(now);
         predictionRepository.save(p);
@@ -286,6 +299,10 @@ public class SettlementServiceImpl implements SettlementService {
         if (stake == null || stake.signum() <= 0) {
             return;
         }
+        // Two-sided refund, HOUSE FIRST (house -> bettor): DEBIT the house wallet BEFORE crediting the
+        // bettor. A refund returns exactly the received stake with no rake, so the house never overdraws.
+        walletLedgerService.applyEntry(
+                house, EntryType.DEBIT, TxnCategory.REFUND, stake, "PREDICTION", p.getPredictionId());
         walletLedgerService.applyEntry(
                 userId(p), EntryType.CREDIT, TxnCategory.REFUND, stake, "PREDICTION", p.getPredictionId());
     }

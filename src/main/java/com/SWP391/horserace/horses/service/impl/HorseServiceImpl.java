@@ -473,7 +473,24 @@ public class HorseServiceImpl implements HorseService {
         com.SWP391.horserace.horses.entity.HorseMedicalRecord rec = medicalRecordRepository
                 .findByRecordIdAndHorse_HorseId(recordId, horseId)
                 .orElseThrow(() -> new AppException(ErrorCode.MEDICAL_RECORD_NOT_FOUND));
+        imageUploadService.deleteByUrl(rec.getFileUrl()); // best-effort cleanup of the attached file
         medicalRecordRepository.delete(rec);
+    }
+
+    @Override
+    @Transactional
+    public com.SWP391.horserace.horses.dto.MedicalRecordResponse uploadMedicalRecordFile(
+            UUID currentUserId, UUID horseId, UUID recordId, MultipartFile file) {
+        loadOwnedHorse(currentUserId, horseId);
+        com.SWP391.horserace.horses.entity.HorseMedicalRecord rec = medicalRecordRepository
+                .findByRecordIdAndHorse_HorseId(recordId, horseId)
+                .orElseThrow(() -> new AppException(ErrorCode.MEDICAL_RECORD_NOT_FOUND));
+        String oldUrl = rec.getFileUrl();
+        rec.setFileUrl(imageUploadService.storeImageAsUrl(file, "medical"));
+        rec.setFileName(file.getOriginalFilename());
+        com.SWP391.horserace.horses.dto.MedicalRecordResponse saved = mapMedical(medicalRecordRepository.save(rec));
+        imageUploadService.deleteByUrl(oldUrl); // remove the replaced file (no-op on first upload)
+        return saved;
     }
 
     private com.SWP391.horserace.horses.dto.MedicalRecordResponse mapMedical(com.SWP391.horserace.horses.entity.HorseMedicalRecord r) {
@@ -483,6 +500,8 @@ public class HorseServiceImpl implements HorseService {
                 .title(r.getTitle())
                 .note(r.getNote())
                 .recordDate(r.getRecordDate())
+                .fileUrl(r.getFileUrl())
+                .fileName(r.getFileName())
                 .createdAt(r.getCreatedAt())
                 .build();
     }

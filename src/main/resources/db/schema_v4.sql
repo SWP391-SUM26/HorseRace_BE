@@ -281,6 +281,8 @@ CREATE TABLE horse_medical_record (
     title       VARCHAR(255) NOT NULL,
     note        TEXT,
     record_date DATE,
+    file_url    TEXT,                          -- attached document/scan (public URL); null if none
+    file_name   VARCHAR(255),                  -- original uploaded filename for display
     created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

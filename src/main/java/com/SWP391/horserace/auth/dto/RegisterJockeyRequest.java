@@ -53,7 +53,7 @@ public record RegisterJockeyRequest(
         @Min(value = 16, message = "Jockey must be at least 16 years old")
         Integer age,
 
-        /** Optional — weight in lbs. */
+        /** Optional — body weight in kg (stored directly into jockey_profile.body_weight). */
         @Positive(message = "Weight must be positive")
         Double weight,
 

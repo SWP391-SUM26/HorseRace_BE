@@ -23,6 +23,7 @@ import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.repository.UserRepository;
 import com.SWP391.horserace.wallets.entity.EntryType;
 import com.SWP391.horserace.wallets.entity.TxnCategory;
+import com.SWP391.horserace.wallets.service.HouseWalletService;
 import com.SWP391.horserace.wallets.service.WalletLedgerService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -57,6 +58,7 @@ public class PredictionServiceImpl implements PredictionService {
     private final RaceEntryRepository raceEntryRepository;
     private final UserRepository userRepository;
     private final WalletLedgerService walletLedgerService;
+    private final HouseWalletService houseWalletService;
 
     @Override
     @Transactional
@@ -70,7 +72,8 @@ public class PredictionServiceImpl implements PredictionService {
         Race race = raceRepository.findByRaceIdAndDeletedFalse(request.getRaceId())
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
 
-        if (race.getStatus() != RaceStatus.SCHEDULED && race.getStatus() != RaceStatus.OPEN) {
+        // FR-03: betting is accepted ONLY once the lineup is locked (CLOSED) and before the cutoff.
+        if (race.getStatus() != RaceStatus.CLOSED) {
             throw new AppException(ErrorCode.PREDICTION_RACE_NOT_OPEN);
         }
 
@@ -141,8 +144,13 @@ public class PredictionServiceImpl implements PredictionService {
                 .build();
         prediction = predictionRepository.save(prediction);
 
-        // 8. Debit the wallet inside THIS @Transactional. INSUFFICIENT_BALANCE / WALLET_INACTIVE
-        //    propagate and roll back the prediction save + pool add (do NOT catch/swallow).
+        // 8. Move the stake two-sided inside THIS @Transactional, HOUSE FIRST (bettor -> house). The
+        //    house wallet row is locked BEFORE the bettor's (the deadlock-safety invariant). If the
+        //    bettor DEBIT throws (INSUFFICIENT_BALANCE / WALLET_INACTIVE / WALLET_NOT_FOUND), the whole
+        //    tx — the house credit, the prediction save, the pool add — rolls back (do NOT catch/swallow).
+        UUID house = houseWalletService.houseUserId();
+        walletLedgerService.applyEntry(house, EntryType.CREDIT, TxnCategory.BET_STAKE,
+                request.getStakeAmount(), "PREDICTION", prediction.getPredictionId());
         walletLedgerService.applyEntry(userId, EntryType.DEBIT, TxnCategory.BET_STAKE,
                 request.getStakeAmount(), "PREDICTION", prediction.getPredictionId());
 
@@ -181,7 +189,8 @@ public class PredictionServiceImpl implements PredictionService {
         }
 
         Race race = prediction.getRace();
-        if (race.getStatus() != RaceStatus.SCHEDULED && race.getStatus() != RaceStatus.OPEN) {
+        // FR-03: a bet is cancellable only within the same window it could be placed in — CLOSED + before cutoff.
+        if (race.getStatus() != RaceStatus.CLOSED) {
             throw new AppException(ErrorCode.PREDICTION_CANNOT_CANCEL);
         }
 
@@ -198,7 +207,11 @@ public class PredictionServiceImpl implements PredictionService {
                     }
                 });
 
-        // Refund the stake back to the wallet inside THIS @Transactional.
+        // Refund the stake two-sided inside THIS @Transactional, HOUSE FIRST (house -> bettor). The
+        // house wallet row is locked BEFORE the bettor's; a throw on either side rolls both back.
+        UUID house = houseWalletService.houseUserId();
+        walletLedgerService.applyEntry(house, EntryType.DEBIT, TxnCategory.REFUND,
+                prediction.getStakeAmount(), "PREDICTION", prediction.getPredictionId());
         walletLedgerService.applyEntry(userId, EntryType.CREDIT, TxnCategory.REFUND,
                 prediction.getStakeAmount(), "PREDICTION", prediction.getPredictionId());
 
