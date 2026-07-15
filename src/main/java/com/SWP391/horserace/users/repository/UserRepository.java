@@ -1,6 +1,7 @@
 package com.SWP391.horserace.users.repository;
 
 import com.SWP391.horserace.users.entity.User;
+import com.SWP391.horserace.users.entity.UserStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -35,6 +36,9 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
 
     /** All active users with a given role code (e.g. "ADMIN") — used to notify admins. */
     List<User> findByRole_RoleCodeAndDeletedFalse(String roleCode);
+
+    /** Count non-deleted users with a given role code and status — powers the last-admin guard. */
+    long countByRole_RoleCodeAndStatusAndDeletedFalse(String roleCode, UserStatus status);
 
     /** Total non soft-deleted users (powers the Total Users KPI). */
     long countByDeletedFalse();

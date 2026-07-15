@@ -56,7 +56,7 @@ class AuthServiceImplTest {
     private RegisterJockeyRequest jockeyRequest() {
         return new RegisterJockeyRequest(
                 "Jockey@Example.com", "Passw0rd!", "Passw0rd!", "Loop", "Rider",
-                22, 120.0, "VN", 3, "Flat", null, null, true);
+                22, 54.43, "VN", 3, "Flat", null, null, true);
     }
 
     @Test
@@ -79,14 +79,14 @@ class AuthServiceImplTest {
         assertThat(userCap.getValue().getStatus()).isEqualTo(UserStatus.PENDING);
         assertThat(userCap.getValue().getEmail()).isEqualTo("jockey@example.com");
 
-        // Jockey profile persisted with the self-registration fields (weight converted lbs→kg).
+        // Jockey profile persisted with the self-registration fields (weight is kg, stored as-is).
         ArgumentCaptor<JockeyProfile> profCap = ArgumentCaptor.forClass(JockeyProfile.class);
         verify(jockeyProfileRepository).save(profCap.capture());
         assertThat(profCap.getValue().getAge()).isEqualTo(22);
         assertThat(profCap.getValue().getNationality()).isEqualTo("VN");
         assertThat(profCap.getValue().getApplicationRidingStyle()).isEqualTo("Flat");
         assertThat(profCap.getValue().getExperienceYrs()).isEqualTo(3);
-        assertThat(profCap.getValue().getBodyWeight().doubleValue()).isEqualTo(54.43); // 120 lbs
+        assertThat(profCap.getValue().getBodyWeight().doubleValue()).isEqualTo(54.43); // kg, stored as-is
 
         // Onboarding application filed for the referee queue.
         ArgumentCaptor<MembershipApplication> appCap = ArgumentCaptor.forClass(MembershipApplication.class);

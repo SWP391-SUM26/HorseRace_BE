@@ -452,6 +452,23 @@ class WalletServiceImplTest {
     }
 
     @Test
+    void requestWithdrawal_fromHouseWallet_isForbidden_andHoldsNothing() {
+        // The escrow/house wallet holds spectators' stakes — it must never be drained via a withdrawal.
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "houseEmail", "admin@horserace.local");
+        when(userRepository.findByEmail("admin@horserace.local"))
+                .thenReturn(Optional.of(User.builder().userId(userId).build()));
+
+        assertThatThrownBy(() -> service.requestWithdrawal(userId, withdrawalReq("10000")))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.HOUSE_WITHDRAWAL_FORBIDDEN);
+
+        // guard runs before loading the wallet — no hold, no txn
+        verify(walletRepository, never()).findByUserUserIdForUpdate(any());
+        verify(paymentTransactionRepository, never()).save(any());
+    }
+
+    @Test
     void requestWithdrawal_onFrozenWallet_throwsWalletInactive_andHoldsNothing() {
         Wallet w = wallet();
         w.setStatus(WalletStatus.FROZEN);

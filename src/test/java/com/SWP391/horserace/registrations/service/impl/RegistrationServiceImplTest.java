@@ -48,6 +48,7 @@ class RegistrationServiceImplTest {
     @Mock UserRepository userRepository;
     @Mock RaceRepository raceRepository;
     @Mock RaceEntryRepository raceEntryRepository;
+    @Mock com.SWP391.horserace.races.service.RaceEntryGate raceEntryGate;
     @Mock com.SWP391.horserace.attachments.repository.AttachmentRepository attachmentRepository;
 
     private RegistrationServiceImpl service;
@@ -64,7 +65,7 @@ class RegistrationServiceImplTest {
     void setUp() {
         service = new RegistrationServiceImpl(
                 registrationRepository, tournamentRepository, horseRepository, userRepository,
-                raceRepository, raceEntryRepository, attachmentRepository);
+                raceRepository, raceEntryRepository, raceEntryGate, attachmentRepository);
         // #7: by default a registration HAS its owner-uploaded document (approve tests focus on other logic).
         org.mockito.Mockito.lenient().when(attachmentRepository
                 .existsByOwnerEntityTypeAndOwnerEntityIdAndUploadedBy_UserId(org.mockito.ArgumentMatchers.any(),

@@ -44,6 +44,8 @@ public enum ErrorCode {
     // ---- admin user management ----
     INVALID_USER_STATUS(1023, "Invalid user status. Allowed: ACTIVE, INACTIVE, SUSPENDED, BANNED", HttpStatus.BAD_REQUEST),
     CANNOT_CREATE_ADMIN(1026, "Cannot create an ADMIN account via user provisioning", HttpStatus.FORBIDDEN),
+    CANNOT_MODIFY_SELF(1027, "You cannot change your own account via admin user-management", HttpStatus.FORBIDDEN),
+    LAST_ADMIN_PROTECTED(1028, "Cannot demote, suspend, or delete the last active administrator", HttpStatus.FORBIDDEN),
 
     // ---- jockey ----
     JOCKEY_NOT_FOUND(2001, "Jockey profile not found", HttpStatus.NOT_FOUND),
@@ -100,6 +102,8 @@ public enum ErrorCode {
     NOT_HORSE_OWNER(5005, "You are not the owner of this horse", HttpStatus.FORBIDDEN),
     HORSE_NO_APPROVED_REGISTRATION(5006, "Horse has no approved registration for this race's tournament", HttpStatus.BAD_REQUEST),
     MEDICAL_RECORD_NOT_FOUND(5007, "Medical record not found", HttpStatus.NOT_FOUND),
+    HORSE_NOT_FIT_TO_RACE(5008, "Horse is not fit to race (injured, unfit, or in quarantine)", HttpStatus.BAD_REQUEST),
+    HORSE_BELOW_MIN_AGE(5009, "Horse is below the minimum racing age", HttpStatus.BAD_REQUEST),
 
     // ---- file upload / storage ----
     FILE_EMPTY(6001, "Uploaded file is empty", HttpStatus.BAD_REQUEST),
@@ -203,7 +207,8 @@ public enum ErrorCode {
     TOPUP_AMOUNT_INVALID(9812, "Top-up amount is invalid", HttpStatus.BAD_REQUEST),
     WITHDRAWAL_AMOUNT_INVALID(9813, "Withdrawal amount must be at least 10,000 VND", HttpStatus.BAD_REQUEST),
     PAYMENT_GATEWAY_NOT_CONFIGURED(9814, "Payment gateway is not configured", HttpStatus.SERVICE_UNAVAILABLE),
-    HOUSE_WALLET_UNAVAILABLE(9815, "House wallet is not configured", HttpStatus.SERVICE_UNAVAILABLE);
+    HOUSE_WALLET_UNAVAILABLE(9815, "House wallet is not configured", HttpStatus.SERVICE_UNAVAILABLE),
+    HOUSE_WITHDRAWAL_FORBIDDEN(9816, "The house/escrow wallet cannot be withdrawn from", HttpStatus.FORBIDDEN);
 
     private final int code;
     private final String message;

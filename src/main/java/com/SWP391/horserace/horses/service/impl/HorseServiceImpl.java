@@ -63,6 +63,7 @@ public class HorseServiceImpl implements HorseService {
     private final RaceRepository raceRepository;
     private final RaceEntryRepository raceEntryRepository;
     private final RaceResultRepository raceResultRepository;
+    private final com.SWP391.horserace.races.service.RaceEntryGate raceEntryGate;
     private final com.SWP391.horserace.horses.repository.HorseMedicalRecordRepository medicalRecordRepository;
 
     @Override
@@ -393,6 +394,9 @@ public class HorseServiceImpl implements HorseService {
                         horse.getHorseId(), tournamentId, RegistrationStatus.APPROVED)
                 .orElseThrow(() -> new AppException(ErrorCode.HORSE_NO_APPROVED_REGISTRATION));
 
+        // Eligibility (health + age) + entry-fee debit before the entry is created.
+        raceEntryGate.admit(registration, race);
+
         RaceEntry entry = RaceEntry.builder()
                 .registration(registration)
                 .race(race)
@@ -421,6 +425,7 @@ public class HorseServiceImpl implements HorseService {
                         .tournamentName(r.getTournament() != null ? r.getTournament().getName() : null)
                         .scheduledStartAt(r.getScheduledStartAt())
                         .status(r.getStatus() != null ? r.getStatus().name() : null)
+                        .entryFee(r.getEntryFee())
                         .build())
                 .collect(Collectors.toList());
     }

@@ -136,9 +136,43 @@ class WalletLedgerServiceImplTest {
     }
 
     @Test
-    void applyEntry_throwsWalletInactive_whenWalletNotActive_andNeverMovesMoney() {
+    void applyEntry_creditToFrozenWallet_succeeds_moneyInIsAllowed() {
+        // A freeze blocks outflow, not inflow: a frozen spectator can still receive winnings/refunds,
+        // so one frozen wallet can't strand an entire settlement pool on a payout CREDIT.
         Wallet w = wallet(new BigDecimal("100000.00"));
         w.setStatus(WalletStatus.FROZEN);
+        when(walletRepository.findByUserUserIdForUpdate(userId)).thenReturn(Optional.of(w));
+        when(walletTransactionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.applyEntry(
+                userId, EntryType.CREDIT, TxnCategory.BET_PAYOUT, new BigDecimal("1000.00"), "PREDICTION", relatedId);
+
+        assertThat(w.getBalance()).isEqualByComparingTo("101000.00");
+        verify(walletTransactionRepository).save(any());
+    }
+
+    @Test
+    void applyEntry_debitFromFrozenWallet_throwsWalletInactive_andNeverMovesMoney() {
+        Wallet w = wallet(new BigDecimal("100000.00"));
+        w.setStatus(WalletStatus.FROZEN);
+        when(walletRepository.findByUserUserIdForUpdate(userId)).thenReturn(Optional.of(w));
+
+        assertThatThrownBy(() -> service.applyEntry(
+                userId, EntryType.DEBIT, TxnCategory.BET_STAKE, new BigDecimal("1000.00"), "PREDICTION", relatedId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.WALLET_INACTIVE);
+
+        verify(walletRepository, never()).save(any());
+        verify(walletTransactionRepository, never()).save(any());
+        assertThat(w.getBalance()).isEqualByComparingTo("100000.00");
+    }
+
+    @Test
+    void applyEntry_creditToClosedWallet_throwsWalletInactive_andNeverMovesMoney() {
+        // CLOSED is terminal — even inflow is rejected.
+        Wallet w = wallet(new BigDecimal("100000.00"));
+        w.setStatus(WalletStatus.CLOSED);
         when(walletRepository.findByUserUserIdForUpdate(userId)).thenReturn(Optional.of(w));
 
         assertThatThrownBy(() -> service.applyEntry(

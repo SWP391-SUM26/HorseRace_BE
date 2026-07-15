@@ -90,6 +90,10 @@ public class Race {
     @Column(name = "total_purse")
     private BigDecimal totalPurse;
 
+    /** Fee the owner pays (into the house wallet) when the horse enters this race. */
+    @Column(name = "entry_fee")
+    private BigDecimal entryFee;
+
     // ── FE-v2 Results + Certify (mục 5): telemetry / photofinish / certification ──
 
     @Column(name = "wind_speed_kph", precision = 5, scale = 2)

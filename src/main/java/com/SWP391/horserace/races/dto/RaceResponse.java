@@ -37,6 +37,7 @@ public class RaceResponse {
     private long confirmedCount;
     private Integer goingMoisturePct;
     private BigDecimal totalPurse;
+    private BigDecimal entryFee;
     private List<PrizeDistributionDto> prizeDistribution;
     private RaceStatus status;
     private UUID tournamentId;

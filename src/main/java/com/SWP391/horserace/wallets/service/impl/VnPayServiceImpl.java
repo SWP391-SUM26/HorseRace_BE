@@ -94,7 +94,9 @@ public class VnPayServiceImpl implements VnPayService {
         params.put("vnp_OrderType", "other");
         params.put("vnp_Locale", "vn");
         params.put("vnp_ReturnUrl", vnPayProperties.getReturnUrl());
-        params.put("vnp_IpnUrl", vnPayProperties.getIpnUrl());
+        // NOTE: do NOT send vnp_IpnUrl as a request param. It is not a standard VNPay 2.1.0 payment
+        // field — the IPN URL is configured in the merchant portal. VNPay recomputes the signature
+        // over its known fields only, so an extra vnp_IpnUrl makes the checksums differ → "Sai chữ ký".
         params.put("vnp_IpAddr", "127.0.0.1");
         params.put("vnp_CreateDate", now.format(DATE_FMT));
         params.put("vnp_ExpireDate", now.plusMinutes(15).format(DATE_FMT));

@@ -31,6 +31,7 @@ class RegistrationStatsServiceImplTest {
     @Mock UserRepository userRepository;
     @Mock RaceRepository raceRepository;
     @Mock RaceEntryRepository raceEntryRepository;
+    @Mock com.SWP391.horserace.races.service.RaceEntryGate raceEntryGate;
     @Mock com.SWP391.horserace.attachments.repository.AttachmentRepository attachmentRepository;
 
     private RegistrationServiceImpl service;
@@ -39,7 +40,7 @@ class RegistrationStatsServiceImplTest {
     void setUp() {
         service = new RegistrationServiceImpl(
                 registrationRepository, tournamentRepository, horseRepository, userRepository,
-                raceRepository, raceEntryRepository, attachmentRepository);
+                raceRepository, raceEntryRepository, raceEntryGate, attachmentRepository);
     }
 
     private RegistrationRepository.StatusCount row(RegistrationStatus status, long cnt) {

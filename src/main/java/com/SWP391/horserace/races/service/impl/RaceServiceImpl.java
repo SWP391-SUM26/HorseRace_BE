@@ -72,6 +72,7 @@ public class RaceServiceImpl implements RaceService {
     private final JockeyAssignmentRepository jockeyAssignmentRepository;
     private final VenueRepository venueRepository;
     private final RefereeAssignmentRepository refereeAssignmentRepository;
+    private final com.SWP391.horserace.races.service.RaceEntryGate raceEntryGate;
     private final com.SWP391.horserace.notifications.service.NotificationService notificationService;
     private final EntryDocumentReviewRepository entryDocumentReviewRepository;
     private final RaceEntryInspectionRepository raceEntryInspectionRepository;
@@ -160,6 +161,9 @@ public class RaceServiceImpl implements RaceService {
                 .minParticipants(request.minParticipants())
                 .venue(request.venue())
                 .venueRef(resolveVenue(request.venueId()))
+                .totalPurse(request.totalPurse())
+                .entryFee(request.entryFee())
+                .prizeDistribution(toPrizeItems(request.prizeDistribution()))
                 // Status is always SCHEDULED on create; lifecycle changes go through
                 // schedule()/cancel(), never a client-supplied status.
                 .status(RaceStatus.SCHEDULED)
@@ -236,6 +240,18 @@ public class RaceServiceImpl implements RaceService {
         if (request.minParticipants() != null) race.setMinParticipants(request.minParticipants());
         if (request.venue() != null) race.setVenue(request.venue());
         if (request.venueId() != null) race.setVenueRef(resolveVenue(request.venueId()));
+        if (request.totalPurse() != null) race.setTotalPurse(request.totalPurse());
+        if (request.entryFee() != null) race.setEntryFee(request.entryFee());
+        if (request.prizeDistribution() != null) {
+            // Replace the @ElementCollection in place (clear+addAll) so Hibernate tracks it cleanly.
+            List<PrizeDistributionItem> items = toPrizeItems(request.prizeDistribution());
+            if (race.getPrizeDistribution() == null) {
+                race.setPrizeDistribution(new java.util.ArrayList<>(items));
+            } else {
+                race.getPrizeDistribution().clear();
+                race.getPrizeDistribution().addAll(items);
+            }
+        }
         // Status is intentionally NOT updatable here — transitions go through schedule()/cancel().
 
         return mapToResponse(raceRepository.save(race));
@@ -485,6 +501,9 @@ public class RaceServiceImpl implements RaceService {
             throw new AppException(ErrorCode.RACE_FULL);
         }
 
+        // Eligibility (health + age) + entry-fee debit before the entry is created.
+        raceEntryGate.admit(registration, race);
+
         RaceEntry entry = RaceEntry.builder()
                 .registration(registration)
                 .race(race)
@@ -653,6 +672,7 @@ public class RaceServiceImpl implements RaceService {
                 .confirmedCount(confirmedCount)
                 .goingMoisturePct(r.getGoingMoisturePct())
                 .totalPurse(r.getTotalPurse())
+                .entryFee(r.getEntryFee())
                 .prizeDistribution(mapPrizeDistribution(r.getPrizeDistribution()))
                 .status(r.getStatus())
                 .tournamentId(t != null ? t.getTournamentId() : null)
@@ -661,6 +681,17 @@ public class RaceServiceImpl implements RaceService {
                 .createdAt(r.getCreatedAt())
                 .updatedAt(r.getUpdatedAt())
                 .build();
+    }
+
+    /** Convert request DTOs → embeddable prize-distribution items (skips blank/incomplete rows). */
+    private List<PrizeDistributionItem> toPrizeItems(List<PrizeDistributionDto> dtos) {
+        if (dtos == null) {
+            return List.of();
+        }
+        return dtos.stream()
+                .filter(d -> d != null && d.place() != null && !d.place().isBlank() && d.amount() != null)
+                .map(d -> PrizeDistributionItem.builder().place(d.place().trim()).amount(d.amount()).build())
+                .toList();
     }
 
     private List<PrizeDistributionDto> mapPrizeDistribution(List<PrizeDistributionItem> items) {

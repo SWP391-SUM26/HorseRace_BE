@@ -25,6 +25,7 @@ import com.SWP391.horserace.wallets.service.VnPayService;
 import com.SWP391.horserace.wallets.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,11 @@ public class WalletServiceImpl implements WalletService {
     private final UserRepository userRepository;
     private final VnPayService vnPayService;
     private final PaymentTransactionRepository paymentTransactionRepository;
+
+    /** House / escrow wallet owner email — the same property {@code HouseWalletService} resolves from.
+     *  Resolved inline here (rather than injecting HouseWalletService) to avoid a bean cycle. */
+    @Value("${app.house.user-email:admin@horserace.local}")
+    private String houseEmail;
 
     @Override
     @Transactional
@@ -115,6 +121,12 @@ public class WalletServiceImpl implements WalletService {
                 || amount.compareTo(MIN_TOPUP) < 0
                 || amount.stripTrailingZeros().scale() > 0) {
             throw new AppException(ErrorCode.WITHDRAWAL_AMOUNT_INVALID);
+        }
+        // The house/escrow wallet holds spectators' stakes between bet and settlement — it must never
+        // be drained via a withdrawal (which would starve pending payouts and strand settlement pools).
+        if (houseEmail != null && userRepository.findByEmail(houseEmail)
+                .map(house -> house.getUserId().equals(userId)).orElse(false)) {
+            throw new AppException(ErrorCode.HOUSE_WITHDRAWAL_FORBIDDEN);
         }
         Wallet wallet = walletRepository.findByUserUserIdForUpdate(userId)
                 .orElseThrow(() -> new AppException(ErrorCode.WALLET_NOT_FOUND));

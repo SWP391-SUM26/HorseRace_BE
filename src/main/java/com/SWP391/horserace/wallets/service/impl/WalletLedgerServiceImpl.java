@@ -43,19 +43,25 @@ public class WalletLedgerServiceImpl implements WalletLedgerService {
         Wallet wallet = walletRepository.findByUserUserIdForUpdate(userId)
                 .orElseThrow(() -> new AppException(ErrorCode.WALLET_NOT_FOUND));
 
-        // A frozen/closed wallet must not move money through any path (this is the single shared
-        // primitive every debit/credit funnels through, so the check lives here once).
-        if (wallet.getStatus() != WalletStatus.ACTIVE) {
-            throw new AppException(ErrorCode.WALLET_INACTIVE);
-        }
-
+        // Wallet status gates by DIRECTION (this is the single primitive every move funnels through).
+        // A CLOSED wallet is terminal — no money moves at all. A FROZEN wallet is blocked from moving
+        // money OUT (spend/withdraw) but may still RECEIVE credits (winnings, refunds, deposits): a
+        // freeze should stop outflow, and letting inflow through means one frozen spectator can no
+        // longer strand an entire settlement pool on a payout/refund CREDIT.
+        WalletStatus status = wallet.getStatus();
         BigDecimal newBalance;
         if (entryType == EntryType.DEBIT) {
+            if (status != WalletStatus.ACTIVE) {
+                throw new AppException(ErrorCode.WALLET_INACTIVE);
+            }
             if (wallet.getBalance().compareTo(amount) < 0) {
                 throw new AppException(ErrorCode.INSUFFICIENT_BALANCE);
             }
             newBalance = wallet.getBalance().subtract(amount);
         } else {
+            if (status == WalletStatus.CLOSED) {
+                throw new AppException(ErrorCode.WALLET_INACTIVE);
+            }
             newBalance = wallet.getBalance().add(amount);
         }
 

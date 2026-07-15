@@ -292,6 +292,11 @@ public class SettlementServiceImpl implements SettlementService {
     }
 
     private void refund(Prediction p, OffsetDateTime now, UUID house) {
+        // Idempotency belt (mirrors payWinner's Payout guard): only a still-PENDING bet is refunded, so
+        // a re-entry can never double-refund. Settled bets (WON/LOST/REFUNDED) are skipped.
+        if (p.getStatus() != PredictionStatus.PENDING) {
+            return;
+        }
         p.setStatus(PredictionStatus.REFUNDED);
         p.setSettledAt(now);
         predictionRepository.save(p);
