@@ -10,10 +10,7 @@ import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.wallets.entity.EntryType;
 import com.SWP391.horserace.wallets.entity.TxnCategory;
-import com.SWP391.horserace.wallets.entity.Wallet;
-import com.SWP391.horserace.wallets.entity.WalletTransaction;
-import com.SWP391.horserace.wallets.repository.WalletRepository;
-import com.SWP391.horserace.wallets.repository.WalletTransactionRepository;
+import com.SWP391.horserace.wallets.service.WalletLedgerService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -30,8 +27,7 @@ import java.util.UUID;
 public class RewardServiceImpl implements RewardService {
 
     private final RewardRepository rewardRepository;
-    private final WalletRepository walletRepository;
-    private final WalletTransactionRepository walletTransactionRepository;
+    private final WalletLedgerService walletLedgerService;
     private final RewardMapper rewardMapper;
 
     @Override
@@ -74,29 +70,25 @@ public class RewardServiceImpl implements RewardService {
             throw new AppException(ErrorCode.UNCATEGORIZED_EXCEPTION); // Edge case protection
         }
 
-        // Add funds to wallet
-        Wallet wallet = walletRepository.findByUserUserId(userId)
-                .orElseThrow(() -> new AppException(ErrorCode.UNCATEGORIZED_EXCEPTION)); // Assuming user always has a wallet
+        // Atomically claim the reward BEFORE crediting: a single conditional UPDATE flips
+        // PENDING → CLAIMED, so two concurrent claims can't both pass the status check above and
+        // both credit the wallet (the in-memory check is TOCTOU under READ COMMITTED). Only the
+        // caller that wins the race (rowsAffected == 1) proceeds to credit; the loser gets 0.
+        OffsetDateTime claimedAt = OffsetDateTime.now();
+        int claimed = rewardRepository.markClaimedIfPending(rewardId, claimedAt);
+        if (claimed == 0) {
+            throw new AppException(ErrorCode.REWARD_ALREADY_CLAIMED);
+        }
 
-        wallet.setBalance(wallet.getBalance().add(reward.getAmount()));
-        walletRepository.save(wallet);
+        // Credit through the row-locked, idempotent wallet ledger (WALLET_NOT_FOUND if absent).
+        walletLedgerService.applyEntry(
+                userId, EntryType.CREDIT, TxnCategory.REWARD,
+                reward.getAmount(), "REWARD", reward.getRewardId());
 
-        // Create transaction record
-        WalletTransaction transaction = WalletTransaction.builder()
-                .wallet(wallet)
-                .entryType(EntryType.CREDIT)
-                .txnCategory(TxnCategory.REWARD)
-                .amount(reward.getAmount())
-                .balanceAfter(wallet.getBalance())
-                .relatedEntityType("REWARD")
-                .relatedEntityId(reward.getRewardId())
-                .build();
-        walletTransactionRepository.save(transaction);
-
-        // Update reward status
+        // Reflect the committed status transition on the returned entity (the UPDATE bypassed the
+        // persistence context, and @Modifying(clearAutomatically) evicted it).
         reward.setStatus(RewardStatus.CLAIMED);
-        reward.setClaimedAt(OffsetDateTime.now());
-        rewardRepository.save(reward);
+        reward.setClaimedAt(claimedAt);
 
         log.info("User {} successfully claimed reward {}", userId, rewardId);
 

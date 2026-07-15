@@ -67,6 +67,7 @@ public interface HorseService {
     com.SWP391.horserace.horses.dto.MedicalRecordResponse addMedicalRecord(UUID currentUserId, UUID horseId, com.SWP391.horserace.horses.dto.MedicalRecordRequest request);
     com.SWP391.horserace.horses.dto.MedicalRecordResponse updateMedicalRecord(UUID currentUserId, UUID horseId, UUID recordId, com.SWP391.horserace.horses.dto.MedicalRecordRequest request);
     void deleteMedicalRecord(UUID currentUserId, UUID horseId, UUID recordId);
+    com.SWP391.horserace.horses.dto.MedicalRecordResponse uploadMedicalRecordFile(UUID currentUserId, UUID horseId, UUID recordId, MultipartFile file);
 
     /** Ride intelligence for a horse (FE-v2 jockey contract #7): surface, post time, trainer, owner, recent form. */
     RideIntelligenceResponse getRideIntelligence(UUID horseId);

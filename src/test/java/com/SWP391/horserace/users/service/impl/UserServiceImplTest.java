@@ -154,7 +154,7 @@ class UserServiceImplTest {
         when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(Mockito.any(User.class))).thenAnswer(i -> i.getArgument(0));
 
-        service.deleteUser(userId);
+        service.deleteUser(UUID.randomUUID(), userId);
 
         assertThat(user.isDeleted()).isTrue();
         assertThat(user.getDeletedAt()).isNotNull();
@@ -166,9 +166,34 @@ class UserServiceImplTest {
         UUID userId = UUID.randomUUID();
         when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.deleteUser(userId))
+        assertThatThrownBy(() -> service.deleteUser(UUID.randomUUID(), userId))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.USER_NOT_EXISTED);
+    }
+
+    @Test
+    void deleteUser_self_throwsCannotModifySelf() {
+        UUID selfId = UUID.randomUUID();
+        assertThatThrownBy(() -> service.deleteUser(selfId, selfId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.CANNOT_MODIFY_SELF);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void deleteUser_lastActiveAdmin_throwsProtected() {
+        UUID id = UUID.randomUUID();
+        User admin = User.builder().userId(id).status(UserStatus.ACTIVE)
+                .role(Role.builder().roleCode("ADMIN").roleName("Admin").build())
+                .build();
+        when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(admin));
+        when(userRepository.countByRole_RoleCodeAndStatusAndDeletedFalse("ADMIN", UserStatus.ACTIVE))
+                .thenReturn(1L);
+
+        assertThatThrownBy(() -> service.deleteUser(UUID.randomUUID(), id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.LAST_ADMIN_PROTECTED);
+        verify(userRepository, never()).save(any(User.class));
     }
 
     // ── list / filter (B3) — maps new fields (status, lastLoginAt) ──
@@ -259,7 +284,7 @@ class UserServiceImplTest {
         when(roleRepository.findByRoleCode("JOCKEY")).thenReturn(Optional.of(newRole));
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
 
-        UserResponse res = service.changeRole(id, new ChangeRoleRequest("jockey"));
+        UserResponse res = service.changeRole(UUID.randomUUID(), id, new ChangeRoleRequest("jockey"));
 
         assertThat(res.getRoleCode()).isEqualTo("JOCKEY");
         assertThat(user.getRole()).isSameAs(newRole);
@@ -272,7 +297,7 @@ class UserServiceImplTest {
         when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
         when(roleRepository.findByRoleCode("BOGUS")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.changeRole(id, new ChangeRoleRequest("BOGUS")))
+        assertThatThrownBy(() -> service.changeRole(UUID.randomUUID(), id, new ChangeRoleRequest("BOGUS")))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ROLE_NOT_EXISTED);
         verify(userRepository, never()).save(any(User.class));
@@ -283,7 +308,7 @@ class UserServiceImplTest {
         UUID id = UUID.randomUUID();
         when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.changeRole(id, new ChangeRoleRequest("ADMIN")))
+        assertThatThrownBy(() -> service.changeRole(UUID.randomUUID(), id, new ChangeRoleRequest("ADMIN")))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.USER_NOT_EXISTED);
     }
@@ -297,7 +322,7 @@ class UserServiceImplTest {
         when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
 
-        UserResponse res = service.changeStatus(id, new ChangeStatusRequest("suspended", "spam"));
+        UserResponse res = service.changeStatus(UUID.randomUUID(), id, new ChangeStatusRequest("suspended", "spam"));
 
         assertThat(res.getStatus()).isEqualTo("SUSPENDED");
         assertThat(user.getStatus()).isEqualTo(UserStatus.SUSPENDED);
@@ -309,7 +334,7 @@ class UserServiceImplTest {
         User user = User.builder().userId(id).status(UserStatus.ACTIVE).build();
         when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
 
-        assertThatThrownBy(() -> service.changeStatus(id, new ChangeStatusRequest("ON_FIRE", null)))
+        assertThatThrownBy(() -> service.changeStatus(UUID.randomUUID(), id, new ChangeStatusRequest("ON_FIRE", null)))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.INVALID_USER_STATUS);
         verify(userRepository, never()).save(any(User.class));
@@ -396,6 +421,22 @@ class UserServiceImplTest {
 
         assertThatThrownBy(() -> service.createUser(
                 new CreateUserRequest("P", "p@example.com", "JOCKEY", "0912345678")))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void createUser_normalizesPhoneBeforeUniquenessCheck() {
+        // FR-11: a dashed/spaced phone is stripped to its digits before the uniqueness check,
+        // so formatting cannot bypass the dedupe against a stored "0912345678".
+        Role role = Role.builder().roleCode("JOCKEY").build();
+        when(userRepository.existsByEmail("p@example.com")).thenReturn(false);
+        when(roleRepository.findByRoleCode("JOCKEY")).thenReturn(Optional.of(role));
+        when(userRepository.existsByPhone("0912345678")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.createUser(
+                new CreateUserRequest("P", "p@example.com", "JOCKEY", "09 12-345-678")))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.PHONE_ALREADY_EXISTS);
         verify(userRepository, never()).save(any(User.class));

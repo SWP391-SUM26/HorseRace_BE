@@ -6,6 +6,7 @@ import com.SWP391.horserace.roles.repository.RoleRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.shared.storage.ImageUploadService;
+import com.SWP391.horserace.shared.util.PhoneUtil;
 import com.SWP391.horserace.users.dto.ChangeRoleRequest;
 import com.SWP391.horserace.users.dto.ChangeStatusRequest;
 import com.SWP391.horserace.users.dto.CreateUserRequest;
@@ -41,6 +42,8 @@ import java.util.stream.Collectors;
 public class UserServiceImpl implements UserService {
 
     private static final Logger log = LoggerFactory.getLogger(UserServiceImpl.class);
+
+    private static final String ADMIN_ROLE = "ADMIN";
 
     /** Allow-list of entity fields a client may sort by, mapped from the public sortBy values. */
     private static final Map<String, String> SORTABLE_FIELDS = Map.of(
@@ -141,19 +144,31 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public UserResponse changeRole(UUID id, ChangeRoleRequest request) {
+    public UserResponse changeRole(UUID actingUserId, UUID id, ChangeRoleRequest request) {
+        guardNotSelf(actingUserId, id);
         User user = loadActiveUser(id);
         Role role = roleRepository.findByRoleCode(request.roleCode().trim().toUpperCase())
                 .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
+        // Never demote the last active administrator out of the ADMIN role.
+        if (!ADMIN_ROLE.equalsIgnoreCase(role.getRoleCode()) && isLastActiveAdmin(user)) {
+            throw new AppException(ErrorCode.LAST_ADMIN_PROTECTED);
+        }
         user.setRole(role);
         return mapToResponse(userRepository.save(user));
     }
 
     @Override
     @Transactional
-    public UserResponse changeStatus(UUID id, ChangeStatusRequest request) {
+    public UserResponse changeStatus(UUID actingUserId, UUID id, ChangeStatusRequest request) {
         User user = loadActiveUser(id);
         UserStatus status = parseStatus(request.status());
+        // Deactivating (anything other than ACTIVE) must not lock the actor out or remove the last admin.
+        if (status != UserStatus.ACTIVE) {
+            guardNotSelf(actingUserId, id);
+            if (isLastActiveAdmin(user)) {
+                throw new AppException(ErrorCode.LAST_ADMIN_PROTECTED);
+            }
+        }
         user.setStatus(status);
         if (request.reason() != null && !request.reason().isBlank()) {
             // No dedicated audit column today — log the reason for traceability.
@@ -179,7 +194,8 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
 
         // Reject a duplicate phone before the DB UNIQUE is the last resort (only when supplied).
-        String normalizedPhone = request.phone() != null ? request.phone().trim() : null;
+        // FR-11: normalize (strip spaces/dashes) before the check AND store the normalized value.
+        String normalizedPhone = PhoneUtil.normalize(request.phone());
         if (normalizedPhone != null && !normalizedPhone.isBlank()
                 && userRepository.existsByPhone(normalizedPhone)) {
             throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
@@ -256,7 +272,7 @@ public class UserServiceImpl implements UserService {
             user.setFullName(request.fullName().trim());
         }
         if (request.phone() != null) {
-            String phone = request.phone().trim();
+            String phone = PhoneUtil.normalize(request.phone());
             if (!phone.isBlank() && userRepository.existsByPhoneAndUserIdNot(phone, userId)) {
                 throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
             }
@@ -280,7 +296,7 @@ public class UserServiceImpl implements UserService {
             user.setFullName(request.fullName().trim());
         }
         if (request.phone() != null) {
-            String phone = request.phone().trim();
+            String phone = PhoneUtil.normalize(request.phone());
             if (!phone.isBlank() && userRepository.existsByPhoneAndUserIdNot(phone, id)) {
                 throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
             }
@@ -321,8 +337,12 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public void deleteUser(UUID id) {
+    public void deleteUser(UUID actingUserId, UUID id) {
+        guardNotSelf(actingUserId, id);
         User user = loadActiveUser(id);
+        if (isLastActiveAdmin(user)) {
+            throw new AppException(ErrorCode.LAST_ADMIN_PROTECTED);
+        }
         user.setDeleted(true);
         user.setDeletedAt(OffsetDateTime.now());
         userRepository.save(user);
@@ -331,6 +351,24 @@ public class UserServiceImpl implements UserService {
     private User loadActiveUser(UUID userId) {
         return userRepository.findByUserIdAndDeletedFalse(userId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+    }
+
+    /** An admin must not change their own account via the admin user-management endpoints. */
+    private void guardNotSelf(UUID actingUserId, UUID targetId) {
+        if (actingUserId != null && actingUserId.equals(targetId)) {
+            throw new AppException(ErrorCode.CANNOT_MODIFY_SELF);
+        }
+    }
+
+    /** True when removing this user (demote/suspend/delete) would leave zero active administrators. */
+    private boolean isLastActiveAdmin(User user) {
+        if (user.getRole() == null || !ADMIN_ROLE.equalsIgnoreCase(user.getRole().getRoleCode())) {
+            return false;
+        }
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            return false;
+        }
+        return userRepository.countByRole_RoleCodeAndStatusAndDeletedFalse(ADMIN_ROLE, UserStatus.ACTIVE) <= 1;
     }
 
     /** Translate the public {@code sortBy}/{@code sortDir} into a JPA {@link Sort} over an allow-listed field. */

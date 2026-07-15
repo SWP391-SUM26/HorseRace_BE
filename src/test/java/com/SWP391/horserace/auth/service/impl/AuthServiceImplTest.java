@@ -56,7 +56,7 @@ class AuthServiceImplTest {
     private RegisterJockeyRequest jockeyRequest() {
         return new RegisterJockeyRequest(
                 "Jockey@Example.com", "Passw0rd!", "Passw0rd!", "Loop", "Rider",
-                22, 120.0, "VN", 3, "Flat", null, null, true);
+                22, 54.43, "VN", 3, "Flat", null, null, true);
     }
 
     @Test
@@ -79,14 +79,14 @@ class AuthServiceImplTest {
         assertThat(userCap.getValue().getStatus()).isEqualTo(UserStatus.PENDING);
         assertThat(userCap.getValue().getEmail()).isEqualTo("jockey@example.com");
 
-        // Jockey profile persisted with the self-registration fields (weight converted lbs→kg).
+        // Jockey profile persisted with the self-registration fields (weight is kg, stored as-is).
         ArgumentCaptor<JockeyProfile> profCap = ArgumentCaptor.forClass(JockeyProfile.class);
         verify(jockeyProfileRepository).save(profCap.capture());
         assertThat(profCap.getValue().getAge()).isEqualTo(22);
         assertThat(profCap.getValue().getNationality()).isEqualTo("VN");
         assertThat(profCap.getValue().getApplicationRidingStyle()).isEqualTo("Flat");
         assertThat(profCap.getValue().getExperienceYrs()).isEqualTo(3);
-        assertThat(profCap.getValue().getBodyWeight().doubleValue()).isEqualTo(54.43); // 120 lbs
+        assertThat(profCap.getValue().getBodyWeight().doubleValue()).isEqualTo(54.43); // kg, stored as-is
 
         // Onboarding application filed for the referee queue.
         ArgumentCaptor<MembershipApplication> appCap = ArgumentCaptor.forClass(MembershipApplication.class);
@@ -105,6 +105,22 @@ class AuthServiceImplTest {
     void registerSpectator_duplicatePhone_throws() {
         RegisterSpectatorRequest request = new RegisterSpectatorRequest(
                 "Sam Spectator", "Sam@Example.com", "0912345678", "Passw0rd!", "Passw0rd!", true);
+        when(userRepository.existsByEmail("sam@example.com")).thenReturn(false);
+        when(userRepository.existsByPhone("0912345678")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.registerSpectator(request, "ua"))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void registerSpectator_normalizesPhone_soFormattingCannotBypassUnique() {
+        // FR-11: dashed/spaced phone stripped to digits before existsByPhone, so a formatted
+        // variant of an already-registered number is still rejected as a duplicate.
+        RegisterSpectatorRequest request = new RegisterSpectatorRequest(
+                "Sam Spectator", "Sam@Example.com", "09 12-345-678", "Passw0rd!", "Passw0rd!", true);
         when(userRepository.existsByEmail("sam@example.com")).thenReturn(false);
         when(userRepository.existsByPhone("0912345678")).thenReturn(true);
 

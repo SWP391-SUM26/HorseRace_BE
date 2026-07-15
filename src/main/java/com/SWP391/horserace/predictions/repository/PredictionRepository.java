@@ -1,6 +1,7 @@
 package com.SWP391.horserace.predictions.repository;
 
 import com.SWP391.horserace.predictions.entity.Prediction;
+import com.SWP391.horserace.predictions.entity.PredictionStatus;
 import com.SWP391.horserace.predictions.entity.PredictionType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -24,4 +25,22 @@ public interface PredictionRepository extends JpaRepository<Prediction, UUID> {
             UUID raceId, UUID userId, PredictionType type, UUID predictedEntryId);
 
     boolean existsByIdempotencyKey(String idempotencyKey);
+
+    /** Live bets of a race in a given status (e.g. PENDING) — authoritative source for live pool odds. */
+    @Query("SELECT p FROM Prediction p LEFT JOIN FETCH p.predictedEntry pe WHERE p.race.raceId = :raceId AND p.status = :status")
+    List<Prediction> findByRace_RaceIdAndStatus(@Param("raceId") UUID raceId, @Param("status") PredictionStatus status);
+
+    /**
+     * Active bets of one pool (race + type) in a given status — settlement recomputes the authoritative
+     * pool total from these live rows (NOT {@code BettingPool.totalStake}). The spectator + predicted
+     * entry are fetched so settlement can read the owner's id and the entry's scratch status without
+     * lazy hits.
+     */
+    @Query("SELECT p FROM Prediction p "
+            + "LEFT JOIN FETCH p.spectator s LEFT JOIN FETCH p.predictedEntry pe "
+            + "WHERE p.race.raceId = :raceId AND p.predictionType = :type AND p.status = :status")
+    List<Prediction> findByRace_RaceIdAndPredictionTypeAndStatus(
+            @Param("raceId") UUID raceId,
+            @Param("type") PredictionType type,
+            @Param("status") PredictionStatus status);
 }

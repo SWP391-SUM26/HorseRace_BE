@@ -23,6 +23,7 @@ import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.roles.repository.RoleRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
+import com.SWP391.horserace.shared.util.PhoneUtil;
 import com.SWP391.horserace.users.entity.KycStatus;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.entity.UserStatus;
@@ -55,9 +56,6 @@ public class AuthServiceImpl implements AuthService {
     private final MembershipApplicationRepository membershipApplicationRepository;
     private final OwnerProfileRepository ownerProfileRepository;
     private final AttachmentService attachmentService;
-
-    /** lbs → kg factor for storing the form's weight into jockey_profile.body_weight (kg). */
-    private static final double LBS_TO_KG = 0.45359237;
 
     // =========================================================
     // Login / token management
@@ -135,8 +133,10 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public AuthResponse registerSpectator(RegisterSpectatorRequest request, String userAgent) {
         String normalizedEmail = request.email().trim().toLowerCase();
+        // FR-11: normalize the phone (strip spaces/dashes) before the uniqueness check AND store it.
+        String normalizedPhone = PhoneUtil.normalize(request.phone());
         validateEmailAvailable(normalizedEmail);
-        validatePhoneAvailable(request.phone());
+        validatePhoneAvailable(normalizedPhone);
         validatePasswordMatch(request.password(), request.confirmPassword());
 
         Role role = lookupRole("SPECTATOR");
@@ -146,7 +146,7 @@ public class AuthServiceImpl implements AuthService {
                 .userCode(generateUserCode())
                 .fullName(request.fullName().trim())
                 .email(normalizedEmail)
-                .phone(request.phone())
+                .phone(normalizedPhone)
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .status(UserStatus.ACTIVE)
                 .kycStatus(KycStatus.PENDING)
@@ -170,8 +170,10 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public AuthResponse registerOwner(RegisterOwnerRequest request, String userAgent) {
         String normalizedEmail = request.email().trim().toLowerCase();
+        // FR-11: normalize the phone (strip spaces/dashes) before the uniqueness check AND store it.
+        String normalizedPhone = PhoneUtil.normalize(request.contactNumber());
         validateEmailAvailable(normalizedEmail);
-        validatePhoneAvailable(request.contactNumber());
+        validatePhoneAvailable(normalizedPhone);
         validatePasswordMatch(request.password(), request.confirmPassword());
 
         Role role = lookupRole("HORSE_OWNER");
@@ -181,7 +183,7 @@ public class AuthServiceImpl implements AuthService {
                 .userCode(generateUserCode())
                 .fullName(request.fullName().trim())
                 .email(normalizedEmail)
-                .phone(request.contactNumber())
+                .phone(normalizedPhone)
                 .avatarUrl(request.avatarUrl())
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .status(UserStatus.ACTIVE)
@@ -250,7 +252,7 @@ public class AuthServiceImpl implements AuthService {
                 .nationality(request.nationality())
                 .applicationRidingStyle(request.ridingStyle())
                 .experienceYrs(request.yearsActive())
-                .bodyWeight(lbsToKg(request.weight()))
+                .bodyWeight(toBodyWeightKg(request.weight()))
                 .jockeyLicenseUrl(licenseUrl)
                 .fitnessCertificateUrl(fitnessUrl)
                 .build();
@@ -274,10 +276,15 @@ public class AuthServiceImpl implements AuthService {
                 .build();
     }
 
-    /** Convert the form's weight (lbs) to jockey_profile.body_weight (kg, 2dp); null-safe. */
-    private BigDecimal lbsToKg(Double weightLbs) {
-        return weightLbs == null ? null
-                : BigDecimal.valueOf(weightLbs * LBS_TO_KG).setScale(2, RoundingMode.HALF_UP);
+    /**
+     * Store the form's body weight (kg) into jockey_profile.body_weight (kg, 2dp); null-safe.
+     * body_weight is kilograms across the system — the jockey self-profile edit and the admin
+     * review both read/write it as kg — so registration must NOT convert (a lbs→kg conversion here
+     * was what made the reviewed weight look "off" against the entered value).
+     */
+    private BigDecimal toBodyWeightKg(Double weightKg) {
+        return weightKg == null ? null
+                : BigDecimal.valueOf(weightKg).setScale(2, RoundingMode.HALF_UP);
     }
 
     /**

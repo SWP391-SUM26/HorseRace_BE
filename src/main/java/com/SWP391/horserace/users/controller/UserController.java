@@ -212,24 +212,26 @@ public class UserController {
     /** PATCH /api/v1/users/{id}/role — admin: change a user's role by role code. */
     @PatchMapping("/{id}/role")
     @PreAuthorize("hasRole('ADMIN')")
-    public ApiResponse<UserResponse> changeRole(@PathVariable UUID id,
+    public ApiResponse<UserResponse> changeRole(@AuthenticationPrincipal UUID actingUserId,
+                                                @PathVariable UUID id,
                                                 @Valid @RequestBody ChangeRoleRequest request) {
         return ApiResponse.<UserResponse>builder()
                 .success(true)
                 .message("User role updated")
-                .data(userService.changeRole(id, request))
+                .data(userService.changeRole(actingUserId, id, request))
                 .build();
     }
 
     /** PATCH /api/v1/users/{id}/status — admin: suspend / activate / ban a user. */
     @PatchMapping("/{id}/status")
     @PreAuthorize("hasRole('ADMIN')")
-    public ApiResponse<UserResponse> changeStatus(@PathVariable UUID id,
+    public ApiResponse<UserResponse> changeStatus(@AuthenticationPrincipal UUID actingUserId,
+                                                  @PathVariable UUID id,
                                                   @Valid @RequestBody ChangeStatusRequest request) {
         return ApiResponse.<UserResponse>builder()
                 .success(true)
                 .message("User status updated")
-                .data(userService.changeStatus(id, request))
+                .data(userService.changeStatus(actingUserId, id, request))
                 .build();
     }
 
@@ -251,8 +253,9 @@ public class UserController {
     /** DELETE /api/v1/users/{id} — admin soft-delete a user by UUID. */
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public ApiResponse<Void> deleteUser(@PathVariable UUID id) {
-        userService.deleteUser(id);
+    public ApiResponse<Void> deleteUser(@AuthenticationPrincipal UUID actingUserId,
+                                        @PathVariable UUID id) {
+        userService.deleteUser(actingUserId, id);
         return ApiResponse.<Void>builder()
                 .success(true)
                 .message("User deleted")

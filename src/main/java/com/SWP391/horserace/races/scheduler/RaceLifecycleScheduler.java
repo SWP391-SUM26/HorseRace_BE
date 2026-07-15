@@ -33,4 +33,24 @@ public class RaceLifecycleScheduler {
             }
         }
     }
+
+    /**
+     * Auto-close (FR-07): transition OPEN races that are within the configured lead of their prediction
+     * cutoff (fallback: scheduled start) to CLOSED, so betting opens without a manual step. Reuses the
+     * auto-cancel sweep cadence. Each race is closed in its own transaction (via
+     * {@link RaceService#autoClose}) so one failure can't abort the sweep. OPEN → CLOSED only and
+     * idempotent, so it coexists with the auto-cancel sweep (cancel-flagged races are excluded).
+     */
+    @Scheduled(
+            fixedDelayString = "${app.race.auto-cancel-sweep-ms:600000}",
+            initialDelayString = "${app.race.auto-close-initial-delay-ms:90000}")
+    public void sweepRacesToAutoClose() {
+        for (UUID raceId : raceService.findRacesToAutoClose()) {
+            try {
+                raceService.autoClose(raceId); // own transaction — idempotent per race
+            } catch (RuntimeException e) {
+                log.warn("Auto-close failed for race {}", raceId, e);
+            }
+        }
+    }
 }

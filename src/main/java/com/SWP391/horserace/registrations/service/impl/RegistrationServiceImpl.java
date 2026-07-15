@@ -50,6 +50,7 @@ public class RegistrationServiceImpl implements RegistrationService {
     private final UserRepository userRepository;
     private final RaceRepository raceRepository;
     private final RaceEntryRepository raceEntryRepository;
+    private final com.SWP391.horserace.races.service.RaceEntryGate raceEntryGate;
     private final com.SWP391.horserace.attachments.repository.AttachmentRepository attachmentRepository;
 
     @Override
@@ -173,6 +174,9 @@ public class RegistrationServiceImpl implements RegistrationService {
             throw new AppException(ErrorCode.REGISTRATION_DOCUMENT_REQUIRED);
         }
 
+        // Don't approve an ineligible horse (unfit/injured/quarantine or below minimum age).
+        raceEntryGate.checkEligibility(registration.getHorse(), registration.getTournament());
+
         User reviewer = userRepository.findByUserIdAndDeletedFalse(currentUserId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
 
@@ -250,6 +254,8 @@ public class RegistrationServiceImpl implements RegistrationService {
                 // race_result, inspections) are RESTRICT and would throw a DataIntegrityViolation.
                 entry.setStatus(RaceEntryStatus.SCRATCHED);
                 raceEntryRepository.save(entry);
+                // Return the entry fee to the owner (no-op when the race had no fee).
+                raceEntryGate.refundEntryFee(registration, race);
             });
         }
 
@@ -281,6 +287,9 @@ public class RegistrationServiceImpl implements RegistrationService {
                 && raceEntryRepository.countByRace_RaceId(race.getRaceId()) >= race.getMaxParticipants()) {
             throw new AppException(ErrorCode.RACE_FULL);
         }
+
+        // Eligibility (health + age) + entry-fee debit before the entry is created.
+        raceEntryGate.admit(registration, race);
 
         RaceEntry entry = RaceEntry.builder()
                 .registration(registration)

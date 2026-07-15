@@ -66,6 +66,8 @@ class HorseServiceImplTest {
         @Mock
         RaceResultRepository raceResultRepository;
         @Mock
+        com.SWP391.horserace.races.service.RaceEntryGate raceEntryGate;
+        @Mock
         HorseMedicalRecordRepository medicalRecordRepository;
 
         private HorseServiceImpl service;
@@ -83,7 +85,7 @@ class HorseServiceImplTest {
                 service = new HorseServiceImpl(horseRepository, userRepository,
                                 new ImageUploadService(Mockito.mock(FileStorageService.class)),
                                 registrationRepository, raceRepository, raceEntryRepository, raceResultRepository,
-                                medicalRecordRepository);
+                                raceEntryGate, medicalRecordRepository);
         }
 
         private static HorseRequest req(String name, HorseGender gender) {

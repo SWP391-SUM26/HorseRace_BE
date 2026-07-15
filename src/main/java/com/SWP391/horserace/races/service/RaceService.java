@@ -30,6 +30,9 @@ public interface RaceService {
 
     RaceResponse scheduleRace(UUID currentUserId, UUID id, ScheduleRaceRequest request);
 
+    /** Lock the lineup: OPEN → CLOSED (opens betting). */
+    RaceResponse closeRace(UUID currentUserId, UUID id);
+
     /** Conduct the race: OPEN/CLOSED → RUNNING (locks entries; stamps actual start). */
     RaceResponse startRace(UUID currentUserId, UUID id);
 
@@ -49,4 +52,10 @@ public interface RaceService {
 
     /** Propose cancelling one under-filled race (sets cancelProposedAt + notifies admins); idempotent. */
     void proposeCancel(UUID raceId);
+
+    /** Ids of OPEN races due to auto-close (cutoff, or start fallback, within the lead) — driven by the auto-close sweeper. */
+    List<UUID> findRacesToAutoClose();
+
+    /** Auto-transition one OPEN race → CLOSED (opens betting); idempotent no-op if not OPEN. */
+    void autoClose(UUID raceId);
 }

@@ -88,3 +88,17 @@ ON CONFLICT (email) DO UPDATE
         status        = EXCLUDED.status,
         kyc_status    = EXCLUDED.kyc_status,
         is_deleted    = FALSE;
+
+-- =========================================================
+-- HOUSE / ESCROW WALLET (two-sided money flow)
+-- Pre-seed the admin's wallet row so it exists BEFORE the first bet. Every bet/payout/refund resolves
+-- the house wallet (app.house.user-email -> admin@horserace.local) and locks it FIRST; without this
+-- row, two concurrent first-bets could both try to INSERT it and race the wallet.user_id UNIQUE
+-- constraint (getOrCreateWallet is a lazy find-or-create with no unique-violation handling) -> a raw
+-- 500. Seeding one ACTIVE, zero-balance VND wallet removes that bootstrap race.
+-- Idempotent on the wallet.user_id UNIQUE so a re-run of the seed is a no-op.
+INSERT INTO wallet (user_id, balance, locked_balance, currency_code, status)
+SELECT u.user_id, 0, 0, 'VND', 'ACTIVE'
+FROM app_user u
+WHERE u.email = 'admin@horserace.local'
+ON CONFLICT (user_id) DO NOTHING;

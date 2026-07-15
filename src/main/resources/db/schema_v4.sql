@@ -281,6 +281,8 @@ CREATE TABLE horse_medical_record (
     title       VARCHAR(255) NOT NULL,
     note        TEXT,
     record_date DATE,
+    file_url    TEXT,                          -- attached document/scan (public URL); null if none
+    file_name   VARCHAR(255),                  -- original uploaded filename for display
     created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -397,6 +399,7 @@ CREATE TABLE race (
     venue_id             UUID REFERENCES venue(venue_id),  -- §D1 structured venue FK (nullable)
     going_moisture_pct   INT CHECK (going_moisture_pct IS NULL OR (going_moisture_pct BETWEEN 0 AND 100)),
     total_purse          NUMERIC(18,2),
+    entry_fee            NUMERIC(18,2) CHECK (entry_fee IS NULL OR entry_fee >= 0),  -- owner pays on entry
     -- FE-v2 Results + Certify (mục 5): telemetry / photofinish / certification.
     wind_speed_kph       NUMERIC(5,2),
     wind_direction       VARCHAR(10),                                 -- FE-v2 Live monitor (mục 4)
@@ -756,7 +759,7 @@ CREATE TABLE wallet_transaction (
     entry_type          VARCHAR(20) NOT NULL CHECK (entry_type IN ('DEBIT', 'CREDIT')),
     txn_category        VARCHAR(50)
                         CHECK (txn_category IN ('DEPOSIT', 'WITHDRAWAL', 'BET_STAKE',
-                                                'BET_PAYOUT', 'PRIZE', 'REFUND', 'ADJUSTMENT', 'REWARD')),
+                                                'BET_PAYOUT', 'PRIZE', 'REFUND', 'ADJUSTMENT', 'REWARD', 'ENTRY_FEE')),
     amount              NUMERIC(18,2) NOT NULL CHECK (amount >= 0),
     balance_after       NUMERIC(18,2) NOT NULL CHECK (balance_after >= 0),
     related_entity_type VARCHAR(50),

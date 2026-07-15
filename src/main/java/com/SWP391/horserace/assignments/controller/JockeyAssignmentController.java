@@ -5,13 +5,11 @@ import com.SWP391.horserace.assignments.dto.InvitationResponse;
 import com.SWP391.horserace.assignments.dto.SendInvitationRequest;
 import com.SWP391.horserace.assignments.service.JockeyAssignmentService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
-import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -48,10 +46,8 @@ public class JockeyAssignmentController {
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<InvitationResponse> sendInvitation(
             @Valid @RequestBody SendInvitationRequest request,
-            @RequestParam(value = "currentUserId", required = false) UUID currentUserIdParam,
-            Authentication authentication) {
+            @AuthenticationPrincipal UUID currentUserId) {
 
-        UUID currentUserId = resolveUserId(authentication, currentUserIdParam);
         InvitationResponse response = assignmentService.sendInvitation(request, currentUserId);
 
         return ApiResponse.<InvitationResponse>builder()
@@ -100,10 +96,8 @@ public class JockeyAssignmentController {
     @PatchMapping("/{id}/accept")
     public ApiResponse<InvitationResponse> acceptInvitation(
             @PathVariable UUID id,
-            @RequestParam(value = "currentUserId", required = false) UUID currentUserIdParam,
-            Authentication authentication) {
+            @AuthenticationPrincipal UUID currentUserId) {
 
-        UUID currentUserId = resolveUserId(authentication, currentUserIdParam);
         InvitationResponse response = assignmentService.acceptInvitation(id, currentUserId);
 
         return ApiResponse.<InvitationResponse>builder()
@@ -122,10 +116,8 @@ public class JockeyAssignmentController {
     @PatchMapping("/{id}/reject")
     public ApiResponse<InvitationResponse> rejectInvitation(
             @PathVariable UUID id,
-            @RequestParam(value = "currentUserId", required = false) UUID currentUserIdParam,
-            Authentication authentication) {
+            @AuthenticationPrincipal UUID currentUserId) {
 
-        UUID currentUserId = resolveUserId(authentication, currentUserIdParam);
         InvitationResponse response = assignmentService.rejectInvitation(id, currentUserId);
 
         return ApiResponse.<InvitationResponse>builder()
@@ -165,10 +157,8 @@ public class JockeyAssignmentController {
     @DeleteMapping("/{id}")
     public ApiResponse<Void> cancelInvitation(
             @PathVariable UUID id,
-            @RequestParam(value = "currentUserId", required = false) UUID currentUserIdParam,
-            Authentication authentication) {
+            @AuthenticationPrincipal UUID currentUserId) {
 
-        UUID currentUserId = resolveUserId(authentication, currentUserIdParam);
         assignmentService.cancelInvitation(id, currentUserId);
 
         return ApiResponse.<Void>builder()
@@ -177,34 +167,4 @@ public class JockeyAssignmentController {
                 .build();
     }
 
-    // =========================================================================
-    // PRIVATE HELPERS
-    // =========================================================================
-
-    /**
-     * Resolves the current user id from either:
-     * <ol>
-     *   <li>The JWT authentication principal (production path), or</li>
-     *   <li>The {@code currentUserId} query parameter (DEV/Swagger fallback).</li>
-     * </ol>
-     *
-     * @throws AppException if neither source provides a valid user id.
-     */
-    private UUID resolveUserId(Authentication authentication, UUID fallbackUserId) {
-        // 1. Try JWT principal
-        if (authentication != null && authentication.getName() != null
-                && !"anonymousUser".equals(authentication.getName())) {
-            try {
-                return UUID.fromString(authentication.getName());
-            } catch (IllegalArgumentException ignored) {
-                // not a valid UUID — fall through
-            }
-        }
-        // 2. Try query parameter fallback (DEV mode)
-        if (fallbackUserId != null) {
-            return fallbackUserId;
-        }
-        // 3. No user identity available - return null for DEV mode bypass
-        return null;
-    }
 }

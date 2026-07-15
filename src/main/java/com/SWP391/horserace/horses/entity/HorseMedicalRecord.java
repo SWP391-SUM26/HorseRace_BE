@@ -46,6 +46,14 @@ public class HorseMedicalRecord {
     @Column(name = "record_date")
     private LocalDate recordDate;
 
+    /** Public URL of an attached document/scan (Cloudinary CDN or local /api/v1/files/…); null if none. */
+    @Column(name = "file_url", columnDefinition = "text")
+    private String fileUrl;
+
+    /** Original filename of the attached document, for display. */
+    @Column(name = "file_name")
+    private String fileName;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private OffsetDateTime createdAt;

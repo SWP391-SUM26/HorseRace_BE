@@ -3,6 +3,7 @@ package com.SWP391.horserace.horses.dto;
 import lombok.Builder;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -21,4 +22,6 @@ public class EnterableRaceResponse {
     private String tournamentName;
     private OffsetDateTime scheduledStartAt;
     private String status;
+    /** Fee the owner pays on entry (null/0 = free). */
+    private BigDecimal entryFee;
 }

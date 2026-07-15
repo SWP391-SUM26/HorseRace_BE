@@ -12,6 +12,7 @@ import com.SWP391.horserace.races.service.RaceService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -35,9 +36,11 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/races")
 @RequiredArgsConstructor
+@Slf4j
 public class RaceController {
 
     private final RaceService raceService;
+    private final com.SWP391.horserace.predictions.service.SettlementService settlementService;
 
     /** GET /api/v1/races — list with search (q), filters, sort and pagination. */
     @GetMapping
@@ -125,6 +128,19 @@ public class RaceController {
                 .build();
     }
 
+    /** PATCH /api/v1/races/{id}/close — lock the lineup (OPEN → CLOSED; opens betting). */
+    @PatchMapping("/{id}/close")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<RaceResponse> closeRace(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID id) {
+        return ApiResponse.<RaceResponse>builder()
+                .success(true)
+                .message("Race closed")
+                .data(raceService.closeRace(userId, id))
+                .build();
+    }
+
     /** PATCH /api/v1/races/{id}/start — conduct the race (OPEN/CLOSED → RUNNING; locks entries). */
     @PatchMapping("/{id}/start")
     @PreAuthorize("hasRole('ADMIN')")
@@ -157,10 +173,19 @@ public class RaceController {
     public ApiResponse<RaceResponse> cancelRace(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id) {
+        RaceResponse cancelled = raceService.cancelRace(userId, id);
+        // After the CANCELLED status commits, refund every pooled stake (pari-mutuel refund-all).
+        // Runs OUTSIDE the cancel tx (like the certify→settle hook); if it hiccups the scheduled
+        // sweep + admin resettle drain the pools later, so a settlement blip never fails the cancel.
+        try {
+            settlementService.settleRace(id);
+        } catch (RuntimeException e) {
+            log.error("Refund settlement after cancelling race {} failed; sweep will retry", id, e);
+        }
         return ApiResponse.<RaceResponse>builder()
                 .success(true)
                 .message("Race cancelled")
-                .data(raceService.cancelRace(userId, id))
+                .data(cancelled)
                 .build();
     }
 

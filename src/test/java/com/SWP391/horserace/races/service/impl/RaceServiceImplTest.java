@@ -62,6 +62,7 @@ class RaceServiceImplTest {
     @Mock JockeyAssignmentRepository jockeyAssignmentRepository;
     @Mock com.SWP391.horserace.venues.repository.VenueRepository venueRepository;
     @Mock com.SWP391.horserace.staffing.repository.RefereeAssignmentRepository refereeAssignmentRepository;
+    @Mock com.SWP391.horserace.races.service.RaceEntryGate raceEntryGate;
     @Mock com.SWP391.horserace.notifications.service.NotificationService notificationService;
     @Mock com.SWP391.horserace.inspections.repository.EntryDocumentReviewRepository entryDocumentReviewRepository;
     @Mock com.SWP391.horserace.inspections.repository.RaceEntryInspectionRepository raceEntryInspectionRepository;
@@ -78,7 +79,7 @@ class RaceServiceImplTest {
         service = new RaceServiceImpl(
                 raceRepository, raceEntryRepository, registrationRepository, tournamentRepository,
                 userRepository, jockeyAssignmentRepository, venueRepository, refereeAssignmentRepository,
-                notificationService, entryDocumentReviewRepository, raceEntryInspectionRepository);
+                raceEntryGate, notificationService, entryDocumentReviewRepository, raceEntryInspectionRepository);
         tournament = Tournament.builder().tournamentId(tournamentId).name("Spring Cup").build();
     }
 
@@ -146,6 +147,57 @@ class RaceServiceImplTest {
         var now = OffsetDateTime.now();
         RaceResponse res = service.createRace(currentUserId, reqDates(now, now));
         assertThat(res).isNotNull();
+    }
+
+    // ── FR-12 min ≤ max participant range ──
+
+    @Test
+    void createRace_rejectsMinGreaterThanMax() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        // params: (…, maxParticipants=4, minParticipants=8, …) → min > max
+        RaceRequest req = new RaceRequest(tournamentId, "R", "FLAT", 1200, "GOOD", "SUNNY",
+                null, null, 4, 8, null, null);
+        assertThatThrownBy(() -> service.createRace(currentUserId, req))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_PARTICIPANT_RANGE);
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void createRace_allowsMinEqualMax() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(raceRepository.count()).thenReturn(0L);
+        when(raceRepository.existsByRaceCode(any())).thenReturn(false);
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+        RaceRequest req = new RaceRequest(tournamentId, "R", "FLAT", 1200, "GOOD", "SUNNY",
+                null, null, 5, 5, null, null); // max == min
+        assertThat(service.createRace(currentUserId, req)).isNotNull();
+    }
+
+    @Test
+    void createRace_allowsMinLessThanMax() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(raceRepository.count()).thenReturn(0L);
+        when(raceRepository.existsByRaceCode(any())).thenReturn(false);
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+        RaceRequest req = new RaceRequest(tournamentId, "R", "FLAT", 1200, "GOOD", "SUNNY",
+                null, null, 8, 2, null, null); // max=8, min=2
+        assertThat(service.createRace(currentUserId, req)).isNotNull();
+    }
+
+    @Test
+    void updateRace_rejectsMinGreaterThanMax_onEffectiveValues() {
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.SCHEDULED).maxParticipants(4).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+        // supply only min=8 (max stays existing 4) → effective min > max
+        RaceRequest req = new RaceRequest(tournamentId, null, null, null, null, null,
+                null, null, null, 8, null, null);
+        assertThatThrownBy(() -> service.updateRace(currentUserId, id, req))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_PARTICIPANT_RANGE);
+        verify(raceRepository, never()).save(any(Race.class));
     }
 
     // ── update ──
@@ -233,6 +285,56 @@ class RaceServiceImplTest {
     }
 
     @Test
+    void scheduleRace_rejectsPastStart() {
+        // FR-04: a past scheduledStartAt is rejected; status is not flipped to OPEN and nothing is saved.
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.SCHEDULED).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+
+        OffsetDateTime pastStart = OffsetDateTime.now().minusDays(1);
+
+        assertThatThrownBy(() -> service.scheduleRace(currentUserId, id, new ScheduleRaceRequest(pastStart, null)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.DATE_IN_PAST);
+        assertThat(race.getStatus()).isEqualTo(RaceStatus.SCHEDULED);
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void scheduleRace_allowsTodayOrFutureStart() {
+        // Boundary: today must pass the past-check (mirrors validateDates day-granularity).
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.SCHEDULED).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+
+        OffsetDateTime today = OffsetDateTime.now();
+        RaceResponse res = service.scheduleRace(currentUserId, id, new ScheduleRaceRequest(today, null));
+
+        assertThat(res.getStatus()).isEqualTo(RaceStatus.OPEN);
+        assertThat(res.getScheduledStartAt()).isEqualTo(today);
+    }
+
+    @Test
+    void scheduleRace_stillEnforcesCutoffBeforeStart() {
+        // Regression: the past-check must not pre-empt the existing cutoff-before-start guard.
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.SCHEDULED).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+
+        OffsetDateTime start = OffsetDateTime.now().plusDays(1);
+        OffsetDateTime cutoff = start.plusHours(1); // cutoff AFTER start → un-startable
+
+        assertThatThrownBy(() -> service.scheduleRace(currentUserId, id, new ScheduleRaceRequest(start, cutoff)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_TIMING);
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
     void schedule_fromOpen_invalidStatus() {
         UUID id = UUID.randomUUID();
         Race race = Race.builder().raceId(id).tournament(tournament)
@@ -270,6 +372,51 @@ class RaceServiceImplTest {
         assertThatThrownBy(() -> service.cancelRace(currentUserId, id))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_STATUS);
+    }
+
+    // ── close (FR-01: OPEN → CLOSED; the only state betting is accepted in) ──
+
+    @Test
+    void closeRace_fromOpen_setsClosed() {
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).tournament(tournament)
+                .raceCode("RACE00001").status(RaceStatus.OPEN).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+
+        RaceResponse res = service.closeRace(currentUserId, id);
+
+        assertThat(res.getStatus()).isEqualTo(RaceStatus.CLOSED);
+        assertThat(race.getStatus()).isEqualTo(RaceStatus.CLOSED);
+        verify(raceRepository).save(race);
+    }
+
+    @Test
+    void closeRace_whenNotOpen_rejects() {
+        for (RaceStatus notOpen : new RaceStatus[]{
+                RaceStatus.SCHEDULED, RaceStatus.CLOSED, RaceStatus.RUNNING,
+                RaceStatus.FINISHED, RaceStatus.OFFICIAL, RaceStatus.CANCELLED}) {
+            UUID id = UUID.randomUUID();
+            Race race = Race.builder().raceId(id).tournament(tournament)
+                    .raceCode("RACE00001").status(notOpen).build();
+            when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+
+            assertThatThrownBy(() -> service.closeRace(currentUserId, id))
+                    .as("closing from %s must be rejected", notOpen)
+                    .isInstanceOf(AppException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_STATUS);
+            assertThat(race.getStatus()).isEqualTo(notOpen);
+        }
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    @Test
+    void closeRace_nullUser_rejects() {
+        assertThatThrownBy(() -> service.closeRace(null, UUID.randomUUID()))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNAUTHENTICATED);
+        verify(raceRepository, never()).findByRaceIdAndDeletedFalse(any());
+        verify(raceRepository, never()).save(any(Race.class));
     }
 
     // ── §D1 venueId set on create / update ──
@@ -576,71 +723,18 @@ class RaceServiceImplTest {
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ENTRY_NOT_FOUND);
     }
 
-    // ── startRace: ready-to-run enforcement (FR-03) ──
+    // ── startRace: admin override (the admin's decision is final) ──
 
-    private Race readyRace(UUID id) {
+    private Race startableRace(UUID id, RaceStatus status) {
         return Race.builder().raceId(id).tournament(tournament)
-                .raceCode("RACE00001").status(RaceStatus.OPEN).maxParticipants(8).minParticipants(2)
-                .predictionCutoffAt(OffsetDateTime.now().minusMinutes(10)) // registration closed
-                .scheduledStartAt(OffsetDateTime.now().plusHours(1))       // not past yet
+                .raceCode("RACE00001").status(status).maxParticipants(8).minParticipants(2)
                 .build();
     }
 
-    /** Fully-ready stub: CONFIRMED referee + all entries doc-ACCEPTED + vet-CLEARED. */
-    private void stubReady(UUID id, long entries, long accepted, boolean hasReferee) {
-        stubReady(id, entries, accepted, hasReferee, true, true);
-    }
-
-    /**
-     * Extended startRace gate stub (FR-18): builds {@code entries} non-scratched entries, each with a
-     * document review (ACCEPTED iff {@code allDocsAccepted}) and an inspection (CLEARED iff
-     * {@code allVetCleared}), plus a CONFIRMED-referee flag.
-     */
-    private void stubReady(UUID id, long entries, long accepted, boolean hasConfirmedReferee,
-                           boolean allDocsAccepted, boolean allVetCleared) {
-        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(readyRace(id)));
-        when(raceEntryRepository.countByRace_RaceId(id)).thenReturn(entries);
-        when(jockeyAssignmentRepository.countAcceptedByRaceId(id)).thenReturn(accepted);
-        when(refereeAssignmentRepository.existsByRace_RaceIdAndStatus(
-                any(), eq(com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED)))
-                .thenReturn(hasConfirmedReferee);
-
-        List<RaceEntry> list = new java.util.ArrayList<>();
-        List<com.SWP391.horserace.inspections.entity.EntryDocumentReview> reviews = new java.util.ArrayList<>();
-        List<com.SWP391.horserace.inspections.entity.RaceEntryInspection> inspections = new java.util.ArrayList<>();
-        for (int i = 0; i < entries; i++) {
-            RaceEntry e = RaceEntry.builder().entryId(UUID.randomUUID())
-                    .status(RaceEntryStatus.ENTERED).build();
-            list.add(e);
-            reviews.add(com.SWP391.horserace.inspections.entity.EntryDocumentReview.builder()
-                    .entry(e)
-                    .documentStatus(allDocsAccepted
-                            ? com.SWP391.horserace.inspections.entity.DocumentReviewStatus.ACCEPTED
-                            : com.SWP391.horserace.inspections.entity.DocumentReviewStatus.PENDING)
-                    .build());
-            inspections.add(com.SWP391.horserace.inspections.entity.RaceEntryInspection.builder()
-                    .entry(e)
-                    .inspectionStatus(allVetCleared
-                            ? com.SWP391.horserace.inspections.entity.InspectionStatus.CLEARED
-                            : com.SWP391.horserace.inspections.entity.InspectionStatus.PENDING)
-                    .build());
-        }
-        when(raceEntryRepository.findByRace_RaceId(id)).thenReturn(list);
-        when(entryDocumentReviewRepository.findByEntry_EntryIdIn(any())).thenReturn(reviews);
-        when(raceEntryInspectionRepository.findByEntry_EntryIdIn(any())).thenReturn(inspections);
-    }
-
-    private void assertStartNotReady(UUID id) {
-        assertThatThrownBy(() -> service.startRace(currentUserId, id))
-                .isInstanceOf(AppException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY);
-        verify(raceRepository, never()).save(any(Race.class));
-    }
-
     @Test
-    void startRace_allConditionsMet_setsRunning() {
+    void startRace_fromOpen_setsRunning() {
         UUID id = UUID.randomUUID();
-        stubReady(id, 2, 2, true);
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(startableRace(id, RaceStatus.OPEN)));
         when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
 
         RaceResponse res = service.startRace(currentUserId, id);
@@ -649,136 +743,41 @@ class RaceServiceImplTest {
     }
 
     @Test
-    void startRace_notEnoughParticipants_notReady() {
+    void startRace_fromClosed_setsRunning() {
         UUID id = UUID.randomUUID();
-        stubReady(id, 1, 1, true); // 1 < min 2
-        assertStartNotReady(id);
-    }
-
-    @Test
-    void startRace_notEveryEntryHasJockey_notReady() {
-        UUID id = UUID.randomUUID();
-        stubReady(id, 2, 1, true); // accepted 1 != entries 2
-        assertStartNotReady(id);
-    }
-
-    @Test
-    void startRace_noRefereeAssigned_notReady() {
-        UUID id = UUID.randomUUID();
-        stubReady(id, 2, 2, false);
-        assertStartNotReady(id);
-    }
-
-    @Test
-    void startRace_onlyDeclinedReferee_blocked() {
-        // RT-HIGH-1: a DECLINED assignment must NOT satisfy the referee gate. The gate queries only
-        // ASSIGNED/CONFIRMED, so a declined-only race resolves to hasReferee=false → not ready.
-        UUID id = UUID.randomUUID();
-        stubReady(id, 2, 2, false);
-        assertStartNotReady(id);
-    }
-
-    @Test
-    void startRace_nullPredictionCutoff_notReady_noNpe() {
-        UUID id = UUID.randomUUID();
-        // Fully ready EXCEPT the null cutoff — must not NPE and must report not-ready.
-        Race r = readyRace(id);
-        r.setPredictionCutoffAt(null); // red-team: must not NPE
-        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(r));
-        when(raceEntryRepository.countByRace_RaceId(id)).thenReturn(2L);
-        when(jockeyAssignmentRepository.countAcceptedByRaceId(id)).thenReturn(2L);
-        when(refereeAssignmentRepository.existsByRace_RaceIdAndStatus(
-                any(), eq(com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED)))
-                .thenReturn(true);
-        when(raceEntryRepository.findByRace_RaceId(id)).thenReturn(List.of());
-        // No entries → doc/vet gates are trivially satisfied; only the null cutoff blocks.
-        assertStartNotReady(id);
-    }
-
-    // ── startRace: Phase 2 unified gate (FR-18 / CN2) ──
-
-    @Test
-    void startRace_noConfirmedReferee_blocked() {
-        // An ASSIGNED-but-not-CONFIRMED referee no longer satisfies the gate.
-        UUID id = UUID.randomUUID();
-        stubReady(id, 2, 2, false, true, true);
-        assertThatThrownBy(() -> service.startRace(currentUserId, id))
-                .isInstanceOf(AppException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY)
-                .hasMessageContaining("confirmed referee");
-        verify(raceRepository, never()).save(any(Race.class));
-    }
-
-    @Test
-    void startRace_entryDocumentsNotAccepted_blocked() {
-        // One (of two) non-scratched entries has a PENDING document review.
-        UUID id = UUID.randomUUID();
-        stubReady(id, 2, 2, true, false, true);
-        assertThatThrownBy(() -> service.startRace(currentUserId, id))
-                .isInstanceOf(AppException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY)
-                .hasMessageContaining("documents accepted");
-        verify(raceRepository, never()).save(any(Race.class));
-    }
-
-    @Test
-    void startRace_entryWithNoDocumentReview_blocked() {
-        // RT-HIGH-2: an entry with NO review row at all must count as not-accepted (missing rows).
-        UUID id = UUID.randomUUID();
-        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(readyRace(id)));
-        when(raceEntryRepository.countByRace_RaceId(id)).thenReturn(2L);
-        when(jockeyAssignmentRepository.countAcceptedByRaceId(id)).thenReturn(2L);
-        when(refereeAssignmentRepository.existsByRace_RaceIdAndStatus(
-                any(), eq(com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED)))
-                .thenReturn(true);
-        List<RaceEntry> list = List.of(
-                RaceEntry.builder().entryId(UUID.randomUUID()).status(RaceEntryStatus.ENTERED).build(),
-                RaceEntry.builder().entryId(UUID.randomUUID()).status(RaceEntryStatus.ENTERED).build());
-        when(raceEntryRepository.findByRace_RaceId(id)).thenReturn(list);
-        // ZERO review rows and ZERO inspection rows exist.
-        when(entryDocumentReviewRepository.findByEntry_EntryIdIn(any())).thenReturn(List.of());
-        when(raceEntryInspectionRepository.findByEntry_EntryIdIn(any())).thenReturn(List.of());
-        assertThatThrownBy(() -> service.startRace(currentUserId, id))
-                .isInstanceOf(AppException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY)
-                .hasMessageContaining("documents accepted (0/2)");
-        verify(raceRepository, never()).save(any(Race.class));
-    }
-
-    @Test
-    void startRace_entryNotVetCleared_blocked() {
-        UUID id = UUID.randomUUID();
-        stubReady(id, 2, 2, true, true, false);
-        assertThatThrownBy(() -> service.startRace(currentUserId, id))
-                .isInstanceOf(AppException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY)
-                .hasMessageContaining("vet-cleared");
-        verify(raceRepository, never()).save(any(Race.class));
-    }
-
-    @Test
-    void startRace_allGapsCollected_notFirstFail() {
-        // No confirmed referee + docs not accepted + not vet-cleared → the message lists ALL gaps.
-        UUID id = UUID.randomUUID();
-        stubReady(id, 2, 2, false, false, false);
-        assertThatThrownBy(() -> service.startRace(currentUserId, id))
-                .isInstanceOf(AppException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_NOT_READY)
-                .hasMessageContaining("confirmed referee")
-                .hasMessageContaining("documents accepted")
-                .hasMessageContaining("vet-cleared");
-        verify(raceRepository, never()).save(any(Race.class));
-    }
-
-    @Test
-    void startRace_allConditionsMet_transitionsToRunning() {
-        UUID id = UUID.randomUUID();
-        stubReady(id, 2, 2, true, true, true);
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(startableRace(id, RaceStatus.CLOSED)));
         when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
 
         RaceResponse res = service.startRace(currentUserId, id);
 
         assertThat(res.getStatus()).isEqualTo(RaceStatus.RUNNING);
+    }
+
+    @Test
+    void startRace_adminOverride_startsWithNoReadinessChecks() {
+        // Admin's decision is final: NO readiness gate (min participants, confirmed jockeys/referee,
+        // documents accepted, vet-cleared, registration window) blocks the start. Even an empty OPEN
+        // race with no referee/documents/vet starts, and those gate repositories are never consulted.
+        UUID id = UUID.randomUUID();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(startableRace(id, RaceStatus.OPEN)));
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+
+        RaceResponse res = service.startRace(currentUserId, id);
+
+        assertThat(res.getStatus()).isEqualTo(RaceStatus.RUNNING);
+        verify(entryDocumentReviewRepository, never()).findByEntry_EntryIdIn(any());
+        verify(raceEntryInspectionRepository, never()).findByEntry_EntryIdIn(any());
+        verify(refereeAssignmentRepository, never()).existsByRace_RaceIdAndStatus(any(), any());
+    }
+
+    @Test
+    void startRace_invalidStatus_throws() {
+        UUID id = UUID.randomUUID();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(startableRace(id, RaceStatus.FINISHED)));
+        assertThatThrownBy(() -> service.startRace(currentUserId, id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_INVALID_STATUS);
+        verify(raceRepository, never()).save(any(Race.class));
     }
 
     // ── auto-cancel proposal (FR-05) ──
@@ -873,5 +872,46 @@ class RaceServiceImplTest {
         verify(notificationService).notifyUser(eq(refId), any(), any());
         verify(notificationService).notifyUser(eq(jockeyId), any(), any());
         verify(notificationService).notifyUser(eq(ownerId), any(), any());
+    }
+
+    // ── auto-close sweep (FR-07) ──
+
+    @Test
+    void findRacesToAutoClose_delegatesWithNowPlusLeadBoundary() {
+        // lead = 30 min; the finder must be called with a threshold ~= now + 30min.
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "autoCloseLeadMs", 1_800_000L);
+        UUID x = UUID.randomUUID();
+        ArgumentCaptor<OffsetDateTime> threshold = ArgumentCaptor.forClass(OffsetDateTime.class);
+        when(raceRepository.findOpenRacesToAutoClose(threshold.capture())).thenReturn(List.of(x));
+
+        OffsetDateTime before = OffsetDateTime.now().plusMinutes(30);
+        List<UUID> result = service.findRacesToAutoClose();
+        OffsetDateTime after = OffsetDateTime.now().plusMinutes(30);
+
+        assertThat(result).containsExactly(x);
+        // threshold is now + 30min, so it sits within the [before, after] bracket around now+30min.
+        assertThat(threshold.getValue()).isBetween(before.minusSeconds(5), after.plusSeconds(5));
+    }
+
+    @Test
+    void autoClose_open_marksClosed() {
+        UUID id = UUID.randomUUID();
+        when(raceRepository.markClosed(id)).thenReturn(1); // won the atomic OPEN→CLOSED
+
+        service.autoClose(id);
+
+        verify(raceRepository).markClosed(id);
+        verify(raceRepository, never()).save(any()); // conditional update only — no full-row save
+    }
+
+    @Test
+    void autoClose_nonOpen_noOpNoThrow() {
+        UUID id = UUID.randomUUID();
+        when(raceRepository.markClosed(id)).thenReturn(0); // already CLOSED/CANCELLED/RUNNING or lost race
+
+        service.autoClose(id); // must not throw
+
+        verify(raceRepository).markClosed(id);
+        verify(raceRepository, never()).save(any());
     }
 }

@@ -3,6 +3,16 @@ package com.SWP391.horserace.races.service.impl;
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
 import com.SWP391.horserace.horses.entity.Horse;
+import com.SWP391.horserace.jockeys.entity.JockeyProfile;
+import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
+import com.SWP391.horserace.prizes.entity.BeneficiaryType;
+import com.SWP391.horserace.prizes.entity.Prize;
+import com.SWP391.horserace.penalties.entity.Penalty;
+import com.SWP391.horserace.penalties.entity.PenaltyStatus;
+import com.SWP391.horserace.penalties.entity.PenaltyType;
+import com.SWP391.horserace.penalties.repository.PenaltyRepository;
+import com.SWP391.horserace.prizes.entity.PrizeStatus;
+import com.SWP391.horserace.prizes.repository.PrizeRepository;
 import com.SWP391.horserace.races.dto.CertifyResultsRequest;
 import com.SWP391.horserace.races.dto.CertifyResultsResponse;
 import com.SWP391.horserace.races.dto.RaceResultsResponse;
@@ -13,8 +23,10 @@ import com.SWP391.horserace.races.dto.SubmitReportResponse;
 import com.SWP391.horserace.races.dto.UpdateResultRequest;
 import com.SWP391.horserace.races.dto.UpdateResultResponse;
 import com.SWP391.horserace.races.entity.OfficialityStatus;
+import com.SWP391.horserace.races.entity.PrizeDistributionItem;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
+import com.SWP391.horserace.races.entity.RaceEntryStatus;
 import com.SWP391.horserace.races.entity.RaceFraction;
 import com.SWP391.horserace.races.entity.RaceResult;
 import com.SWP391.horserace.races.entity.RaceResultVersion;
@@ -31,16 +43,25 @@ import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.repository.UserRepository;
 import com.SWP391.horserace.violations.dto.CreateViolationRequest;
 import com.SWP391.horserace.violations.dto.ViolationDetailResponse;
+import com.SWP391.horserace.wallets.entity.EntryType;
+import com.SWP391.horserace.wallets.entity.TxnCategory;
+import com.SWP391.horserace.wallets.service.WalletLedgerService;
+import com.SWP391.horserace.wallets.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -57,8 +78,16 @@ public class RaceResultServiceImpl implements RaceResultService {
     private final com.SWP391.horserace.staffing.service.RefereeSubmissionCodeService refereeSubmissionCodeService;
     private final com.SWP391.horserace.violations.service.ViolationService violationService;
     private final RegistrationRepository registrationRepository;
+    private final PenaltyRepository penaltyRepository;
+    private final PrizeRepository prizeRepository;
+    private final JockeyProfileRepository jockeyProfileRepository;
+    private final WalletLedgerService walletLedgerService;
+    private final WalletService walletService;
 
     private static final String ADMIN_ROLE_CODE = "ADMIN";
+    /** Default jockey cut of a horse's prize when the jockey profile has no prizePercent set. */
+    private static final BigDecimal DEFAULT_JOCKEY_PRIZE_PCT = new BigDecimal("10");
+    private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
 
     @Override
     @Transactional
@@ -250,6 +279,17 @@ public class RaceResultServiceImpl implements RaceResultService {
     /** Upsert the finish order (one race_result per entry, status PROVISIONAL). */
     private List<RaceResult> upsertResults(Race race, List<RecordResultsRequest.ResultRow> rows) {
         UUID raceId = race.getRaceId();
+
+        // FR-01: guard duplicate finish positions BEFORE any save — under the pessimistic lock so
+        // concurrent writers serialize. Covers within-payload dupes AND payload-vs-persisted.
+        Map<UUID, Integer> desiredByEntry = new HashMap<>();
+        for (RecordResultsRequest.ResultRow row : rows) {
+            if (row.finishPosition() != null) {
+                desiredByEntry.put(row.entryId(), row.finishPosition());
+            }
+        }
+        assertNoDuplicateFinishPositions(raceId, desiredByEntry);
+
         List<RaceResult> saved = new ArrayList<>();
         for (RecordResultsRequest.ResultRow row : rows) {
             RaceEntry entry = raceEntryRepository.findByIdWithDetails(row.entryId())
@@ -284,6 +324,47 @@ public class RaceResultServiceImpl implements RaceResultService {
             saved.add(raceResultRepository.save(result));
         }
         return saved;
+    }
+
+    /**
+     * FR-01: reject duplicate finish positions within a race. Acquires a PESSIMISTIC_WRITE lock on the
+     * parent {@code race} row FIRST (it always exists, so it serializes concurrent writers even when no
+     * {@code race_result} rows exist yet — a {@code FOR UPDATE} over the result rows can't lock
+     * not-yet-inserted rows), then reads the committed results and checks that the union of the desired
+     * positions for THIS operation ({@code desiredByEntry}) plus the persisted positions of every OTHER
+     * entry (not in {@code desiredByEntry}) has no repeated non-null value. A collision →
+     * {@link ErrorCode#DUPLICATE_FINISH_POSITION}. Re-submitting an entry's own position is safe (its
+     * persisted row is excluded because that entry is in {@code desiredByEntry}).
+     */
+    private void assertNoDuplicateFinishPositions(UUID raceId, Map<UUID, Integer> desiredByEntry) {
+        // Serialize on the always-present race row: a second concurrent writer blocks here until the
+        // first commits, then reads the first writer's committed positions below and detects the clash.
+        raceRepository.findByRaceIdForUpdate(raceId);
+
+        List<Integer> effective = new ArrayList<>();
+        // Desired positions from this operation (non-null only).
+        for (Integer pos : desiredByEntry.values()) {
+            if (pos != null) {
+                effective.add(pos);
+            }
+        }
+        // Persisted positions of every OTHER entry (those not being written in this operation).
+        // Read AFTER acquiring the race lock so we see the latest committed rows (READ COMMITTED).
+        for (RaceResult r : raceResultRepository.findByRace_RaceId(raceId)) {
+            UUID entryId = r.getEntry() != null ? r.getEntry().getEntryId() : null;
+            if (entryId != null && desiredByEntry.containsKey(entryId)) {
+                continue; // this entry's position is being (re)set by the current operation
+            }
+            if (r.getFinishPosition() != null) {
+                effective.add(r.getFinishPosition());
+            }
+        }
+        Set<Integer> seen = new HashSet<>();
+        for (Integer pos : effective) {
+            if (!seen.add(pos)) {
+                throw new AppException(ErrorCode.DUPLICATE_FINISH_POSITION);
+            }
+        }
     }
 
     /** Best-effort in-app notification to every active ADMIN (never throws to the caller). */
@@ -396,6 +477,14 @@ public class RaceResultServiceImpl implements RaceResultService {
             throw new AppException(ErrorCode.RESULT_ENTRY_RACE_MISMATCH);
         }
 
+        // FR-01: a new finish position must not collide with another result in the race (checked under
+        // the pessimistic lock, BEFORE any version/row write). Re-submitting this row's own position is
+        // fine — the guard excludes the target entry's persisted row.
+        if (request != null && request.finishPosition() != null && result.getEntry() != null) {
+            assertNoDuplicateFinishPositions(raceId,
+                    Map.of(result.getEntry().getEntryId(), request.finishPosition()));
+        }
+
         User changedBy = userRepository.findByUserIdAndDeletedFalse(currentUserId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
 
@@ -492,6 +581,10 @@ public class RaceResultServiceImpl implements RaceResultService {
             throw new AppException(ErrorCode.RESULT_UNDER_REVIEW_BLOCKS_CERTIFY);
         }
 
+        // Apply stewards' rulings (time penalties / disqualifications) to the order of finish BEFORE
+        // it is frozen OFFICIAL — so both prizes and bet settlement use the corrected placings.
+        applyPenaltiesAndRerank(race, results);
+
         for (RaceResult result : results) {
             result.setOfficialityStatus(OfficialityStatus.OFFICIAL);
             result.setApprovedBy(certifier);
@@ -504,6 +597,9 @@ public class RaceResultServiceImpl implements RaceResultService {
         race.setCertifiedAt(now);
         race.setStewardsReport(request.stewardsReport());
         raceRepository.save(race);
+
+        // Pay the purse: credit each finishing horse's owner + jockey (mint) per the prize distribution.
+        creditPrizes(race, results);
 
         // Notify each owner whose horse ran that the official result is published.
         for (RaceResult result : results) {
@@ -555,6 +651,196 @@ public class RaceResultServiceImpl implements RaceResultService {
             }
         }
         return byEntry;
+    }
+
+    // ── stewards' rulings applied to placings (on certify, before OFFICIAL) ──
+
+    /**
+     * Apply issued stewards' rulings to the finishing order before certification freezes it: add time
+     * penalties to finish times, disqualify DQ'd entries (their finish position becomes null), then
+     * renumber the surviving finishers by adjusted time. Only rulings tied to a specific entry apply.
+     * Idempotent: only {@code ISSUED} penalties are applied and they flip to {@code UPHELD}; the
+     * FINISHED→OFFICIAL certify transition is itself one-shot, so this never double-applies.
+     */
+    private void applyPenaltiesAndRerank(Race race, List<RaceResult> results) {
+        List<Penalty> penalties = penaltyRepository.findByRace_RaceId(race.getRaceId());
+        if (penalties.isEmpty()) {
+            return;
+        }
+        Map<UUID, RaceResult> byEntry = new HashMap<>();
+        for (RaceResult r : results) {
+            if (r.getEntry() != null) {
+                byEntry.put(r.getEntry().getEntryId(), r);
+            }
+        }
+
+        Set<UUID> disqualified = new HashSet<>();
+        boolean changed = false;
+        for (Penalty penalty : penalties) {
+            if (penalty.getStatus() != PenaltyStatus.ISSUED || penalty.getEntry() == null) {
+                continue;
+            }
+            RaceResult result = byEntry.get(penalty.getEntry().getEntryId());
+            if (result == null) {
+                continue;
+            }
+            if (penalty.getPenaltyType() == PenaltyType.TIME_PENALTY
+                    && penalty.getTimePenaltyMs() != null && result.getFinishTimeMs() != null) {
+                result.setFinishTimeMs(result.getFinishTimeMs() + penalty.getTimePenaltyMs());
+                changed = true;
+            } else if (penalty.getPenaltyType() == PenaltyType.DISQUALIFICATION) {
+                RaceEntry entry = penalty.getEntry();
+                entry.setStatus(RaceEntryStatus.DISQUALIFIED);
+                raceEntryRepository.save(entry);
+                disqualified.add(entry.getEntryId());
+                changed = true;
+            }
+            penalty.setStatus(PenaltyStatus.UPHELD);
+            penaltyRepository.save(penalty);
+        }
+
+        if (!changed) {
+            return;
+        }
+
+        // Renumber surviving finishers by adjusted time (null times sort last); DQ'd lose their place.
+        List<RaceResult> survivors = results.stream()
+                .filter(r -> r.getEntry() == null || !disqualified.contains(r.getEntry().getEntryId()))
+                .sorted(Comparator.comparing(RaceResult::getFinishTimeMs,
+                        Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+        int position = 1;
+        for (RaceResult r : survivors) {
+            r.setFinishPosition(position++);
+            raceResultRepository.save(r);
+        }
+        for (RaceResult r : results) {
+            if (r.getEntry() != null && disqualified.contains(r.getEntry().getEntryId())) {
+                r.setFinishPosition(null);
+                raceResultRepository.save(r);
+            }
+        }
+    }
+
+    // ── prize distribution (credited on certify) ──
+
+    /**
+     * Credit each finishing horse's prize to its owner + jockey wallets (MINT — the purse is
+     * operator-funded, so a pure CREDIT with no debit source) and record {@link Prize} rows. The
+     * jockey takes their {@link JockeyProfile#getPrizePercent()} (default 10% if unset); the owner
+     * takes the remainder. Idempotent: skips any entry that has already earned a prize.
+     */
+    private void creditPrizes(Race race, List<RaceResult> results) {
+        List<PrizeDistributionItem> dist = race.getPrizeDistribution();
+        if (dist == null || dist.isEmpty()) {
+            return;
+        }
+        Map<Integer, BigDecimal> amountByPosition = new HashMap<>();
+        for (PrizeDistributionItem item : dist) {
+            Integer pos = parsePlace(item.getPlace());
+            if (pos != null && item.getAmount() != null && item.getAmount().signum() > 0) {
+                amountByPosition.put(pos, item.getAmount());
+            }
+        }
+        if (amountByPosition.isEmpty()) {
+            return;
+        }
+
+        // Riding (ACCEPTED) jockey per entry, resolved in one query.
+        List<UUID> entryIds = results.stream()
+                .map(r -> r.getEntry() != null ? r.getEntry().getEntryId() : null)
+                .filter(Objects::nonNull)
+                .toList();
+        Map<UUID, User> jockeyByEntry = new HashMap<>();
+        for (JockeyAssignment ja : jockeyAssignmentRepository.findAcceptedByEntryIds(entryIds)) {
+            if (ja.getEntry() != null && ja.getJockey() != null) {
+                jockeyByEntry.put(ja.getEntry().getEntryId(), ja.getJockey());
+            }
+        }
+
+        for (RaceResult result : results) {
+            RaceEntry entry = result.getEntry();
+            Integer pos = result.getFinishPosition();
+            if (entry == null || pos == null || entry.getRegistration() == null) {
+                continue;
+            }
+            BigDecimal amount = amountByPosition.get(pos);
+            if (amount == null) {
+                continue;
+            }
+            // Idempotency belt: never pay an entry twice.
+            if (entry.getPrizeEarned() != null && entry.getPrizeEarned().signum() > 0) {
+                continue;
+            }
+            User owner = entry.getRegistration().getOwner();
+            if (owner == null) {
+                continue;
+            }
+
+            User jockey = jockeyByEntry.get(entry.getEntryId());
+            BigDecimal jockeyCut = BigDecimal.ZERO;
+            if (jockey != null) {
+                BigDecimal pct = jockeyProfileRepository.findById(jockey.getUserId())
+                        .map(JockeyProfile::getPrizePercent)
+                        .orElse(null);
+                if (pct == null) {
+                    pct = DEFAULT_JOCKEY_PRIZE_PCT;
+                }
+                jockeyCut = amount.multiply(pct).divide(ONE_HUNDRED, 2, RoundingMode.HALF_UP);
+            }
+            BigDecimal ownerCut = amount.subtract(jockeyCut);
+
+            if (ownerCut.signum() > 0) {
+                walletService.getOrCreateWallet(owner.getUserId());
+                walletLedgerService.applyEntry(owner.getUserId(), EntryType.CREDIT, TxnCategory.PRIZE,
+                        ownerCut, "RACE_ENTRY", entry.getEntryId());
+                savePrize(race, entry, BeneficiaryType.OWNER, pos, ownerCut);
+            }
+            if (jockey != null && jockeyCut.signum() > 0) {
+                walletService.getOrCreateWallet(jockey.getUserId());
+                walletLedgerService.applyEntry(jockey.getUserId(), EntryType.CREDIT, TxnCategory.PRIZE,
+                        jockeyCut, "RACE_ENTRY", entry.getEntryId());
+                savePrize(race, entry, BeneficiaryType.JOCKEY, pos, jockeyCut);
+            }
+
+            entry.setPrizeEarned(amount);
+            raceEntryRepository.save(entry);
+        }
+    }
+
+    private void savePrize(Race race, RaceEntry entry, BeneficiaryType type, int position, BigDecimal amount) {
+        prizeRepository.save(Prize.builder()
+                .race(race)
+                .beneficiaryType(type)
+                .rankPosition(position)
+                .prizeAmount(amount)
+                // Unique per (entry, beneficiary): "PRZ-O-<entryId>" / "PRZ-J-<entryId>" (≤ 50 chars).
+                .prizeCode("PRZ-" + type.name().charAt(0) + "-" + entry.getEntryId())
+                .status(PrizeStatus.AWARDED)
+                .build());
+    }
+
+    /** Parse a distribution place label ("1st", "2nd", "10th", or "3") to a finish-position int. */
+    private static Integer parsePlace(String place) {
+        if (place == null) {
+            return null;
+        }
+        StringBuilder digits = new StringBuilder();
+        for (char c : place.trim().toCharArray()) {
+            if (Character.isDigit(c)) {
+                digits.append(c);
+            } else if (digits.length() > 0) {
+                break;
+            }
+        }
+        if (digits.length() == 0) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(digits.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**
