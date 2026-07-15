@@ -178,6 +178,13 @@ public class UserServiceImpl implements UserService {
         Role role = roleRepository.findByRoleCode(normalizedRole)
                 .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
 
+        // Reject a duplicate phone before the DB UNIQUE is the last resort (only when supplied).
+        String normalizedPhone = request.phone() != null ? request.phone().trim() : null;
+        if (normalizedPhone != null && !normalizedPhone.isBlank()
+                && userRepository.existsByPhone(normalizedPhone)) {
+            throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+        }
+
         // Generate a strong random password, store it bcrypt-hashed, email the raw value to the user.
         String rawPassword = generatePassword();
 
@@ -186,7 +193,7 @@ public class UserServiceImpl implements UserService {
                 .userCode(generateUserCode())
                 .fullName(request.fullName().trim())
                 .email(normalizedEmail)
-                .phone(request.phone() != null ? request.phone().trim() : null)
+                .phone(normalizedPhone)
                 .passwordHash(passwordEncoder.encode(rawPassword))
                 .status(UserStatus.ACTIVE)
                 // Admin-provisioned: the generated password is emailed to this exact address, so an
@@ -249,7 +256,11 @@ public class UserServiceImpl implements UserService {
             user.setFullName(request.fullName().trim());
         }
         if (request.phone() != null) {
-            user.setPhone(request.phone().trim());
+            String phone = request.phone().trim();
+            if (!phone.isBlank() && userRepository.existsByPhoneAndUserIdNot(phone, userId)) {
+                throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+            }
+            user.setPhone(phone);
         }
         if (request.avatarUrl() != null) {
             user.setAvatarUrl(request.avatarUrl().trim());
@@ -269,7 +280,11 @@ public class UserServiceImpl implements UserService {
             user.setFullName(request.fullName().trim());
         }
         if (request.phone() != null) {
-            user.setPhone(request.phone().trim());
+            String phone = request.phone().trim();
+            if (!phone.isBlank() && userRepository.existsByPhoneAndUserIdNot(phone, id)) {
+                throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+            }
+            user.setPhone(phone);
         }
         if (request.avatarUrl() != null) {
             user.setAvatarUrl(request.avatarUrl().trim());

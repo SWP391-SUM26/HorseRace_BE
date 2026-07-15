@@ -87,6 +87,11 @@ public class RefereeApplicationServiceImpl implements RefereeApplicationService 
         // Soft-deleted accounts are intentionally excluded so an approval never resurrects a removed user.
         User user = userRepository.findByEmailAndDeletedFalse(app.getEmail()).orElse(null);
         if (user == null) {
+            // Reject a duplicate phone before creating the account (only when the applicant supplied one).
+            if (app.getPhone() != null && !app.getPhone().isBlank()
+                    && userRepository.existsByPhone(app.getPhone())) {
+                throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+            }
             user = User.builder()
                     .role(role)
                     .userCode(generateUserCode())

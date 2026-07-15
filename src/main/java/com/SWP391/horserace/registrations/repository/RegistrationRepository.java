@@ -54,6 +54,21 @@ public interface RegistrationRepository
             + "WHERE r.tournament.tournamentId = :tournamentId GROUP BY r.status")
     List<StatusCount> countGroupByStatusForTournament(@Param("tournamentId") UUID tournamentId);
 
+    /** APPROVED registrations for a tournament that have NO race entry in the given race (#8). */
+    @Query("""
+        SELECT r FROM TournamentRegistration r
+          JOIN FETCH r.horse h
+          JOIN FETCH r.owner o
+         WHERE r.tournament.tournamentId = :tournamentId
+           AND r.status = com.SWP391.horserace.registrations.entity.RegistrationStatus.APPROVED
+           AND NOT EXISTS (
+             SELECT 1 FROM RaceEntry re
+              WHERE re.registration = r AND re.race.raceId = :raceId
+           )
+        """)
+    List<TournamentRegistration> findApprovedNotEnteredInRace(@Param("tournamentId") UUID tournamentId,
+                                                              @Param("raceId") UUID raceId);
+
     /** Projection row for the group-by-status KPI query. */
     interface StatusCount {
         RegistrationStatus getStatus();

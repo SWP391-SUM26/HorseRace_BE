@@ -151,6 +151,38 @@ class HorseServiceImplTest {
                 assertThat(res.getCogginsTestDate()).isEqualTo(coggins);
         }
 
+        // ── #9 regression: focused Horse fields survive mapToResponse ──
+
+        @Test
+        void getHorseById_responseCarriesFocusedFields() {
+                UUID id = UUID.randomUUID();
+                Horse horse = Horse.builder()
+                                .horseId(id).owner(owner).horseCode("HRS0001").name("Midnight Thunder")
+                                .microchipNo("985141000123456")
+                                .gender(HorseGender.MALE)
+                                .color("Bay")
+                                .dateOfBirth(java.time.LocalDate.of(2019, 4, 1))
+                                .weight(new java.math.BigDecimal("512.50"))
+                                .originCountry("Ireland")
+                                .healthStatus(HorseHealthStatus.HEALTHY)
+                                .registrationStatus("REGISTERED")
+                                .status(HorseStatus.ACTIVE)
+                                .build();
+                when(horseRepository.findByHorseIdAndDeletedFalse(id)).thenReturn(Optional.of(horse));
+
+                HorseResponse res = service.getHorseById(id);
+
+                assertThat(res.getMicrochipNo()).isEqualTo("985141000123456");
+                assertThat(res.getGender()).isEqualTo(HorseGender.MALE);
+                assertThat(res.getColor()).isEqualTo("Bay");
+                assertThat(res.getDateOfBirth()).isEqualTo(java.time.LocalDate.of(2019, 4, 1));
+                assertThat(res.getWeight()).isEqualByComparingTo("512.50");
+                assertThat(res.getOriginCountry()).isEqualTo("Ireland");
+                assertThat(res.getHealthStatus()).isEqualTo(HorseHealthStatus.HEALTHY);
+                assertThat(res.getRegistrationStatus()).isEqualTo("REGISTERED");
+                assertThat(res.getStatus()).isEqualTo(HorseStatus.ACTIVE);
+        }
+
         @Test
         void update_byNonOwnerNonAdmin_rejected() {
                 UUID id = UUID.randomUUID();

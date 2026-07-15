@@ -25,4 +25,7 @@ public interface RegistrationService {
     RegistrationResponse rejectRegistration(UUID currentUserId, UUID id, RejectRegistrationRequest request);
 
     RegistrationResponse withdrawRegistration(UUID currentUserId, UUID id);
+
+    /** Referee/admin soft-removes a registration (status REMOVED); scratches its race entry if any. */
+    void deleteRegistration(UUID currentUserId, UUID id);
 }

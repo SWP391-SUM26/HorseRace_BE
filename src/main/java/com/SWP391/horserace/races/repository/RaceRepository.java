@@ -2,6 +2,7 @@ package com.SWP391.horserace.races.repository;
 
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceStatus;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -20,6 +21,12 @@ public interface RaceRepository extends JpaRepository<Race, UUID>, JpaSpecificat
     boolean existsByRaceCode(String code);
 
     Optional<Race> findByRaceIdAndDeletedFalse(UUID id);
+
+    /** Non-deleted races, paged — the staffing list must not surface soft-deleted races (their detail 404s). */
+    Page<Race> findByDeletedFalse(Pageable pageable);
+
+    /** Count of non-deleted races — staffing dashboard total. */
+    long countByDeletedFalse();
 
     @Query("SELECT r FROM Race r LEFT JOIN FETCH r.tournament WHERE r.raceId = :id")
     Optional<Race> findByIdWithTournament(@Param("id") UUID id);

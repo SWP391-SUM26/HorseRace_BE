@@ -101,4 +101,16 @@ public class User {
 
     @Column(name = "deleted_at")
     private OffsetDateTime deletedAt;
+
+    /**
+     * Store a blank phone as NULL so the {@code app_user.phone} UNIQUE constraint treats "no phone"
+     * as absent (NULLs are exempt from uniqueness) rather than colliding on the empty string.
+     */
+    @jakarta.persistence.PrePersist
+    @jakarta.persistence.PreUpdate
+    private void normalizeBlankPhone() {
+        if (phone != null && phone.isBlank()) {
+            phone = null;
+        }
+    }
 }

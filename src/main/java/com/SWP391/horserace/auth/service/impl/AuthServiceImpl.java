@@ -136,6 +136,7 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponse registerSpectator(RegisterSpectatorRequest request, String userAgent) {
         String normalizedEmail = request.email().trim().toLowerCase();
         validateEmailAvailable(normalizedEmail);
+        validatePhoneAvailable(request.phone());
         validatePasswordMatch(request.password(), request.confirmPassword());
 
         Role role = lookupRole("SPECTATOR");
@@ -170,6 +171,7 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponse registerOwner(RegisterOwnerRequest request, String userAgent) {
         String normalizedEmail = request.email().trim().toLowerCase();
         validateEmailAvailable(normalizedEmail);
+        validatePhoneAvailable(request.contactNumber());
         validatePasswordMatch(request.password(), request.confirmPassword());
 
         Role role = lookupRole("HORSE_OWNER");
@@ -336,6 +338,13 @@ public class AuthServiceImpl implements AuthService {
     private void validateEmailAvailable(String email) {
         if (userRepository.existsByEmail(email)) {
             throw new AppException(ErrorCode.EMAIL_ALREADY_EXISTS);
+        }
+    }
+
+    /** Throws {@link ErrorCode#PHONE_ALREADY_EXISTS} if a non-blank phone is already registered. */
+    private void validatePhoneAvailable(String phone) {
+        if (phone != null && !phone.isBlank() && userRepository.existsByPhone(phone.trim())) {
+            throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
         }
     }
 

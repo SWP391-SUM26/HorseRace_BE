@@ -25,10 +25,12 @@ import com.SWP391.horserace.races.repository.RaceResultVersionRepository;
 import com.SWP391.horserace.races.dto.SubmitReportRequest;
 import com.SWP391.horserace.races.dto.SubmitReportResponse;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
+import com.SWP391.horserace.registrations.repository.RegistrationRepository;
 import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.staffing.service.RefereeSubmissionCodeService;
+import com.SWP391.horserace.tournaments.entity.Tournament;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.repository.UserRepository;
 import com.SWP391.horserace.violations.dto.CreateViolationRequest;
@@ -67,6 +69,7 @@ class RaceResultServiceImplTest {
     @Mock NotificationService notificationService;
     @Mock RefereeSubmissionCodeService refereeSubmissionCodeService;
     @Mock ViolationService violationService;
+    @Mock RegistrationRepository registrationRepository;
 
     private RaceResultServiceImpl service;
 
@@ -86,7 +89,12 @@ class RaceResultServiceImplTest {
         service = new RaceResultServiceImpl(
                 raceRepository, raceEntryRepository, raceResultRepository,
                 raceResultVersionRepository, jockeyAssignmentRepository, userRepository,
-                notificationService, refereeSubmissionCodeService, violationService);
+                notificationService, refereeSubmissionCodeService, violationService,
+                registrationRepository);
+        // #8: most getResults tests build a tournament-less race → repo is not queried; keep this
+        // lenient so the stub is harmless where the NOT-ENTERED path is never reached.
+        lenient().when(registrationRepository.findApprovedNotEnteredInRace(any(), any()))
+                .thenReturn(List.of());
 
         race = Race.builder().raceId(raceId).status(RaceStatus.FINISHED)
                 .trackCondition("FAST").trackBias("NONE").build();
@@ -586,5 +594,47 @@ class RaceResultServiceImplTest {
                 .isEqualTo(ErrorCode.RESULT_ALREADY_OFFICIAL);
 
         verify(raceResultRepository, never()).save(any());
+    }
+
+    // ── #8: registered-but-not-entered on the result sheet ──
+
+    @Test
+    void getResults_includesRegisteredNotEntered() {
+        UUID tid = UUID.randomUUID();
+        UUID regId = UUID.randomUUID();
+        UUID horseId = UUID.randomUUID();
+        Race raceWithT = Race.builder().raceId(raceId).status(RaceStatus.FINISHED)
+                .tournament(Tournament.builder().tournamentId(tid).build()).build();
+        Horse regHorse = Horse.builder().horseId(horseId).name("Absent Star").build();
+        User regOwner = User.builder().userId(UUID.randomUUID()).fullName("Olga Owner").build();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(regId).registrationCode("REG00042")
+                .horse(regHorse).owner(regOwner).build();
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(raceWithT));
+        when(raceResultRepository.findByRaceIdWithEntry(raceId)).thenReturn(List.of());
+        when(registrationRepository.findApprovedNotEnteredInRace(tid, raceId)).thenReturn(List.of(reg));
+
+        RaceResultsResponse resp = service.getResults(raceId);
+
+        assertThat(resp.getRegisteredNotEntered()).hasSize(1);
+        RaceResultsResponse.RegisteredNotEnteredRow row = resp.getRegisteredNotEntered().get(0);
+        assertThat(row.getRegistrationId()).isEqualTo(regId);
+        assertThat(row.getRegistrationCode()).isEqualTo("REG00042");
+        assertThat(row.getHorseId()).isEqualTo(horseId);
+        assertThat(row.getHorseName()).isEqualTo("Absent Star");
+        assertThat(row.getOwnerName()).isEqualTo("Olga Owner");
+    }
+
+    @Test
+    void getResults_emptyWhenNoTournament() {
+        // The shared race has no tournament → the NOT-ENTERED repo is never queried.
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(raceResultRepository.findByRaceIdWithEntry(raceId)).thenReturn(List.of());
+
+        RaceResultsResponse resp = service.getResults(raceId);
+
+        assertThat(resp.getRegisteredNotEntered()).isEmpty();
+        verify(registrationRepository, never()).findApprovedNotEnteredInRace(any(), any());
     }
 }

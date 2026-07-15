@@ -132,6 +132,8 @@ public class RaceServiceImpl implements RaceService {
             throw new AppException(ErrorCode.TOURNAMENT_NOT_FOUND);
         }
 
+        validateDates(request.scheduledStartAt(), request.predictionCutoffAt());
+
         Race race = Race.builder()
                 .tournament(tournament)
                 .raceCode(generateRaceCode())
@@ -189,6 +191,18 @@ public class RaceServiceImpl implements RaceService {
                 || race.getStatus() == RaceStatus.FINISHED
                 || race.getStatus() == RaceStatus.OFFICIAL) {
             throw new AppException(ErrorCode.RACE_INVALID_STATUS);
+        }
+
+        // #2 date validation (partial update): range check on the EFFECTIVE values; the past-check
+        // only applies to a newly-supplied start (don't reject an unrelated edit of an existing race).
+        OffsetDateTime effStart = request.scheduledStartAt() != null ? request.scheduledStartAt() : race.getScheduledStartAt();
+        OffsetDateTime effCutoff = request.predictionCutoffAt() != null ? request.predictionCutoffAt() : race.getPredictionCutoffAt();
+        if (effStart != null && effCutoff != null && appDate(effCutoff).isAfter(appDate(effStart))) {
+            throw new AppException(ErrorCode.INVALID_DATE_RANGE);
+        }
+        if (request.scheduledStartAt() != null
+                && appDate(request.scheduledStartAt()).isBefore(java.time.LocalDate.now(APP_ZONE))) {
+            throw new AppException(ErrorCode.DATE_IN_PAST);
         }
 
         // Partial update: apply only non-null fields. Tournament and code are immutable.
@@ -547,6 +561,30 @@ public class RaceServiceImpl implements RaceService {
             code = String.format("RACE%05d", n++);
         } while (raceRepository.existsByRaceCode(code));
         return code;
+    }
+
+    /**
+     * Validate race dates on create (#2). NULL-safe (dates optional — a race can be scheduled later via
+     * scheduleRace). Day granularity in UTC so a same-day start the FE sends as {@code T00:00:00Z} passes.
+     */
+    private void validateDates(OffsetDateTime scheduledStartAt, OffsetDateTime predictionCutoffAt) {
+        java.time.LocalDate today = java.time.LocalDate.now(APP_ZONE);
+        if (scheduledStartAt != null && predictionCutoffAt != null
+                && appDate(predictionCutoffAt).isAfter(appDate(scheduledStartAt))) {
+            throw new AppException(ErrorCode.INVALID_DATE_RANGE); // betting cutoff can't be after the start
+        }
+        if (scheduledStartAt != null && appDate(scheduledStartAt).isBefore(today)) {
+            throw new AppException(ErrorCode.DATE_IN_PAST);
+        }
+        if (predictionCutoffAt != null && appDate(predictionCutoffAt).isBefore(today)) {
+            throw new AppException(ErrorCode.DATE_IN_PAST);
+        }
+    }
+
+    private static final java.time.ZoneId APP_ZONE = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+
+    private static java.time.LocalDate appDate(OffsetDateTime odt) {
+        return odt.atZoneSameInstant(APP_ZONE).toLocalDate();
     }
 
     /** Sequential code ENTnnnnn, skipping any already taken (the DB UNIQUE is the final guard). */

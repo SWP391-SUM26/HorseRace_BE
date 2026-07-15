@@ -64,6 +64,13 @@ public interface RefereeAssignmentRepository extends JpaRepository<RefereeAssign
     Optional<RefereeAssignment> findFirstByRace_RaceIdAndReferee_UserIdAndStatusNot(
             UUID raceId, UUID refereeUserId, RefereeAssignmentStatus status);
 
+    /**
+     * The (race, referee) assignment row regardless of status — INCLUDING REVOKED. Used to
+     * reactivate a previously-revoked assignment in place instead of inserting a duplicate that
+     * would collide with UNIQUE(race_id, referee_user_id). UNIQUE means at most one such row.
+     */
+    Optional<RefereeAssignment> findFirstByRace_RaceIdAndReferee_UserId(UUID raceId, UUID refereeUserId);
+
     /** All active (non-REVOKED) assignments for a referee — the referee's own assignment list. */
     List<RefereeAssignment> findByReferee_UserIdAndStatusNot(UUID refereeUserId, RefereeAssignmentStatus status);
 

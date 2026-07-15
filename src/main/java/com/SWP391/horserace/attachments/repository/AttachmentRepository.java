@@ -21,4 +21,15 @@ public interface AttachmentRepository extends JpaRepository<Attachment, UUID> {
         """)
     List<Attachment> findByOwner(@Param("ownerEntityType") String ownerEntityType,
                                  @Param("ownerEntityId") UUID ownerEntityId);
+
+    /** True if any attachment exists for the given polymorphic owner (#7 registration doc gate). */
+    boolean existsByOwnerEntityTypeAndOwnerEntityId(String ownerEntityType, UUID ownerEntityId);
+
+    /**
+     * True if the given owner-entity has an attachment uploaded BY {@code uploadedByUserId} (#7):
+     * the registration's document must come from its own owner, not any authenticated user who tagged
+     * a file with the registration id.
+     */
+    boolean existsByOwnerEntityTypeAndOwnerEntityIdAndUploadedBy_UserId(
+            String ownerEntityType, UUID ownerEntityId, UUID uploadedByUserId);
 }

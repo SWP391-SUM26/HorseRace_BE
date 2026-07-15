@@ -17,7 +17,6 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 public class TournamentRequest {
-    private String tournamentCode;
     private String name;
     private String description;
     private OffsetDateTime startDate;

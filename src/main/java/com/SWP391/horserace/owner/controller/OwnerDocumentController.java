@@ -1,13 +1,19 @@
 package com.SWP391.horserace.owner.controller;
 
 import com.SWP391.horserace.attachments.dto.AttachmentResponse;
+import com.SWP391.horserace.attachments.service.AttachmentService;
 import com.SWP391.horserace.owner.service.OwnerDocumentService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -70,5 +76,20 @@ public class OwnerDocumentController {
                 .message("Fetched horse documents")
                 .data(ownerDocumentService.listHorseDocuments(callerId, horseId))
                 .build();
+    }
+
+    /** GET /api/v1/owner/documents/{attachmentId}/download — stream one of the caller's OWNER/HORSE docs inline. */
+    @GetMapping("/documents/{attachmentId}/download")
+    @PreAuthorize("hasRole('HORSE_OWNER')")
+    public ResponseEntity<Resource> downloadDocument(
+            @AuthenticationPrincipal UUID callerId,
+            @PathVariable UUID attachmentId) {
+        AttachmentService.AttachmentDownload d = ownerDocumentService.downloadOwnerDocument(callerId, attachmentId);
+        MediaType mt = d.mimeType() != null ? MediaType.parseMediaType(d.mimeType()) : MediaType.APPLICATION_OCTET_STREAM;
+        return ResponseEntity.ok()
+                .contentType(mt)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=\"" + (d.fileName() != null ? d.fileName() : "document") + "\"")
+                .body(d.resource());
     }
 }

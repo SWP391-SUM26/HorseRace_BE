@@ -27,6 +27,12 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
 
     boolean existsByEmail(String email);
 
+    /** Phone uniqueness guard on create (mirrors the DB UNIQUE on app_user.phone). */
+    boolean existsByPhone(String phone);
+
+    /** Phone uniqueness guard on update — excludes the user being edited (their own phone is fine). */
+    boolean existsByPhoneAndUserIdNot(String phone, UUID userId);
+
     /** All active users with a given role code (e.g. "ADMIN") — used to notify admins. */
     List<User> findByRole_RoleCodeAndDeletedFalse(String roleCode);
 

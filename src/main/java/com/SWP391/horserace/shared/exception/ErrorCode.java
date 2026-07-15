@@ -31,6 +31,7 @@ public enum ErrorCode {
 
     // ---- registration ----
     EMAIL_ALREADY_EXISTS(1016, "Email is already registered", HttpStatus.CONFLICT),
+    PHONE_ALREADY_EXISTS(1025, "Phone number is already registered", HttpStatus.CONFLICT),
     PASSWORD_MISMATCH(1017, "Passwords do not match", HttpStatus.BAD_REQUEST),
 
     // ---- password reset ----
@@ -123,6 +124,7 @@ public enum ErrorCode {
     REGISTRATION_NOT_APPROVED(8006, "Registration is not approved", HttpStatus.BAD_REQUEST),
     RACE_NOT_READY(8007, "Race is not ready to run", HttpStatus.BAD_REQUEST),
     RACE_INVALID_TIMING(8008, "Registration cutoff must be before the scheduled start time", HttpStatus.BAD_REQUEST),
+    RACE_ALREADY_FINALIZED(8009, "Cannot remove a registration whose race has already finished or been made official", HttpStatus.CONFLICT),
 
     // ---- prediction system ----
     PREDICTION_NOT_FOUND(9001, "Prediction not found", HttpStatus.NOT_FOUND),
@@ -151,6 +153,10 @@ public enum ErrorCode {
     // ---- per-race document review (CN2 / referee-flow Phase 2) ----
     ENTRY_RACE_MISMATCH(9403, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
     ENTRY_REVIEW_REASON_REQUIRED(9404, "A rejection reason is required", HttpStatus.BAD_REQUEST),
+    // ---- tournament/race date validation (#2) + registration document (#7) ----
+    INVALID_DATE_RANGE(9405, "End date cannot be before start date", HttpStatus.BAD_REQUEST),
+    DATE_IN_PAST(9406, "Date cannot be in the past", HttpStatus.BAD_REQUEST),
+    REGISTRATION_DOCUMENT_REQUIRED(9407, "A vaccination/medical document must be attached before approval", HttpStatus.BAD_REQUEST),
 
     // ---- results record/read/edit/certify (FE-v2 §5) ----
     RESULT_NOT_FOUND(9501, "Race result not found", HttpStatus.NOT_FOUND),
