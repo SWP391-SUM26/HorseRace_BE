@@ -1,6 +1,7 @@
 package com.SWP391.horserace.referee.service.impl;
 
 import com.SWP391.horserace.assignments.entity.RefereeAssignment;
+import com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.inspections.entity.InspectionStatus;
 import com.SWP391.horserace.inspections.entity.RaceEntryInspection;
@@ -42,6 +43,7 @@ public class RefereeDashboardServiceImpl implements RefereeDashboardService {
     private final RaceEntryInspectionRepository inspectionRepository;
     private final RaceViolationRepository violationRepository;
     private final RefereeAssignmentRepository refereeAssignmentRepository;
+    private final com.SWP391.horserace.users.repository.UserRepository userRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -50,7 +52,7 @@ public class RefereeDashboardServiceImpl implements RefereeDashboardService {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
 
-        Race race = resolveNextRace(raceId);
+        Race race = resolveNextRace(raceId, userId);
 
         if (race == null) {
             return RefereeDashboardResponse.builder()
@@ -70,14 +72,33 @@ public class RefereeDashboardServiceImpl implements RefereeDashboardService {
                 .build();
     }
 
-    /** When a raceId is given use that race (404 if missing); otherwise the soonest upcoming one. */
-    private Race resolveNextRace(UUID raceId) {
+    /**
+     * When a raceId is given use that race (404 if missing); otherwise the caller's soonest upcoming
+     * race they've CONFIRMED (FR-17) — not the global soonest race.
+     */
+    private Race resolveNextRace(UUID raceId, UUID refereeUserId) {
         if (raceId != null) {
-            return raceRepository.findByRaceIdAndDeletedFalse(raceId)
+            Race race = raceRepository.findByRaceIdAndDeletedFalse(raceId)
                     .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
+            // A referee may only view a race's dashboard (roster, violations, inspections) if assigned
+            // to it; admins may view any. Treat "not yours" as not-found so races aren't enumerable.
+            boolean assigned = refereeAssignmentRepository
+                    .existsByRace_RaceIdAndReferee_UserIdAndStatusNot(
+                            raceId, refereeUserId, RefereeAssignmentStatus.REVOKED);
+            if (!assigned && !isAdmin(refereeUserId)) {
+                throw new AppException(ErrorCode.RACE_NOT_FOUND);
+            }
+            return race;
         }
-        List<Race> upcoming = raceRepository.findUpcomingByStatuses(UPCOMING_STATUSES, PageRequest.of(0, 1));
+        List<Race> upcoming = refereeAssignmentRepository.findUpcomingConfirmedRacesByReferee(
+                refereeUserId, UPCOMING_STATUSES, PageRequest.of(0, 1));
         return upcoming.isEmpty() ? null : upcoming.get(0);
+    }
+
+    private boolean isAdmin(UUID userId) {
+        return userRepository.findByUserIdAndDeletedFalse(userId)
+                .map(u -> u.getRole() != null && "ADMIN".equals(u.getRole().getRoleCode()))
+                .orElse(false);
     }
 
     private RefereeDashboardResponse.NextRace toNextRace(Race race) {

@@ -26,9 +26,13 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AttachmentServiceImpl implements AttachmentService {
 
-    /** Allowed polymorphic owner types for attachments (FE-v2 §6). JOCKEY_PROFILE = sensitive jockey docs. */
+    /** Allowed polymorphic owner types for the generic attachment path (FE-v2 §6). JOCKEY_PROFILE = sensitive jockey docs.
+     *  OWNER / HORSE are intentionally EXCLUDED — those RESTRICTED owner/horse papers must go through the
+     *  ownership-checked {@code /api/v1/owner/documents} endpoint ({@link #uploadOwnerDocument}) (RT-CRITICAL-5). */
     private static final Set<String> ALLOWED_OWNER_TYPES = Set.of(
             "RACE_RESULT", "VIOLATION", "RACE", "TOURNAMENT_REGISTRATION", "JOCKEY_PROFILE");
+    /** Owner/horse document owner-types — only reachable via {@link #uploadOwnerDocument}; always RESTRICTED. */
+    private static final Set<String> OWNER_DOCUMENT_OWNER_TYPES = Set.of("OWNER", "HORSE");
     private static final String STORAGE_FOLDER = "attachments";
 
     private final AttachmentRepository attachmentRepository;
@@ -49,12 +53,38 @@ public class AttachmentServiceImpl implements AttachmentService {
         }
         String ownerType = normalizeOwnerType(ownerEntityType);
         SensitivityLevel sensitivity = parseSensitivity(sensitivityLevel);
+        return store(userId, file, ownerType, ownerEntityId, sensitivity);
+    }
 
+    @Override
+    @Transactional
+    public AttachmentResponse uploadOwnerDocument(UUID userId, MultipartFile file, String ownerEntityType,
+                                                  UUID ownerEntityId) {
+        if (userId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        if (file == null || file.isEmpty()) {
+            throw new AppException(ErrorCode.FILE_EMPTY);
+        }
+        String ownerType = ownerEntityType == null ? null : ownerEntityType.trim().toUpperCase();
+        if (ownerType == null || !OWNER_DOCUMENT_OWNER_TYPES.contains(ownerType)) {
+            throw new AppException(ErrorCode.ATTACHMENT_INVALID_OWNER_TYPE);
+        }
+        // Owner/horse papers are ALWAYS RESTRICTED — auth-gated download only (FR-07). Force it here so
+        // no client-supplied sensitivity can weaken it.
+        return store(userId, file, ownerType, ownerEntityId, SensitivityLevel.RESTRICTED);
+    }
+
+    private AttachmentResponse store(UUID userId, MultipartFile file, String ownerType,
+                                     UUID ownerEntityId, SensitivityLevel sensitivity) {
         User uploader = userRepository.findByUserIdAndDeletedFalse(userId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
 
-        // Store the raw bytes via the storage abstraction (any file type — not image-only).
-        String key = fileStorageService.store(file, STORAGE_FOLDER);
+        // RESTRICTED files go to a folder the public FileController refuses to serve — reachable only
+        // via the auth-gated /attachments/{id}/download (owner IDs, horse vet certs, jockey docs).
+        String folder = sensitivity == SensitivityLevel.RESTRICTED
+                ? com.SWP391.horserace.shared.storage.FileController.RESTRICTED_FOLDER : STORAGE_FOLDER;
+        String key = fileStorageService.store(file, folder);
 
         Attachment attachment = Attachment.builder()
                 .ownerEntityType(ownerType)
@@ -91,6 +121,18 @@ public class AttachmentServiceImpl implements AttachmentService {
                 .toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<AttachmentResponse> listOwnerDocuments(String ownerEntityType, UUID ownerEntityId) {
+        String ownerType = ownerEntityType == null ? null : ownerEntityType.trim().toUpperCase();
+        if (ownerType == null || !OWNER_DOCUMENT_OWNER_TYPES.contains(ownerType)) {
+            throw new AppException(ErrorCode.ATTACHMENT_INVALID_OWNER_TYPE);
+        }
+        return attachmentRepository.findByOwner(ownerType, ownerEntityId).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     private String normalizeOwnerType(String ownerEntityType) {
         if (ownerEntityType == null || !ALLOWED_OWNER_TYPES.contains(ownerEntityType.trim().toUpperCase())) {
             throw new AppException(ErrorCode.ATTACHMENT_INVALID_OWNER_TYPE);
@@ -117,7 +159,9 @@ public class AttachmentServiceImpl implements AttachmentService {
                 .fileName(a.getFileName())
                 .mimeType(a.getMimeType())
                 .fileSize(a.getFileSize())
-                .url(a.getObjectKey() != null ? ImageUploadService.PUBLIC_URL_PREFIX + a.getObjectKey() : null)
+                // RESTRICTED docs never advertise a public URL — clients must use /attachments/{id}/download.
+                .url(a.getObjectKey() != null && a.getSensitivityLevel() != SensitivityLevel.RESTRICTED
+                        ? ImageUploadService.PUBLIC_URL_PREFIX + a.getObjectKey() : null)
                 .sensitivityLevel(a.getSensitivityLevel() != null ? a.getSensitivityLevel().name() : null)
                 .uploadedAt(a.getUploadedAt())
                 .build();

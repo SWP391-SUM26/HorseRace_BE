@@ -334,6 +334,9 @@ class UserServiceImplTest {
 
         assertThat(saved.getEmail()).isEqualTo("new@example.com");
         assertThat(saved.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        // Admin-provisioned accounts are email-verified (password emailed to that address) so staff
+        // like referees can be assigned immediately without a separate verify step.
+        assertThat(saved.isEmailVerified()).isTrue();
         assertThat(saved.getPasswordHash()).isEqualTo("{bcrypt}$2a$HASH"); // bcrypt, NOT {noop}
         assertThat(saved.getPasswordHash()).doesNotStartWith("{noop}");
         assertThat(saved.getRole()).isSameAs(role);

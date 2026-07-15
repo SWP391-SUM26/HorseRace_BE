@@ -32,6 +32,10 @@ public class RefereeAssignmentResponse {
     private String refCode;
     private String status;
     private OffsetDateTime assignedAt;
+    /** When the referee accepted/declined (CN1); null while still ASSIGNED. */
+    private OffsetDateTime respondedAt;
+    /** Reason given on decline (CN1). */
+    private String declineReason;
     private OffsetDateTime createdAt;
 
     // -- created by --

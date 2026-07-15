@@ -4,5 +4,6 @@ package com.SWP391.horserace.assignments.entity;
 public enum RefereeAssignmentStatus {
     ASSIGNED,
     CONFIRMED,
+    DECLINED,
     REVOKED
 }

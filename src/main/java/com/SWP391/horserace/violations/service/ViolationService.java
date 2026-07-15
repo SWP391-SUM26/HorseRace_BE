@@ -18,6 +18,13 @@ public interface ViolationService {
     /** Log a new violation (status PENDING, reportedBy = caller). */
     ViolationDetailResponse createViolation(UUID currentUserId, UUID raceId, CreateViolationRequest request);
 
+    /**
+     * Log a violation WITHOUT the per-race referee-code gate (CN3). The caller has already been
+     * authenticated once for the whole report (e.g. the emailed OTP validated on submit), so the
+     * legacy {@code refCode} is not re-checked. Used by the combined results+violations submit.
+     */
+    ViolationDetailResponse createViolationTrusted(UUID currentUserId, UUID raceId, CreateViolationRequest request);
+
     /** All violations of a race, optionally filtered by status / severity / infractionType. */
     List<ViolationListItemResponse> listViolations(UUID raceId, ViolationStatus status,
                                                    SeverityLevel severity, InfractionType infractionType);

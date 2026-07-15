@@ -22,12 +22,19 @@ import com.SWP391.horserace.races.repository.RaceEntryRepository;
 import com.SWP391.horserace.races.repository.RaceRepository;
 import com.SWP391.horserace.races.repository.RaceResultRepository;
 import com.SWP391.horserace.races.repository.RaceResultVersionRepository;
+import com.SWP391.horserace.races.dto.SubmitReportRequest;
+import com.SWP391.horserace.races.dto.SubmitReportResponse;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
+import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
-import com.SWP391.horserace.staffing.service.RefereeCodeValidator;
+import com.SWP391.horserace.staffing.service.RefereeSubmissionCodeService;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.repository.UserRepository;
+import com.SWP391.horserace.violations.dto.CreateViolationRequest;
+import com.SWP391.horserace.violations.dto.ViolationDetailResponse;
+import com.SWP391.horserace.violations.entity.InfractionType;
+import com.SWP391.horserace.violations.service.ViolationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,7 +65,8 @@ class RaceResultServiceImplTest {
     @Mock JockeyAssignmentRepository jockeyAssignmentRepository;
     @Mock UserRepository userRepository;
     @Mock NotificationService notificationService;
-    @Mock RefereeCodeValidator refereeCodeValidator;
+    @Mock RefereeSubmissionCodeService refereeSubmissionCodeService;
+    @Mock ViolationService violationService;
 
     private RaceResultServiceImpl service;
 
@@ -78,7 +86,7 @@ class RaceResultServiceImplTest {
         service = new RaceResultServiceImpl(
                 raceRepository, raceEntryRepository, raceResultRepository,
                 raceResultVersionRepository, jockeyAssignmentRepository, userRepository,
-                notificationService, refereeCodeValidator);
+                notificationService, refereeSubmissionCodeService, violationService);
 
         race = Race.builder().raceId(raceId).status(RaceStatus.FINISHED)
                 .trackCondition("FAST").trackBias("NONE").build();
@@ -367,5 +375,216 @@ class RaceResultServiceImplTest {
                 .isInstanceOf(AppException.class)
                 .extracting(e -> ((AppException) e).getErrorCode())
                 .isEqualTo(ErrorCode.UNAUTHENTICATED);
+    }
+
+    @Test
+    void certify_resultUnderReview_throwsBlocksCertify() {
+        RaceResult r1 = RaceResult.builder()
+                .resultId(UUID.randomUUID()).race(race).entry(entry)
+                .officialityStatus(OfficialityStatus.UNDER_REVIEW).build();
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(certifier));
+        when(raceResultRepository.findByRaceIdWithEntry(raceId)).thenReturn(List.of(r1));
+
+        assertThatThrownBy(() -> service.certify(userId, raceId,
+                new CertifyResultsRequest("4821", true, "report")))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.RESULT_UNDER_REVIEW_BLOCKS_CERTIFY);
+
+        verify(raceRepository, never()).save(any());
+    }
+
+    // ── CN3: submitReport (OTP-gated combined publish) ──
+
+    private User refereeUser() {
+        return User.builder().userId(userId).fullName("Ref R. Cole").build(); // role null → treated as referee
+    }
+
+    private User adminUser() {
+        return User.builder().userId(userId).fullName("Admin A. Vale")
+                .role(Role.builder().roleCode("ADMIN").build()).build();
+    }
+
+    private SubmitReportRequest submitReq(String otp) {
+        return SubmitReportRequest.builder()
+                .otp(otp)
+                .results(List.of(new RecordResultsRequest.ResultRow(
+                        entryId, 1, 91230L, BigDecimal.ZERO, new BigDecimal("100.0"))))
+                .violations(List.of(new CreateViolationRequest(
+                        entryId, InfractionType.INTERFERENCE, null, 2, 1000L, "Bumped", null, null, null)))
+                .build();
+    }
+
+    private void stubUpsertAndJockeys() {
+        when(raceEntryRepository.findByIdWithDetails(entryId)).thenReturn(Optional.of(entry));
+        when(raceResultRepository.findByEntry_EntryId(entryId)).thenReturn(Optional.empty());
+        when(raceResultRepository.save(any(RaceResult.class))).thenAnswer(inv -> {
+            RaceResult r = inv.getArgument(0);
+            if (r.getResultId() == null) r.setResultId(resultId);
+            return r;
+        });
+        lenient().when(jockeyAssignmentRepository.findAcceptedByEntryIds(any())).thenReturn(List.of());
+    }
+
+    @Test
+    void submitReport_validOtp_publishesResultsAndViolations_usesTrusted_writesAudit() {
+        UUID violationId = UUID.randomUUID();
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(refereeUser()));
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        stubUpsertAndJockeys();
+        when(raceResultRepository.markRefereeSubmitted(any(), any(), any())).thenReturn(1);
+        when(violationService.createViolationTrusted(any(), any(), any()))
+                .thenReturn(ViolationDetailResponse.builder().violationId(violationId).build());
+
+        SubmitReportResponse resp = service.submitReport(userId, raceId, submitReq("123456"));
+
+        // OTP validated + consumed
+        verify(refereeSubmissionCodeService).validateAndConsume(userId, raceId, "123456");
+        // one-time lock stamped
+        verify(raceResultRepository).markRefereeSubmitted(any(), any(), any());
+        // RT-CRITICAL-1: violations go through the TRUSTED path (no refCode gate)
+        verify(violationService).createViolationTrusted(userId, raceId,
+                submitReq("123456").getViolations().get(0));
+        verify(violationService, never()).createViolation(any(), any(), any());
+        // FR-21 audit snapshot written
+        ArgumentCaptor<RaceResultVersion> vCaptor = ArgumentCaptor.forClass(RaceResultVersion.class);
+        verify(raceResultVersionRepository).save(vCaptor.capture());
+        assertThat(vCaptor.getValue().getChangeReason()).isEqualTo("Referee report published");
+
+        assertThat(resp.getResults()).hasSize(1);
+        assertThat(resp.getViolationIds()).containsExactly(violationId);
+        assertThat(resp.getSubmittedAt()).isNotNull();
+    }
+
+    @Test
+    void submitReport_invalidOtp_throws_noWrite() {
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(refereeUser()));
+        org.mockito.Mockito.doThrow(new AppException(ErrorCode.REFEREE_CODE_INVALID))
+                .when(refereeSubmissionCodeService).validateAndConsume(userId, raceId, "000000");
+
+        assertThatThrownBy(() -> service.submitReport(userId, raceId, submitReq("000000")))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.REFEREE_CODE_INVALID);
+
+        verify(raceResultRepository, never()).save(any());
+        verify(raceResultRepository, never()).markRefereeSubmitted(any(), any(), any());
+        verify(violationService, never()).createViolationTrusted(any(), any(), any());
+    }
+
+    @Test
+    void submitReport_raceNotFinished_throws() {
+        Race scheduled = Race.builder().raceId(raceId).status(RaceStatus.SCHEDULED).build();
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(refereeUser()));
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(scheduled));
+
+        assertThatThrownBy(() -> service.submitReport(userId, raceId, submitReq("123456")))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.RACE_NOT_FINISHED);
+
+        verify(raceResultRepository, never()).markRefereeSubmitted(any(), any(), any());
+    }
+
+    @Test
+    void submitReport_secondRefereeSubmit_throwsAlreadySubmitted() {
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(refereeUser()));
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        // Race already has a referee-published result → the authoritative guard blocks BEFORE upsert.
+        when(raceResultRepository.existsByRace_RaceIdAndRefereeSubmittedAtIsNotNull(raceId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.submitReport(userId, raceId, submitReq("123456")))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.RESULT_ALREADY_SUBMITTED);
+
+        verify(raceResultRepository, never()).save(any());
+        verify(violationService, never()).createViolationTrusted(any(), any(), any());
+    }
+
+    @Test
+    void submitReport_emptyResults_throwsResultsRequired() {
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(refereeUser()));
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        SubmitReportRequest empty = SubmitReportRequest.builder().otp("123456")
+                .results(List.of()).violations(List.of()).build();
+
+        assertThatThrownBy(() -> service.submitReport(userId, raceId, empty))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.REPORT_RESULTS_REQUIRED);
+
+        verify(raceResultRepository, never()).save(any());
+    }
+
+    @Test
+    void submitReport_adminAfterRefereeLock_allowed() {
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(adminUser()));
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        stubUpsertAndJockeys();
+        when(raceResultRepository.markRefereeSubmitted(any(), any(), any())).thenReturn(0); // already locked
+        lenient().when(violationService.createViolationTrusted(any(), any(), any()))
+                .thenReturn(ViolationDetailResponse.builder().violationId(UUID.randomUUID()).build());
+
+        SubmitReportResponse resp = service.submitReport(userId, raceId, submitReq("ignored"));
+
+        // ADMIN on /report skips the OTP and is not blocked by the one-time lock
+        verify(refereeSubmissionCodeService, never()).validateAndConsume(any(), any(), any());
+        assertThat(resp.getSubmittedAt()).isNotNull();
+    }
+
+    @Test
+    void adminOverridePublish_noOtp_publishes() {
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(adminUser()));
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        stubUpsertAndJockeys();
+        when(raceResultRepository.markRefereeSubmitted(any(), any(), any())).thenReturn(1);
+        lenient().when(violationService.createViolationTrusted(any(), any(), any()))
+                .thenReturn(ViolationDetailResponse.builder().violationId(UUID.randomUUID()).build());
+
+        SubmitReportResponse resp = service.adminOverridePublish(userId, raceId, submitReq(null));
+
+        verify(refereeSubmissionCodeService, never()).validateAndConsume(any(), any(), any());
+        assertThat(resp.getResults()).hasSize(1);
+        assertThat(resp.getSubmittedAt()).isNotNull();
+    }
+
+    // ── FR-19: flagUnderReview ──
+
+    @Test
+    void flagUnderReview_setsStatus_andAudits() {
+        RaceResult result = RaceResult.builder()
+                .resultId(resultId).race(race).entry(entry)
+                .currentVersionNo(1)
+                .officialityStatus(OfficialityStatus.PROVISIONAL).build();
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(raceResultRepository.findById(resultId)).thenReturn(Optional.of(result));
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(certifier));
+        when(raceResultRepository.save(any(RaceResult.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.flagUnderReview(userId, raceId, resultId);
+
+        assertThat(result.getOfficialityStatus()).isEqualTo(OfficialityStatus.UNDER_REVIEW);
+        verify(raceResultVersionRepository).save(any(RaceResultVersion.class));
+    }
+
+    @Test
+    void flagUnderReview_alreadyOfficial_throws() {
+        RaceResult result = RaceResult.builder()
+                .resultId(resultId).race(race).entry(entry)
+                .officialityStatus(OfficialityStatus.OFFICIAL).build();
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(raceResultRepository.findById(resultId)).thenReturn(Optional.of(result));
+
+        assertThatThrownBy(() -> service.flagUnderReview(userId, raceId, resultId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.RESULT_ALREADY_OFFICIAL);
+
+        verify(raceResultRepository, never()).save(any());
     }
 }

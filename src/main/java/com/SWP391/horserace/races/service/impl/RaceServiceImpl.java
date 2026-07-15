@@ -3,6 +3,12 @@ package com.SWP391.horserace.races.service.impl;
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
 import com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
+import com.SWP391.horserace.inspections.entity.DocumentReviewStatus;
+import com.SWP391.horserace.inspections.entity.EntryDocumentReview;
+import com.SWP391.horserace.inspections.entity.InspectionStatus;
+import com.SWP391.horserace.inspections.entity.RaceEntryInspection;
+import com.SWP391.horserace.inspections.repository.EntryDocumentReviewRepository;
+import com.SWP391.horserace.inspections.repository.RaceEntryInspectionRepository;
 import com.SWP391.horserace.staffing.repository.RefereeAssignmentRepository;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.races.dto.AssignParticipantRequest;
@@ -65,6 +71,8 @@ public class RaceServiceImpl implements RaceService {
     private final VenueRepository venueRepository;
     private final RefereeAssignmentRepository refereeAssignmentRepository;
     private final com.SWP391.horserace.notifications.service.NotificationService notificationService;
+    private final EntryDocumentReviewRepository entryDocumentReviewRepository;
+    private final RaceEntryInspectionRepository raceEntryInspectionRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -254,14 +262,36 @@ public class RaceServiceImpl implements RaceService {
             throw new AppException(ErrorCode.RACE_INVALID_STATUS);
         }
 
-        // "Ready to run" gate (FR-03): collect ALL unmet conditions so the admin sees every gap.
+        // "Ready to run" gate (FR-03 / FR-18): collect ALL unmet conditions so the admin sees every gap.
         int min = effectiveMinParticipants(race);
         long entries = raceEntryRepository.countByRace_RaceId(id);
         long acceptedJockeys = jockeyAssignmentRepository.countAcceptedByRaceId(id);
-        boolean hasReferee = !refereeAssignmentRepository
-                .findByRace_RaceIdAndStatusNot(id, RefereeAssignmentStatus.REVOKED)
-                .isEmpty();
+        // FR-18 (Phase 2): tightened from ASSIGNED/CONFIRMED to CONFIRMED-only — an ASSIGNED-but-not-yet-
+        // confirmed (or DECLINED) referee no longer satisfies the gate.
+        boolean hasConfirmedReferee = refereeAssignmentRepository.existsByRace_RaceIdAndStatus(
+                id, RefereeAssignmentStatus.CONFIRMED);
         OffsetDateTime now = OffsetDateTime.now();
+
+        // FR-18 / RT-HIGH-2: every NON-SCRATCHED entry must have documents ACCEPTED and be vet-CLEARED.
+        // Count ACCEPTED/CLEARED among the non-scratched entries and compare to the total — a MISSING
+        // review/inspection row counts as not-satisfied (a naive "status != ACCEPTED" count can't see rows
+        // that don't exist, so an unreviewed entry would be invisible and wrongly pass).
+        List<RaceEntry> nonScratched = raceEntryRepository.findByRace_RaceId(id).stream()
+                .filter(e -> e.getStatus() != RaceEntryStatus.SCRATCHED)
+                .toList();
+        List<UUID> nonScratchedIds = nonScratched.stream().map(RaceEntry::getEntryId).toList();
+        Map<UUID, DocumentReviewStatus> docStatusByEntry = nonScratchedIds.isEmpty() ? Map.of()
+                : entryDocumentReviewRepository.findByEntry_EntryIdIn(nonScratchedIds).stream()
+                        .collect(Collectors.toMap(r -> r.getEntry().getEntryId(),
+                                EntryDocumentReview::getDocumentStatus, (a, b) -> a));
+        Map<UUID, InspectionStatus> vetStatusByEntry = nonScratchedIds.isEmpty() ? Map.of()
+                : raceEntryInspectionRepository.findByEntry_EntryIdIn(nonScratchedIds).stream()
+                        .collect(Collectors.toMap(i -> i.getEntry().getEntryId(),
+                                RaceEntryInspection::getInspectionStatus, (a, b) -> a));
+        long docsAccepted = nonScratched.stream()
+                .filter(e -> docStatusByEntry.get(e.getEntryId()) == DocumentReviewStatus.ACCEPTED).count();
+        long vetCleared = nonScratched.stream()
+                .filter(e -> vetStatusByEntry.get(e.getEntryId()) == InspectionStatus.CLEARED).count();
 
         List<String> unmet = new ArrayList<>();
         if (entries < min) {
@@ -270,8 +300,14 @@ public class RaceServiceImpl implements RaceService {
         if (acceptedJockeys != entries) {
             unmet.add("every horse must have a confirmed jockey (" + acceptedJockeys + "/" + entries + ")");
         }
-        if (!hasReferee) {
-            unmet.add("at least one referee must be assigned");
+        if (!hasConfirmedReferee) {
+            unmet.add("at least one confirmed referee must be assigned");
+        }
+        if (docsAccepted < nonScratched.size()) {
+            unmet.add("all entries must have documents accepted (" + docsAccepted + "/" + nonScratched.size() + ")");
+        }
+        if (vetCleared < nonScratched.size()) {
+            unmet.add("all entries must be vet-cleared (" + vetCleared + "/" + nonScratched.size() + ")");
         }
         // null-safe: a race with no registration deadline is treated as "registration not closed"
         if (race.getPredictionCutoffAt() == null || !now.isAfter(race.getPredictionCutoffAt())) {
