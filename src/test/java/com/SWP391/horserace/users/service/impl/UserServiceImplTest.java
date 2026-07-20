@@ -1,5 +1,6 @@
 package com.SWP391.horserace.users.service.impl;
 
+import com.SWP391.horserace.races.repository.RaceResultRepository;
 import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.roles.repository.PermissionRepository;
 import com.SWP391.horserace.roles.repository.RoleRepository;
@@ -27,6 +28,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import com.SWP391.horserace.auth.service.EmailService;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -51,6 +54,12 @@ class UserServiceImplTest {
     PermissionRepository permissionRepository;
     @Mock
     RoleRepository roleRepository;
+    @Mock
+    RaceResultRepository raceResultRepository;
+    @Mock
+    PasswordEncoder passwordEncoder;
+    @Mock
+    EmailService emailService;
 
     private UserServiceImpl service;
 
@@ -62,7 +71,10 @@ class UserServiceImplTest {
         service = new UserServiceImpl(userRepository,
                 new ImageUploadService(Mockito.mock(FileStorageService.class)),
                 permissionRepository,
-                roleRepository);
+                roleRepository,
+                raceResultRepository,
+                passwordEncoder,
+                emailService);
     }
 
     // ── update user by id (admin) ──
@@ -142,7 +154,7 @@ class UserServiceImplTest {
         when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(Mockito.any(User.class))).thenAnswer(i -> i.getArgument(0));
 
-        service.deleteUser(userId);
+        service.deleteUser(UUID.randomUUID(), userId);
 
         assertThat(user.isDeleted()).isTrue();
         assertThat(user.getDeletedAt()).isNotNull();
@@ -154,9 +166,34 @@ class UserServiceImplTest {
         UUID userId = UUID.randomUUID();
         when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.deleteUser(userId))
+        assertThatThrownBy(() -> service.deleteUser(UUID.randomUUID(), userId))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.USER_NOT_EXISTED);
+    }
+
+    @Test
+    void deleteUser_self_throwsCannotModifySelf() {
+        UUID selfId = UUID.randomUUID();
+        assertThatThrownBy(() -> service.deleteUser(selfId, selfId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.CANNOT_MODIFY_SELF);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void deleteUser_lastActiveAdmin_throwsProtected() {
+        UUID id = UUID.randomUUID();
+        User admin = User.builder().userId(id).status(UserStatus.ACTIVE)
+                .role(Role.builder().roleCode("ADMIN").roleName("Admin").build())
+                .build();
+        when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(admin));
+        when(userRepository.countByRole_RoleCodeAndStatusAndDeletedFalse("ADMIN", UserStatus.ACTIVE))
+                .thenReturn(1L);
+
+        assertThatThrownBy(() -> service.deleteUser(UUID.randomUUID(), id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.LAST_ADMIN_PROTECTED);
+        verify(userRepository, never()).save(any(User.class));
     }
 
     // ── list / filter (B3) — maps new fields (status, lastLoginAt) ──
@@ -247,7 +284,7 @@ class UserServiceImplTest {
         when(roleRepository.findByRoleCode("JOCKEY")).thenReturn(Optional.of(newRole));
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
 
-        UserResponse res = service.changeRole(id, new ChangeRoleRequest("jockey"));
+        UserResponse res = service.changeRole(UUID.randomUUID(), id, new ChangeRoleRequest("jockey"));
 
         assertThat(res.getRoleCode()).isEqualTo("JOCKEY");
         assertThat(user.getRole()).isSameAs(newRole);
@@ -260,7 +297,7 @@ class UserServiceImplTest {
         when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
         when(roleRepository.findByRoleCode("BOGUS")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.changeRole(id, new ChangeRoleRequest("BOGUS")))
+        assertThatThrownBy(() -> service.changeRole(UUID.randomUUID(), id, new ChangeRoleRequest("BOGUS")))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ROLE_NOT_EXISTED);
         verify(userRepository, never()).save(any(User.class));
@@ -271,7 +308,7 @@ class UserServiceImplTest {
         UUID id = UUID.randomUUID();
         when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.changeRole(id, new ChangeRoleRequest("ADMIN")))
+        assertThatThrownBy(() -> service.changeRole(UUID.randomUUID(), id, new ChangeRoleRequest("ADMIN")))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.USER_NOT_EXISTED);
     }
@@ -285,7 +322,7 @@ class UserServiceImplTest {
         when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
 
-        UserResponse res = service.changeStatus(id, new ChangeStatusRequest("suspended", "spam"));
+        UserResponse res = service.changeStatus(UUID.randomUUID(), id, new ChangeStatusRequest("suspended", "spam"));
 
         assertThat(res.getStatus()).isEqualTo("SUSPENDED");
         assertThat(user.getStatus()).isEqualTo(UserStatus.SUSPENDED);
@@ -297,7 +334,7 @@ class UserServiceImplTest {
         User user = User.builder().userId(id).status(UserStatus.ACTIVE).build();
         when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
 
-        assertThatThrownBy(() -> service.changeStatus(id, new ChangeStatusRequest("ON_FIRE", null)))
+        assertThatThrownBy(() -> service.changeStatus(UUID.randomUUID(), id, new ChangeStatusRequest("ON_FIRE", null)))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.INVALID_USER_STATUS);
         verify(userRepository, never()).save(any(User.class));
@@ -306,14 +343,15 @@ class UserServiceImplTest {
     // ── createUser / provision (B7) ──
 
     @Test
-    void createUser_provisionsActiveUserWithRoleAndNoopPassword() {
+    void createUser_bcryptsGeneratedPassword_andEmailsIt() {
         Role role = Role.builder().roleCode("JOCKEY").roleName("Jockey").build();
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
         when(roleRepository.findByRoleCode("JOCKEY")).thenReturn(Optional.of(role));
+        when(passwordEncoder.encode(any())).thenReturn("{bcrypt}$2a$HASH");
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
 
         UserResponse res = service.createUser(
-                new CreateUserRequest("New User", "New@Example.com", "jockey", null, null));
+                new CreateUserRequest("New User", "New@Example.com", "jockey", null));
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(userCaptor.capture());
@@ -321,24 +359,46 @@ class UserServiceImplTest {
 
         assertThat(saved.getEmail()).isEqualTo("new@example.com");
         assertThat(saved.getStatus()).isEqualTo(UserStatus.ACTIVE);
-        assertThat(saved.getPasswordHash()).isEqualTo("{noop}123456");
-        assertThat(saved.getUserCode()).startsWith("USR-");
+        // Admin-provisioned accounts are email-verified (password emailed to that address) so staff
+        // like referees can be assigned immediately without a separate verify step.
+        assertThat(saved.isEmailVerified()).isTrue();
+        assertThat(saved.getPasswordHash()).isEqualTo("{bcrypt}$2a$HASH"); // bcrypt, NOT {noop}
+        assertThat(saved.getPasswordHash()).doesNotStartWith("{noop}");
         assertThat(saved.getRole()).isSameAs(role);
         assertThat(res.getRoleCode()).isEqualTo("JOCKEY");
+        // the generated (raw) password is emailed to the new user
+        verify(emailService).sendNewAccountPassword(org.mockito.ArgumentMatchers.eq("new@example.com"),
+                org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
-    void createUser_usesProvidedTempPassword() {
-        Role role = Role.builder().roleCode("VET").roleName("Vet").build();
-        when(userRepository.existsByEmail("vet@example.com")).thenReturn(false);
-        when(roleRepository.findByRoleCode("VET")).thenReturn(Optional.of(role));
+    void createUser_generatedPassword_meetsComplexityRules() {
+        Role role = Role.builder().roleCode("SPECTATOR").build();
+        when(userRepository.existsByEmail(any())).thenReturn(false);
+        when(roleRepository.findByRoleCode("SPECTATOR")).thenReturn(Optional.of(role));
+        when(passwordEncoder.encode(any())).thenReturn("{bcrypt}x");
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
 
-        service.createUser(new CreateUserRequest("Doc", "vet@example.com", "VET", null, "Secret99"));
+        service.createUser(new CreateUserRequest("N", "n@example.com", "SPECTATOR", null));
 
-        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
-        verify(userRepository).save(userCaptor.capture());
-        assertThat(userCaptor.getValue().getPasswordHash()).isEqualTo("{noop}Secret99");
+        ArgumentCaptor<String> pwCaptor = ArgumentCaptor.forClass(String.class);
+        verify(emailService).sendNewAccountPassword(any(), pwCaptor.capture());
+        String raw = pwCaptor.getValue();
+        assertThat(raw.length()).isGreaterThanOrEqualTo(8);
+        assertThat(raw).matches(".*[A-Z].*").matches(".*[a-z].*")
+                .matches(".*\\d.*").matches(".*[^A-Za-z0-9].*");
+    }
+
+    @Test
+    void createUser_adminRole_isBlocked() {
+        when(userRepository.existsByEmail("boss@example.com")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.createUser(
+                new CreateUserRequest("Boss", "boss@example.com", "admin", null)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.CANNOT_CREATE_ADMIN);
+        verify(userRepository, never()).save(any(User.class));
+        verify(emailService, never()).sendNewAccountPassword(any(), any());
     }
 
     @Test
@@ -346,10 +406,82 @@ class UserServiceImplTest {
         when(userRepository.existsByEmail("dup@example.com")).thenReturn(true);
 
         assertThatThrownBy(() -> service.createUser(
-                new CreateUserRequest("Dup", "dup@example.com", "ADMIN", null, null)))
+                new CreateUserRequest("Dup", "dup@example.com", "JOCKEY", null)))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.EMAIL_ALREADY_EXISTS);
         verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void createUser_duplicatePhone_throwsPhoneAlreadyExists() {
+        Role role = Role.builder().roleCode("JOCKEY").build();
+        when(userRepository.existsByEmail("p@example.com")).thenReturn(false);
+        when(roleRepository.findByRoleCode("JOCKEY")).thenReturn(Optional.of(role));
+        when(userRepository.existsByPhone("0912345678")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.createUser(
+                new CreateUserRequest("P", "p@example.com", "JOCKEY", "0912345678")))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void createUser_normalizesPhoneBeforeUniquenessCheck() {
+        // FR-11: a dashed/spaced phone is stripped to its digits before the uniqueness check,
+        // so formatting cannot bypass the dedupe against a stored "0912345678".
+        Role role = Role.builder().roleCode("JOCKEY").build();
+        when(userRepository.existsByEmail("p@example.com")).thenReturn(false);
+        when(roleRepository.findByRoleCode("JOCKEY")).thenReturn(Optional.of(role));
+        when(userRepository.existsByPhone("0912345678")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.createUser(
+                new CreateUserRequest("P", "p@example.com", "JOCKEY", "09 12-345-678")))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void createUser_nullPhone_skipsCheck() {
+        Role role = Role.builder().roleCode("JOCKEY").build();
+        when(userRepository.existsByEmail(any())).thenReturn(false);
+        when(roleRepository.findByRoleCode("JOCKEY")).thenReturn(Optional.of(role));
+        when(passwordEncoder.encode(any())).thenReturn("{bcrypt}x");
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.createUser(new CreateUserRequest("N", "n@example.com", "JOCKEY", null));
+
+        verify(userRepository, never()).existsByPhone(any());
+    }
+
+    @Test
+    void updateUserById_phoneTakenByAnother_throws() {
+        UUID id = UUID.randomUUID();
+        User user = User.builder().userId(id).build();
+        when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
+        when(userRepository.existsByPhoneAndUserIdNot("0912345678", id)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.updateUserById(id,
+                new UpdateProfileRequest(null, "0912345678", null)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void updateMyProfile_keepingOwnPhone_succeeds() {
+        UUID id = UUID.randomUUID();
+        User user = User.builder().userId(id).phone("0912345678").build();
+        when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
+        // The user's own phone is not "taken by another" -> guard passes.
+        when(userRepository.existsByPhoneAndUserIdNot("0912345678", id)).thenReturn(false);
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        UserResponse res = service.updateMyProfile(id,
+                new UpdateProfileRequest(null, "0912345678", null));
+
+        assertThat(res.getPhone()).isEqualTo("0912345678");
     }
 
     @Test
@@ -358,9 +490,24 @@ class UserServiceImplTest {
         when(roleRepository.findByRoleCode("NOPE")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.createUser(
-                new CreateUserRequest("X", "x@example.com", "NOPE", null, null)))
+                new CreateUserRequest("X", "x@example.com", "NOPE", null)))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ROLE_NOT_EXISTED);
         verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void resendPassword_regeneratesBcryptAndEmails() {
+        UUID id = UUID.randomUUID();
+        User user = User.builder().userId(id).email("u@example.com").passwordHash("{bcrypt}old").build();
+        when(userRepository.findByUserIdAndDeletedFalse(id)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode(any())).thenReturn("{bcrypt}new");
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.resendPassword(id);
+
+        assertThat(user.getPasswordHash()).isEqualTo("{bcrypt}new");
+        verify(emailService).sendNewAccountPassword(org.mockito.ArgumentMatchers.eq("u@example.com"),
+                org.mockito.ArgumentMatchers.anyString());
     }
 }

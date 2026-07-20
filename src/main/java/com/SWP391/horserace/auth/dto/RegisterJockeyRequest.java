@@ -1,8 +1,10 @@
 package com.SWP391.horserace.auth.dto;
 
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
@@ -36,17 +38,22 @@ public record RegisterJockeyRequest(
 
         // ---- Section 1: Personal Identity ----
 
+        // Capped at 120 each so the concatenated "first last" fullName can never exceed the
+        // app_user.full_name VARCHAR(255) column (120 + 1 space + 120 = 241) — else an oversize
+        // combination would slip past validation and die as a raw 409 at persist time.
         @NotBlank(message = "First name is required")
+        @Size(max = 120, message = "First name must not exceed 120 characters")
         String firstName,
 
         @NotBlank(message = "Last name is required")
+        @Size(max = 120, message = "Last name must not exceed 120 characters")
         String lastName,
 
         /** Optional — age in years. */
         @Min(value = 16, message = "Jockey must be at least 16 years old")
         Integer age,
 
-        /** Optional — weight in lbs. */
+        /** Optional — body weight in kg (stored directly into jockey_profile.body_weight). */
         @Positive(message = "Weight must be positive")
         Double weight,
 
@@ -72,6 +79,10 @@ public record RegisterJockeyRequest(
         String jockeyLicenseUrl,
 
         /** Optional — URL of current fitness certificate. */
-        String fitnessCertificateUrl
+        String fitnessCertificateUrl,
+
+        @NotNull(message = "You must agree to the Terms of Service")
+        @AssertTrue(message = "You must agree to the Terms of Service")
+        Boolean agreedToTerms
 ) {
 }

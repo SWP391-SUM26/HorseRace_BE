@@ -1,6 +1,9 @@
 package com.SWP391.horserace.shared.storage;
 
+import com.SWP391.horserace.shared.exception.AppException;
+import com.SWP391.horserace.shared.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -23,10 +26,21 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class FileController {
 
+    // This endpoint only serves LOCAL-disk files (/api/v1/files/…); Cloudinary images go straight
+    // to the CDN. Pin to local so the wrong impl can't be injected when Cloudinary is @Primary.
+    @Qualifier(LocalFileStorageService.BEAN_NAME)
     private final FileStorageService fileStorageService;
+
+    /** Storage folder for RESTRICTED files — served ONLY via the auth-gated /attachments/{id}/download,
+     *  never from this public route (owner IDs, horse vet certs, etc.). */
+    public static final String RESTRICTED_FOLDER = "restricted";
 
     @GetMapping("/{folder}/{filename:.+}")
     public ResponseEntity<Resource> serve(@PathVariable String folder, @PathVariable String filename) {
+        // Never serve RESTRICTED files publicly — those must go through the authenticated download.
+        if (RESTRICTED_FOLDER.equalsIgnoreCase(folder)) {
+            throw new AppException(ErrorCode.FILE_NOT_FOUND);
+        }
         Resource resource = fileStorageService.load(folder + "/" + filename);
         MediaType mediaType = MediaTypeFactory.getMediaType(resource).orElse(MediaType.APPLICATION_OCTET_STREAM);
         // Defence-in-depth against stored-XSS: stop MIME sniffing and serve with an explicit

@@ -1,17 +1,20 @@
 package com.SWP391.horserace.auth.service;
 
-import com.SWP391.horserace.shared.exception.AppException;
-import com.SWP391.horserace.shared.exception.ErrorCode;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 /**
- * Thin wrapper around {@link JavaMailSender} for sending password-reset emails.
+ * Thin wrapper around {@link JavaMailSender} for sending password-reset / verification emails.
+ *
+ * <p>Sends are {@link Async} and swallow failures (log only): the caller must NOT block on the
+ * SMTP round-trip nor observe a send failure, otherwise the response time / error difference
+ * leaks whether an email is registered (user-enumeration side-channel).
  */
 @Service
 @RequiredArgsConstructor
@@ -21,8 +24,9 @@ public class EmailService {
     private final JavaMailSender mailSender;
 
     /**
-     * Send a password-reset email containing the 6-digit code.
+     * Send a password-reset email containing the 6-digit code (async, best-effort).
      */
+    @Async
     public void sendResetCode(String toEmail, String code) {
         try {
             MimeMessage message = mailSender.createMimeMessage();
@@ -34,15 +38,16 @@ public class EmailService {
 
             mailSender.send(message);
             log.info("Password reset code sent to {}", toEmail);
-        } catch (MessagingException e) {
+        } catch (MessagingException | RuntimeException e) {
+            // Swallow: never surface a send failure to the caller (enumeration side-channel).
             log.error("Failed to send reset email to {}", toEmail, e);
-            throw new AppException(ErrorCode.EMAIL_SEND_FAILED);
         }
     }
 
     /**
-     * Send an email-verification email containing the 6-digit code.
+     * Send an email-verification email containing the 6-digit code (async, best-effort).
      */
+    @Async
     public void sendVerificationCode(String toEmail, String code) {
         try {
             MimeMessage message = mailSender.createMimeMessage();
@@ -54,10 +59,95 @@ public class EmailService {
 
             mailSender.send(message);
             log.info("Email verification code sent to {}", toEmail);
-        } catch (MessagingException e) {
+        } catch (MessagingException | RuntimeException e) {
             log.error("Failed to send verification email to {}", toEmail, e);
-            throw new AppException(ErrorCode.EMAIL_SEND_FAILED);
         }
+    }
+
+    /**
+     * Send a newly-provisioned account's temporary password (async, best-effort).
+     * <p>Unlike reset/verify (which swallow silently to avoid enumeration), a provisioning failure
+     * leaves the user locked out, so this logs at ERROR so an operator can notice + resend.
+     */
+    @Async
+    public void sendNewAccountPassword(String toEmail, String tempPassword) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setTo(toEmail);
+            helper.setSubject("Equine Elite — Your Account Details");
+            helper.setText(buildNewAccountHtmlBody(tempPassword), true);
+
+            mailSender.send(message);
+            log.info("New-account password email sent to {}", toEmail);
+        } catch (MessagingException | RuntimeException e) {
+            // Provisioning: do NOT silently drop — the user is locked out until resent.
+            log.error("Failed to send new-account password email to {} — user cannot log in until resent",
+                    toEmail, e);
+        }
+    }
+
+    /**
+     * Send a referee their one-time race-report submission code (CN3) — async, best-effort.
+     */
+    @Async
+    public void sendRefereeCode(String toEmail, String code) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setTo(toEmail);
+            helper.setSubject("Equine Elite — Race Report Submission Code");
+            helper.setText(buildRefereeCodeHtmlBody(code), true);
+
+            mailSender.send(message);
+            log.info("Referee submission code sent to {}", toEmail);
+        } catch (MessagingException | RuntimeException e) {
+            log.error("Failed to send referee submission code to {}", toEmail, e);
+        }
+    }
+
+    private String buildRefereeCodeHtmlBody(String code) {
+        return """
+                <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8faf8; border-radius: 12px;">
+                    <div style="text-align: center; margin-bottom: 24px;">
+                        <h2 style="color: #0d3b2e; margin: 0;">Equine Elite</h2>
+                        <p style="color: #6b7280; margin: 4px 0 0;">Race Report Submission</p>
+                    </div>
+                    <div style="background: #ffffff; border-radius: 8px; padding: 24px; border: 1px solid #e5e7eb;">
+                        <p style="color: #374151; margin: 0 0 16px;">Use the code below to publish your combined results &amp; violations report:</p>
+                        <div style="text-align: center; margin: 24px 0;">
+                            <span style="display: inline-block; font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #0d3b2e; background: #ecfdf5; padding: 12px 24px; border-radius: 8px; border: 2px dashed #0d3b2e;">
+                                %s
+                            </span>
+                        </div>
+                        <p style="color: #6b7280; font-size: 14px; margin: 16px 0 0;">This code expires in <strong>10 minutes</strong> and can be used once. If you didn't request this, please ignore this email.</p>
+                    </div>
+                    <p style="color: #9ca3af; font-size: 12px; text-align: center; margin: 16px 0 0;">© Equine Elite — Horse Racing Tournament Management</p>
+                </div>
+                """.formatted(code);
+    }
+
+    private String buildNewAccountHtmlBody(String tempPassword) {
+        return """
+                <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8faf8; border-radius: 12px;">
+                    <div style="text-align: center; margin-bottom: 24px;">
+                        <h2 style="color: #0d3b2e; margin: 0;">Equine Elite</h2>
+                        <p style="color: #6b7280; margin: 4px 0 0;">Your account is ready</p>
+                    </div>
+                    <div style="background: #ffffff; border-radius: 8px; padding: 24px; border: 1px solid #e5e7eb;">
+                        <p style="color: #374151; margin: 0 0 16px;">An administrator created an account for you. Sign in with the temporary password below and change it as soon as possible:</p>
+                        <div style="text-align: center; margin: 24px 0;">
+                            <span style="display: inline-block; font-size: 20px; font-weight: 700; letter-spacing: 2px; color: #0d3b2e; background: #ecfdf5; padding: 12px 24px; border-radius: 8px; border: 2px dashed #0d3b2e;">
+                                %s
+                            </span>
+                        </div>
+                        <p style="color: #6b7280; font-size: 14px; margin: 16px 0 0;">If you did not expect this, please contact support.</p>
+                    </div>
+                    <p style="color: #9ca3af; font-size: 12px; text-align: center; margin: 16px 0 0;">© Equine Elite — Horse Racing Tournament Management</p>
+                </div>
+                """.formatted(tempPassword);
     }
 
     private String buildHtmlBody(String code) {

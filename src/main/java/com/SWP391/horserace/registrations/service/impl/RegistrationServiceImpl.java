@@ -50,6 +50,8 @@ public class RegistrationServiceImpl implements RegistrationService {
     private final UserRepository userRepository;
     private final RaceRepository raceRepository;
     private final RaceEntryRepository raceEntryRepository;
+    private final com.SWP391.horserace.races.service.RaceEntryGate raceEntryGate;
+    private final com.SWP391.horserace.attachments.repository.AttachmentRepository attachmentRepository;
 
     @Override
     @Transactional
@@ -164,6 +166,17 @@ public class RegistrationServiceImpl implements RegistrationService {
         requireSourceStatus(registration,
                 RegistrationStatus.SUBMITTED, RegistrationStatus.UNDER_REVIEW);
 
+        // #7: a registration can't be approved without a vaccination/medical document uploaded by its
+        // OWNER (an attachment merely tagged with this id by some other user does not satisfy the gate).
+        UUID ownerUserId = registration.getOwner() != null ? registration.getOwner().getUserId() : null;
+        if (ownerUserId == null || !attachmentRepository
+                .existsByOwnerEntityTypeAndOwnerEntityIdAndUploadedBy_UserId("TOURNAMENT_REGISTRATION", id, ownerUserId)) {
+            throw new AppException(ErrorCode.REGISTRATION_DOCUMENT_REQUIRED);
+        }
+
+        // Don't approve an ineligible horse (unfit/injured/quarantine or below minimum age).
+        raceEntryGate.checkEligibility(registration.getHorse(), registration.getTournament());
+
         User reviewer = userRepository.findByUserIdAndDeletedFalse(currentUserId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
 
@@ -219,6 +232,37 @@ public class RegistrationServiceImpl implements RegistrationService {
         return mapToResponse(registrationRepository.save(registration));
     }
 
+    @Override
+    @Transactional
+    public void deleteRegistration(UUID currentUserId, UUID id) {
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        TournamentRegistration registration = loadRegistration(id);
+
+        // Only an APPROVED reg has a race entry to reconcile. Do this BEFORE flipping status so a
+        // finalized-race refusal changes nothing.
+        if (registration.getStatus() == RegistrationStatus.APPROVED) {
+            raceEntryRepository.findByRegistration_RegistrationId(id).ifPresent(entry -> {
+                Race race = entry.getRace();
+                // Risk (b): never pull an entry from a race whose result is already locked in.
+                if (race != null && (race.getStatus() == RaceStatus.FINISHED
+                        || race.getStatus() == RaceStatus.OFFICIAL)) {
+                    throw new AppException(ErrorCode.RACE_ALREADY_FINALIZED);
+                }
+                // RT-CRITICAL: SCRATCH (soft) — never .delete(): downstream FKs (jockey_assignment,
+                // race_result, inspections) are RESTRICT and would throw a DataIntegrityViolation.
+                entry.setStatus(RaceEntryStatus.SCRATCHED);
+                raceEntryRepository.save(entry);
+                // Return the entry fee to the owner (no-op when the race had no fee).
+                raceEntryGate.refundEntryFee(registration, race);
+            });
+        }
+
+        registration.setStatus(RegistrationStatus.REMOVED);
+        registrationRepository.save(registration);
+    }
+
     // ── helpers ──
 
     private TournamentRegistration loadRegistration(UUID id) {
@@ -235,13 +279,17 @@ public class RegistrationServiceImpl implements RegistrationService {
     private void enterIntoRace(TournamentRegistration registration) {
         Race race = registration.getRace();
 
-        if (race.getStatus() != RaceStatus.SCHEDULED && race.getStatus() != RaceStatus.OPEN) {
+        // Only OPEN races accept entries (approval creates the entry).
+        if (race.getStatus() != RaceStatus.OPEN) {
             throw new AppException(ErrorCode.RACE_NOT_OPEN_FOR_ENTRY);
         }
         if (race.getMaxParticipants() != null
                 && raceEntryRepository.countByRace_RaceId(race.getRaceId()) >= race.getMaxParticipants()) {
             throw new AppException(ErrorCode.RACE_FULL);
         }
+
+        // Eligibility (health + age) + entry-fee debit before the entry is created.
+        raceEntryGate.admit(registration, race);
 
         RaceEntry entry = RaceEntry.builder()
                 .registration(registration)

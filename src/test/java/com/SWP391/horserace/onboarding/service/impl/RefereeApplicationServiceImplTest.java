@@ -50,6 +50,7 @@ class RefereeApplicationServiceImplTest {
     @Mock UserRepository userRepository;
     @Mock RoleRepository roleRepository;
     @Mock HorseRepository horseRepository;
+    @Mock com.SWP391.horserace.jockeys.repository.JockeyProfileRepository jockeyProfileRepository;
 
     private RefereeApplicationServiceImpl service;
 
@@ -58,7 +59,7 @@ class RefereeApplicationServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new RefereeApplicationServiceImpl(
-                applicationRepository, userRepository, roleRepository, horseRepository);
+                applicationRepository, userRepository, roleRepository, horseRepository, jockeyProfileRepository);
     }
 
     private MembershipApplication pendingOwner() {
@@ -143,6 +144,23 @@ class RefereeApplicationServiceImplTest {
         // The requested role must be honored on the existing-account path, not left stale.
         assertThat(existing.getRole().getRoleCode()).isEqualTo("HORSE_OWNER");
         assertThat(app.getCreatedUserId()).isEqualTo(existingId);
+    }
+
+    @Test
+    void approve_duplicatePhone_throws() {
+        MembershipApplication app = pendingOwner();
+        app.setPhone("0912345678");
+        Role ownerRole = Role.builder().roleId(UUID.randomUUID()).roleCode("HORSE_OWNER").build();
+        when(applicationRepository.findById(app.getApplicationId())).thenReturn(Optional.of(app));
+        when(roleRepository.findByRoleCode("HORSE_OWNER")).thenReturn(Optional.of(ownerRole));
+        when(userRepository.findByEmailAndDeletedFalse(app.getEmail())).thenReturn(Optional.empty());
+        when(userRepository.existsByPhone("0912345678")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.approve(app.getApplicationId(), reviewerId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.PHONE_ALREADY_EXISTS);
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test

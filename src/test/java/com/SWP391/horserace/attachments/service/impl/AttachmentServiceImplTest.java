@@ -133,6 +133,67 @@ class AttachmentServiceImplTest {
         assertThat(resp.getOwnerEntityType()).isEqualTo("VIOLATION");
     }
 
+    // ── owner/horse documents (Phase 2 / FR-07) ──
+
+    @Test
+    void upload_ownerTypeHorse_rejectedOnGenericPath() {
+        // RT-CRITICAL-5: HORSE/OWNER must NOT be accepted by the generic upload path.
+        assertThatThrownBy(() -> service.upload(userId, file(), "HORSE", ownerId, "PUBLIC"))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.ATTACHMENT_INVALID_OWNER_TYPE);
+    }
+
+    @Test
+    void upload_ownerTypeOwner_rejectedOnGenericPath() {
+        assertThatThrownBy(() -> service.upload(userId, file(), "OWNER", ownerId, null))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.ATTACHMENT_INVALID_OWNER_TYPE);
+    }
+
+    @Test
+    void uploadOwnerDocument_horse_allowedAndForcedRestricted() {
+        User uploader = User.builder().userId(userId).fullName("Owner O.").build();
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(uploader));
+        // RESTRICTED docs are stored under the private "restricted" folder, not the public "attachments".
+        when(fileStorageService.store(any(), eq("restricted"))).thenReturn("restricted/horse.pdf");
+        when(attachmentRepository.save(any(Attachment.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // Even though a weaker sensitivity is not passed, the method forces RESTRICTED.
+        AttachmentResponse resp = service.uploadOwnerDocument(userId, file(), "HORSE", ownerId);
+
+        ArgumentCaptor<Attachment> captor = ArgumentCaptor.forClass(Attachment.class);
+        org.mockito.Mockito.verify(attachmentRepository).save(captor.capture());
+        assertThat(captor.getValue().getOwnerEntityType()).isEqualTo("HORSE");
+        assertThat(captor.getValue().getSensitivityLevel()).isEqualTo(SensitivityLevel.RESTRICTED);
+        assertThat(resp.getSensitivityLevel()).isEqualTo("RESTRICTED");
+        // RESTRICTED docs must NOT advertise a public /files URL (auth-gated download only).
+        assertThat(resp.getUrl()).isNull();
+    }
+
+    @Test
+    void uploadOwnerDocument_owner_allowedAndForcedRestricted() {
+        User uploader = User.builder().userId(userId).fullName("Owner O.").build();
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(uploader));
+        when(fileStorageService.store(any(), eq("restricted"))).thenReturn("restricted/owner.pdf");
+        when(attachmentRepository.save(any(Attachment.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        AttachmentResponse resp = service.uploadOwnerDocument(userId, file(), "OWNER", ownerId);
+
+        assertThat(resp.getOwnerEntityType()).isEqualTo("OWNER");
+        assertThat(resp.getSensitivityLevel()).isEqualTo("RESTRICTED");
+        assertThat(resp.getUrl()).isNull(); // no public URL for RESTRICTED
+    }
+
+    @Test
+    void uploadOwnerDocument_invalidType_rejected() {
+        assertThatThrownBy(() -> service.uploadOwnerDocument(userId, file(), "RACE", ownerId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ErrorCode.ATTACHMENT_INVALID_OWNER_TYPE);
+    }
+
     // ── list ──
 
     @Test

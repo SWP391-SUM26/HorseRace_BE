@@ -68,6 +68,10 @@ public class RaceResult {
     @Column(name = "published_at")
     private OffsetDateTime publishedAt;
 
+    /** CN3: set once when the referee publishes the combined report — backs the one-time lock. */
+    @Column(name = "referee_submitted_at")
+    private OffsetDateTime refereeSubmittedAt;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private OffsetDateTime createdAt;

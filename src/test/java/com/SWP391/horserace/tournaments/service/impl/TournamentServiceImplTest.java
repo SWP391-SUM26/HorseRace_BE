@@ -18,6 +18,7 @@ import com.SWP391.horserace.venues.repository.VenueRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -29,6 +30,10 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,6 +43,7 @@ class TournamentServiceImplTest {
     @Mock UserRepository userRepository;
     @Mock VenueRepository venueRepository;
     @Mock RegistrationRepository registrationRepository;
+    @Mock com.SWP391.horserace.shared.storage.ImageUploadService imageUploadService;
 
     private TournamentServiceImpl service;
 
@@ -46,7 +52,7 @@ class TournamentServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new TournamentServiceImpl(tournamentRepository, userRepository,
-                venueRepository, registrationRepository);
+                venueRepository, registrationRepository, imageUploadService);
     }
 
     private Tournament withStatus(UUID id, TournamentStatus status) {
@@ -113,7 +119,6 @@ class TournamentServiceImplTest {
 
     @Test
     void create_mapsEligibilityAndEnrichmentFields() {
-        when(tournamentRepository.existsByTournamentCode("T1")).thenReturn(false);
         when(userRepository.findById(userId)).thenReturn(Optional.of(User.builder().userId(userId).build()));
         when(tournamentRepository.save(any(Tournament.class))).thenAnswer(i -> {
             Tournament t = i.getArgument(0);
@@ -122,7 +127,7 @@ class TournamentServiceImplTest {
         });
 
         TournamentRequest req = TournamentRequest.builder()
-                .tournamentCode("T1").name("Cup")
+                .name("Cup")
                 .circuitTier(CircuitTier.GROUP_1)
                 .totalPurse(new BigDecimal("1000000.00"))
                 .entryCap(16)
@@ -141,13 +146,65 @@ class TournamentServiceImplTest {
         assertThat(res.getEligibility().getRequiresPreviousGroupWin()).isFalse();
     }
 
+    // ── §C0 auto-generated tournament code (FR-04) ──
+
+    @Test
+    void createTournament_generatesUniqueCode() {
+        when(userRepository.findById(userId)).thenReturn(Optional.of(User.builder().userId(userId).build()));
+        when(tournamentRepository.save(any(Tournament.class))).thenAnswer(i -> {
+            Tournament t = i.getArgument(0);
+            t.setTournamentId(UUID.randomUUID());
+            return t;
+        });
+
+        // Request no longer carries a code — it must be system-generated.
+        TournamentRequest req = TournamentRequest.builder().name("Cup").build();
+
+        TournamentResponse res = service.createTournament(req, userId);
+
+        assertThat(res.getTournamentCode()).isNotNull().startsWith("TRN");
+    }
+
+    @Test
+    void createTournament_retriesOnCodeCollision() {
+        when(userRepository.findById(userId)).thenReturn(Optional.of(User.builder().userId(userId).build()));
+        // First generated code collides, second is free -> the loop must retry.
+        when(tournamentRepository.existsByTournamentCode(anyString())).thenReturn(true, false);
+        when(tournamentRepository.save(any(Tournament.class))).thenAnswer(i -> {
+            Tournament t = i.getArgument(0);
+            t.setTournamentId(UUID.randomUUID());
+            return t;
+        });
+
+        TournamentResponse res = service.createTournament(
+                TournamentRequest.builder().name("Cup").build(), userId);
+
+        assertThat(res.getTournamentCode()).isNotNull().startsWith("TRN");
+        verify(tournamentRepository, times(2)).existsByTournamentCode(anyString());
+    }
+
+    @Test
+    void updateTournament_doesNotChangeCode() {
+        UUID id = UUID.randomUUID();
+        Tournament existing = Tournament.builder()
+                .tournamentId(id).tournamentCode("TRN00007").name("Old").status(TournamentStatus.DRAFT).build();
+        when(tournamentRepository.findById(id)).thenReturn(Optional.of(existing));
+        when(tournamentRepository.save(any(Tournament.class))).thenAnswer(i -> i.getArgument(0));
+
+        TournamentRequest req = TournamentRequest.builder().name("New Name").build();
+
+        TournamentResponse res = service.updateTournament(id, req);
+
+        assertThat(res.getTournamentCode()).isEqualTo("TRN00007"); // immutable
+        assertThat(res.getName()).isEqualTo("New Name");
+    }
+
     // ── §C3 venue link ──
 
     @Test
     void create_withVenueIds_linksVenues() {
         UUID venueId = UUID.randomUUID();
         Venue venue = Venue.builder().venueId(venueId).name("Meydan").city("Dubai").build();
-        when(tournamentRepository.existsByTournamentCode("T1")).thenReturn(false);
         when(userRepository.findById(userId)).thenReturn(Optional.of(User.builder().userId(userId).build()));
         when(venueRepository.findById(venueId)).thenReturn(Optional.of(venue));
         when(tournamentRepository.save(any(Tournament.class))).thenAnswer(i -> {
@@ -157,7 +214,7 @@ class TournamentServiceImplTest {
         });
 
         TournamentRequest req = TournamentRequest.builder()
-                .tournamentCode("T1").name("Cup").venueIds(List.of(venueId)).build();
+                .name("Cup").venueIds(List.of(venueId)).build();
 
         TournamentResponse res = service.createTournament(req, userId);
 
@@ -169,12 +226,11 @@ class TournamentServiceImplTest {
     @Test
     void create_unknownVenueId_throwsVenueNotFound() {
         UUID venueId = UUID.randomUUID();
-        when(tournamentRepository.existsByTournamentCode("T1")).thenReturn(false);
         when(userRepository.findById(userId)).thenReturn(Optional.of(User.builder().userId(userId).build()));
         when(venueRepository.findById(venueId)).thenReturn(Optional.empty());
 
         TournamentRequest req = TournamentRequest.builder()
-                .tournamentCode("T1").name("Cup").venueIds(List.of(venueId)).build();
+                .name("Cup").venueIds(List.of(venueId)).build();
 
         assertThatThrownBy(() -> service.createTournament(req, userId))
                 .isInstanceOf(AppException.class)
@@ -194,5 +250,145 @@ class TournamentServiceImplTest {
         TournamentResponse res = service.getTournamentById(id);
 
         assertThat(res.getRegisteredEntriesCount()).isEqualTo(7L);
+    }
+
+    // ── image upload (FR-06) ──
+
+    @Test
+    void uploadImage_storesNewThenBestEffortDeletesOld() {
+        UUID id = UUID.randomUUID();
+        Tournament t = withStatus(id, TournamentStatus.DRAFT);
+        t.setImageUrl("/api/v1/files/tournaments/old.png"); // previous image to clean up
+        var file = new org.springframework.mock.web.MockMultipartFile("file", "x.png", "image/png", new byte[]{1});
+        String newUrl = "https://res.cloudinary.com/c/image/upload/tournaments/new.jpg";
+        when(tournamentRepository.findById(id)).thenReturn(Optional.of(t));
+        when(imageUploadService.storeImageAsUrl(file, "tournaments")).thenReturn(newUrl);
+        when(tournamentRepository.save(any(Tournament.class))).thenAnswer(i -> i.getArgument(0));
+
+        TournamentResponse res = service.uploadImage(id, file);
+
+        assertThat(res.getImageUrl()).isEqualTo(newUrl);
+        verify(imageUploadService).deleteByUrl("/api/v1/files/tournaments/old.png");
+    }
+
+    // ── #2 date validation ──
+
+    private void stubCreateOk() {
+        when(userRepository.findById(userId)).thenReturn(Optional.of(User.builder().userId(userId).build()));
+        lenient().when(tournamentRepository.save(any(Tournament.class))).thenAnswer(i -> {
+            Tournament t = i.getArgument(0);
+            t.setTournamentId(UUID.randomUUID());
+            return t;
+        });
+    }
+
+    @Test
+    void createTournament_endBeforeStart_throwsInvalidDateRange() {
+        stubCreateOk();
+        var now = java.time.OffsetDateTime.now();
+        TournamentRequest req = TournamentRequest.builder().name("Cup")
+                .startDate(now.plusDays(5)).endDate(now.plusDays(1)).build();
+        assertThatThrownBy(() -> service.createTournament(req, userId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.INVALID_DATE_RANGE);
+    }
+
+    @Test
+    void createTournament_startInPast_throwsDateInPast() {
+        stubCreateOk();
+        TournamentRequest req = TournamentRequest.builder().name("Cup")
+                .startDate(java.time.OffsetDateTime.now().minusDays(2)).build();
+        assertThatThrownBy(() -> service.createTournament(req, userId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.DATE_IN_PAST);
+    }
+
+    @Test
+    void createTournament_startToday_passes() {
+        stubCreateOk();
+        // Boundary (Risk c): today must be accepted, not rejected as past.
+        TournamentRequest req = TournamentRequest.builder().name("Cup")
+                .startDate(java.time.OffsetDateTime.now()).endDate(java.time.OffsetDateTime.now().plusDays(3)).build();
+        TournamentResponse res = service.createTournament(req, userId);
+        assertThat(res).isNotNull();
+    }
+
+    @Test
+    void createTournament_nullDates_succeeds() {
+        stubCreateOk();
+        // RT-HIGH: dates optional — null-safe validation must not NPE/400.
+        TournamentResponse res = service.createTournament(TournamentRequest.builder().name("Cup").build(), userId);
+        assertThat(res).isNotNull();
+    }
+
+    // ── FR-12: registration window within event window ──
+
+    @Test
+    void createTournament_rejectsRegistrationWindowOutsideEventWindow() {
+        stubCreateOk();
+        var now = java.time.OffsetDateTime.now();
+        TournamentRequest req = TournamentRequest.builder().name("Cup")
+                .startDate(now.plusDays(5)).endDate(now.plusDays(10))
+                .registrationOpenAt(now.plusDays(1)) // opens BEFORE the tournament starts
+                .build();
+        assertThatThrownBy(() -> service.createTournament(req, userId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.INVALID_REGISTRATION_WINDOW);
+    }
+
+    @Test
+    void createTournament_allowsRegistrationWindowInsideEventWindow() {
+        stubCreateOk();
+        var now = java.time.OffsetDateTime.now();
+        TournamentRequest req = TournamentRequest.builder().name("Cup")
+                .startDate(now.plusDays(5)).endDate(now.plusDays(10))
+                .registrationOpenAt(now.plusDays(5)).registrationCloseAt(now.plusDays(9))
+                .build();
+        assertThat(service.createTournament(req, userId)).isNotNull();
+    }
+
+    @Test
+    void updateTournament_appliesSameRegistrationWindowRule() {
+        UUID id = UUID.randomUUID();
+        Tournament existing = Tournament.builder()
+                .tournamentId(id).tournamentCode("TRN00007").name("Old").status(TournamentStatus.DRAFT).build();
+        when(tournamentRepository.findById(id)).thenReturn(Optional.of(existing));
+        var now = java.time.OffsetDateTime.now();
+        TournamentRequest req = TournamentRequest.builder().name("New")
+                .startDate(now.plusDays(5)).endDate(now.plusDays(10))
+                .registrationCloseAt(now.plusDays(20)) // closes AFTER the tournament ends
+                .build();
+        assertThatThrownBy(() -> service.updateTournament(id, req))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.INVALID_REGISTRATION_WINDOW);
+    }
+
+    // ── FR-03: forced DRAFT on create ──
+
+    @Test
+    void createTournament_forcesDraftStatus_ignoringClientStatus() {
+        stubCreateOk();
+        // Client tries to create directly in COMPLETED — the service must ignore it and force DRAFT.
+        TournamentRequest req = TournamentRequest.builder()
+                .name("Cup").status(TournamentStatus.COMPLETED).build();
+
+        service.createTournament(req, userId);
+
+        ArgumentCaptor<Tournament> captor = ArgumentCaptor.forClass(Tournament.class);
+        verify(tournamentRepository).save(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo(TournamentStatus.DRAFT);
+    }
+
+    // ── FR-02: non-negative purse persists unchanged (never silently coerced) ──
+
+    @Test
+    void createTournament_persistsNonNegativePurse() {
+        stubCreateOk();
+        TournamentRequest req = TournamentRequest.builder()
+                .name("Cup").totalPurse(new BigDecimal("500000.00")).build();
+
+        TournamentResponse res = service.createTournament(req, userId);
+
+        assertThat(res.getTotalPurse()).isEqualByComparingTo("500000.00");
     }
 }

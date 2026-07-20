@@ -25,6 +25,7 @@ DROP TABLE IF EXISTS role_permission          CASCADE;
 DROP TABLE IF EXISTS permission               CASCADE;
 DROP TABLE IF EXISTS betting_pool             CASCADE;
 DROP TABLE IF EXISTS email_change_request     CASCADE;
+DROP TABLE IF EXISTS referee_submission_code  CASCADE;
 DROP TABLE IF EXISTS email_verification_token CASCADE;
 DROP TABLE IF EXISTS password_reset_token     CASCADE;
 DROP TABLE IF EXISTS refresh_token            CASCADE;
@@ -45,6 +46,7 @@ DROP TABLE IF EXISTS race_result_version      CASCADE;
 DROP TABLE IF EXISTS race_result              CASCADE;
 DROP TABLE IF EXISTS referee_assignment       CASCADE;
 DROP TABLE IF EXISTS jockey_assignment        CASCADE;
+DROP TABLE IF EXISTS entry_document_review    CASCADE;
 DROP TABLE IF EXISTS race_entry_inspection    CASCADE;
 DROP TABLE IF EXISTS race_entry               CASCADE;
 DROP TABLE IF EXISTS tournament_registration  CASCADE;
@@ -106,11 +108,12 @@ CREATE TABLE app_user (
     user_code     VARCHAR(50) UNIQUE NOT NULL,
     full_name     VARCHAR(255),
     email         VARCHAR(255) UNIQUE NOT NULL,
-    phone         VARCHAR(30),
+    phone         VARCHAR(30) UNIQUE,  -- unique when set; many NULLs allowed (NULLs distinct by default)
     password_hash TEXT NOT NULL,
     avatar_url    TEXT,
     status        VARCHAR(30) NOT NULL DEFAULT 'ACTIVE'
-                  CHECK (status IN ('ACTIVE', 'INACTIVE', 'SUSPENDED', 'BANNED')),
+                  -- PENDING: chờ duyệt (vd jockey tự đăng ký, chờ referee duyệt) — chưa login được
+                  CHECK (status IN ('ACTIVE', 'INACTIVE', 'SUSPENDED', 'BANNED', 'PENDING')),
     kyc_status    VARCHAR(30) NOT NULL DEFAULT 'PENDING'
                   CHECK (kyc_status IN ('PENDING', 'VERIFIED', 'REJECTED')),
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
@@ -142,6 +145,25 @@ CREATE TABLE jockey_profile (
     base_fee       NUMERIC(18,2),                                                        -- hire fee
     prize_percent  NUMERIC(5,2),                                                         -- % of prize taken
     last_trophy    VARCHAR(255),                                                         -- most recent trophy
+    -- Self-registration (Jockey Registration form) fields — thu lúc đăng ký, referee duyệt
+    age                      INT CHECK (age IS NULL OR age >= 16),
+    nationality              VARCHAR(50),
+    application_riding_style VARCHAR(30),   -- form domain (Flat/Jump/Harness/Endurance); TÁCH khỏi riding_style marketing
+    jockey_license_url       TEXT,          -- giấy phép nài (attachment key/url)
+    fitness_certificate_url  TEXT,          -- giấy chứng nhận thể lực
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================
+-- OWNER PROFILE  (NEW) -- hồ sơ chủ ngựa (self-registration)
+-- 1 owner (app_user role=HORSE_OWNER) <-> 1 hồ sơ. App layer đảm bảo đúng role.
+-- =========================================================
+CREATE TABLE owner_profile (
+    owner_user_id  UUID PRIMARY KEY REFERENCES app_user(user_id),
+    stable_name    VARCHAR(100),
+    primary_region VARCHAR(100),          -- lưu mã vùng FE gửi (vd "KY-US","VN")
+    bio            TEXT,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -179,13 +201,14 @@ CREATE TABLE email_change_request (
 -- PASSWORD RESET TOKEN  (OTP 6 số quên mật khẩu, lưu HASH)
 -- =========================================================
 CREATE TABLE password_reset_token (
-    token_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID NOT NULL REFERENCES app_user(user_id),
-    code_hash   VARCHAR(255) NOT NULL,
-    expires_at  TIMESTAMPTZ NOT NULL,
-    used        BOOLEAN NOT NULL DEFAULT FALSE,
-    used_at     TIMESTAMPTZ,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    token_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       UUID NOT NULL REFERENCES app_user(user_id),
+    code_hash     VARCHAR(255) NOT NULL,
+    expires_at    TIMESTAMPTZ NOT NULL,
+    used          BOOLEAN NOT NULL DEFAULT FALSE,
+    used_at       TIMESTAMPTZ,
+    attempt_count INT NOT NULL DEFAULT 0,   -- wrong-code attempts; token invalidated past a limit
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
@@ -258,6 +281,8 @@ CREATE TABLE horse_medical_record (
     title       VARCHAR(255) NOT NULL,
     note        TEXT,
     record_date DATE,
+    file_url    TEXT,                          -- attached document/scan (public URL); null if none
+    file_name   VARCHAR(255),                  -- original uploaded filename for display
     created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -308,6 +333,8 @@ CREATE TABLE tournament (
     status                VARCHAR(50) NOT NULL DEFAULT 'DRAFT'
                           CHECK (status IN ('DRAFT', 'PUBLISHED', 'REGISTRATION_OPEN',
                                             'REGISTRATION_CLOSED', 'ONGOING', 'COMPLETED', 'CANCELLED')),
+    -- Public cover image (Cloudinary CDN URL when app.storage.provider=cloudinary, else /api/v1/files/…)
+    image_url             TEXT,
     created_by_user_id    UUID REFERENCES app_user(user_id),
     created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -363,12 +390,16 @@ CREATE TABLE race (
     actual_start_at      TIMESTAMPTZ,
     actual_end_at        TIMESTAMPTZ,
     prediction_cutoff_at TIMESTAMPTZ,
+    -- Set by the auto-cancel sweeper when an OPEN race is past its cutoff with too few runners;
+    -- notifies admins and awaits their confirmation (semi-auto cancel). NULL = no proposal.
+    cancel_proposed_at   TIMESTAMPTZ,
     max_participants     INT CHECK (max_participants IS NULL OR max_participants > 0),
     min_participants      INT CHECK (min_participants IS NULL OR min_participants > 0),
     venue                VARCHAR(255),
     venue_id             UUID REFERENCES venue(venue_id),  -- §D1 structured venue FK (nullable)
     going_moisture_pct   INT CHECK (going_moisture_pct IS NULL OR (going_moisture_pct BETWEEN 0 AND 100)),
     total_purse          NUMERIC(18,2),
+    entry_fee            NUMERIC(18,2) CHECK (entry_fee IS NULL OR entry_fee >= 0),  -- owner pays on entry
     -- FE-v2 Results + Certify (mục 5): telemetry / photofinish / certification.
     wind_speed_kph       NUMERIC(5,2),
     wind_direction       VARCHAR(10),                                 -- FE-v2 Live monitor (mục 4)
@@ -415,7 +446,7 @@ CREATE TABLE tournament_registration (
     registration_code   VARCHAR(50) UNIQUE NOT NULL,
     status              VARCHAR(50) NOT NULL DEFAULT 'SUBMITTED'
                         CHECK (status IN ('DRAFT', 'SUBMITTED', 'UNDER_REVIEW',
-                                          'APPROVED', 'REJECTED', 'WITHDRAWN')),
+                                          'APPROVED', 'REJECTED', 'WITHDRAWN', 'REMOVED')),
     submitted_at        TIMESTAMPTZ,
     reviewed_at         TIMESTAMPTZ,
     approved_by_user_id UUID REFERENCES app_user(user_id),
@@ -472,6 +503,22 @@ CREATE TABLE race_entry_inspection (
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Referee's per-race document review of each entry's owner + horse papers (CN2). Separate from the
+-- steward vet-check above (different actor/timing); additive so it can't collide with that table.
+CREATE TABLE entry_document_review (
+    review_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entry_id            UUID NOT NULL UNIQUE REFERENCES race_entry(entry_id),
+    race_id             UUID NOT NULL REFERENCES race(race_id),
+    document_status     VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+                        CHECK (document_status IN ('PENDING','ACCEPTED','REJECTED')),
+    review_reason       TEXT,
+    reviewed_by_user_id UUID REFERENCES app_user(user_id),
+    reviewed_at         TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_entry_document_review_race ON entry_document_review(race_id);
+
 -- =========================================================
 -- JOCKEY ASSIGNMENT  (mời/chọn jockey -> jockey accept/decline)
 -- =========================================================
@@ -499,8 +546,10 @@ CREATE TABLE referee_assignment (
                        CHECK (panel_role IN ('CHIEF', 'JUDGE', 'STEWARD', 'TIMEKEEPER', 'OBSERVER')),
     ref_code           VARCHAR(50) UNIQUE,  -- mã trọng tài/cuộc đua admin cấp; bắt buộc khi nộp report
     status             VARCHAR(50) NOT NULL DEFAULT 'ASSIGNED'
-                       CHECK (status IN ('ASSIGNED', 'CONFIRMED', 'REVOKED')),
+                       CHECK (status IN ('ASSIGNED', 'CONFIRMED', 'DECLINED', 'REVOKED')),
     assigned_at        TIMESTAMPTZ,
+    responded_at       TIMESTAMPTZ,          -- when the referee accepted/declined (CN1)
+    decline_reason     TEXT,                 -- reason given on decline (CN1)
     created_by_user_id UUID REFERENCES app_user(user_id),
     created_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (race_id, referee_user_id)  -- 1 trọng tài / cuộc đua tối đa 1 lần
@@ -539,9 +588,24 @@ CREATE TABLE race_result (
                         CHECK (officiality_status IN ('PROVISIONAL', 'UNDER_REVIEW', 'OFFICIAL', 'AMENDED')),
     approved_by_user_id UUID REFERENCES app_user(user_id),
     published_at        TIMESTAMPTZ,
+    referee_submitted_at TIMESTAMPTZ,  -- CN3: set once when the referee publishes the report (one-time lock)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Referee's one-time submission code (CN3): a 6-digit OTP emailed to the referee's verified email,
+-- stored only as a SHA-256 hash, single-use, attempt-limited, bound to (race, referee).
+CREATE TABLE referee_submission_code (
+    code_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    race_id         UUID NOT NULL REFERENCES race(race_id),
+    referee_user_id UUID NOT NULL REFERENCES app_user(user_id),
+    code_hash       VARCHAR(255) NOT NULL,
+    expires_at      TIMESTAMPTZ NOT NULL,
+    consumed_at     TIMESTAMPTZ,
+    attempt_count   INT NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_referee_submission_code_race_ref ON referee_submission_code(race_id, referee_user_id);
 
 -- =========================================================
 -- RACE RESULT VERSION  (lịch sử chỉnh sửa kết quả - audit)
@@ -695,7 +759,7 @@ CREATE TABLE wallet_transaction (
     entry_type          VARCHAR(20) NOT NULL CHECK (entry_type IN ('DEBIT', 'CREDIT')),
     txn_category        VARCHAR(50)
                         CHECK (txn_category IN ('DEPOSIT', 'WITHDRAWAL', 'BET_STAKE',
-                                                'BET_PAYOUT', 'PRIZE', 'REFUND', 'ADJUSTMENT', 'REWARD')),
+                                                'BET_PAYOUT', 'PRIZE', 'REFUND', 'ADJUSTMENT', 'REWARD', 'ENTRY_FEE')),
     amount              NUMERIC(18,2) NOT NULL CHECK (amount >= 0),
     balance_after       NUMERIC(18,2) NOT NULL CHECK (balance_after >= 0),
     related_entity_type VARCHAR(50),

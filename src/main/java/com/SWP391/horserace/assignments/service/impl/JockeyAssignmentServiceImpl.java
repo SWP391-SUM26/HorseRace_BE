@@ -60,17 +60,26 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         RaceEntry entry = raceEntryRepository.findByIdWithDetails(request.getEntryId())
                 .orElseThrow(() -> new AppException(ErrorCode.ENTRY_NOT_FOUND));
 
-        // 2. TẠM TẮT CHECK QUYỀN ĐỂ DEV/TEST (Yêu cầu từ user)
-        /*
+        // 2. Only the horse's owner may invite a jockey for their own entry (object-level auth).
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
         UUID ownerUserId = entry.getRegistration().getOwner().getUserId();
         if (!ownerUserId.equals(currentUserId)) {
             throw new AppException(ErrorCode.OWNER_NOT_MATCH);
         }
-        */
 
         // 4. Verify the jockey exists and is active
         JockeyProfile jockeyProfile = jockeyProfileRepository.findByIdAndUserActive(request.getJockeyUserId())
                 .orElseThrow(() -> new AppException(ErrorCode.JOCKEY_NOT_FOUND));
+
+        // 4b. One ride per race: reject if this jockey has already ACCEPTED a ride in this race
+        //     (they can't ride two horses in the same race).
+        UUID raceId = entry.getRace() != null ? entry.getRace().getRaceId() : null;
+        if (raceId != null
+                && assignmentRepository.findJockeyIdsAcceptedInRace(raceId).contains(request.getJockeyUserId())) {
+            throw new AppException(ErrorCode.JOCKEY_ALREADY_RIDING_RACE);
+        }
 
         // 5. Lấy thẳng chủ ngựa làm người gửi thay vì bắt buộc truyền currentUserId hợp lệ
         User assignedByUser = entry.getRegistration().getOwner();
@@ -160,17 +169,28 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         JockeyAssignment assignment = assignmentRepository.findByIdWithDetails(assignmentId)
                 .orElseThrow(() -> new AppException(ErrorCode.ASSIGNMENT_NOT_FOUND));
 
-        // TẠM TẮT CHECK QUYỀN ĐỂ DEV/TEST
-        /*
-        // Only the invited jockey can accept
+        // Only the invited jockey can accept (object-level auth).
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
         if (!assignment.getJockey().getUserId().equals(currentUserId)) {
             throw new AppException(ErrorCode.NOT_INVITED_JOCKEY);
         }
-        */
 
         // Must be in INVITED status
         if (assignment.getStatus() != JockeyAssignmentStatus.INVITED) {
             throw new AppException(ErrorCode.INVITATION_NOT_PENDING);
+        }
+
+        // One ride per race: reject if this jockey already ACCEPTED a ride on another horse in
+        // this race. The send-time check can't catch this alone — two owners can both invite the
+        // same jockey while both invites sit at INVITED — so we re-check at accept time.
+        RaceEntry entry = assignment.getEntry();
+        UUID raceId = entry != null && entry.getRace() != null ? entry.getRace().getRaceId() : null;
+        UUID jockeyUserId = assignment.getJockey() != null ? assignment.getJockey().getUserId() : null;
+        if (raceId != null && jockeyUserId != null
+                && assignmentRepository.findJockeyIdsAcceptedInRace(raceId).contains(jockeyUserId)) {
+            throw new AppException(ErrorCode.JOCKEY_ALREADY_RIDING_RACE);
         }
 
         assignment.setStatus(JockeyAssignmentStatus.ACCEPTED);
@@ -192,13 +212,13 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         JockeyAssignment assignment = assignmentRepository.findByIdWithDetails(assignmentId)
                 .orElseThrow(() -> new AppException(ErrorCode.ASSIGNMENT_NOT_FOUND));
 
-        // TẠM TẮT CHECK QUYỀN ĐỂ DEV/TEST
-        /*
-        // Only the invited jockey can reject
+        // Only the invited jockey can reject (object-level auth).
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
         if (!assignment.getJockey().getUserId().equals(currentUserId)) {
             throw new AppException(ErrorCode.NOT_INVITED_JOCKEY);
         }
-        */
 
         // Must be in INVITED status
         if (assignment.getStatus() != JockeyAssignmentStatus.INVITED) {
@@ -221,14 +241,14 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         JockeyAssignment assignment = assignmentRepository.findByIdWithDetails(assignmentId)
                 .orElseThrow(() -> new AppException(ErrorCode.ASSIGNMENT_NOT_FOUND));
 
-        // TẠM TẮT CHECK QUYỀN ĐỂ DEV/TEST
-        /*
-        // Only the owner who sent the invitation can cancel
+        // Only the owner who sent the invitation can cancel (object-level auth).
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
         UUID ownerUserId = assignment.getEntry().getRegistration().getOwner().getUserId();
         if (!ownerUserId.equals(currentUserId)) {
             throw new AppException(ErrorCode.NOT_INVITATION_OWNER);
         }
-        */
 
         // Can only cancel INVITED status
         if (assignment.getStatus() != JockeyAssignmentStatus.INVITED) {

@@ -1,7 +1,9 @@
 package com.SWP391.horserace.races.dto;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -17,8 +19,8 @@ public record RecordResultsRequest(
     /** One entry's recorded result. */
     public record ResultRow(
             @NotNull UUID entryId,
-            Integer finishPosition,
-            Long finishTimeMs,
+            @Positive(message = "Finish position must be positive") Integer finishPosition,
+            @Min(value = 0, message = "Finish time cannot be negative") Long finishTimeMs,
             BigDecimal lengthsBehind,
             BigDecimal score
     ) {

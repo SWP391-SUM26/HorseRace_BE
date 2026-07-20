@@ -8,6 +8,7 @@ import com.SWP391.horserace.auth.dto.LogoutRequest;
 import com.SWP391.horserace.auth.dto.RefreshRequest;
 import com.SWP391.horserace.auth.dto.RegisterJockeyRequest;
 import com.SWP391.horserace.auth.dto.RegisterOwnerRequest;
+import com.SWP391.horserace.auth.dto.RegisterResponse;
 import com.SWP391.horserace.auth.dto.RegisterSpectatorRequest;
 import com.SWP391.horserace.auth.dto.RequestEmailVerificationRequest;
 import com.SWP391.horserace.auth.dto.ResendCodeRequest;
@@ -23,11 +24,15 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -109,17 +114,20 @@ public class AuthController {
 
     /**
      * POST /api/v1/auth/register/jockey
-     * <p>Creates a JOCKEY account and immediately issues tokens.
-     * Required fields: firstName, lastName, email, password, confirmPassword.
+     * <p>Files a JOCKEY registration. The account is created in PENDING status and a referee must
+     * approve it before the jockey can log in — so NO tokens are returned here.
+     * Required fields: firstName, lastName, email, password, confirmPassword, agreedToTerms.
      */
-    @PostMapping("/register/jockey")
+    @PostMapping(value = "/register/jockey", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<AuthResponse> registerJockey(@Valid @RequestBody RegisterJockeyRequest request,
-                                                    HttpServletRequest httpRequest) {
-        AuthResponse data = authService.registerJockey(request, userAgent(httpRequest));
-        return ApiResponse.<AuthResponse>builder()
+    public ApiResponse<RegisterResponse> registerJockey(
+            @Valid @ModelAttribute RegisterJockeyRequest request,
+            @RequestPart(value = "license", required = false) MultipartFile license,
+            @RequestPart(value = "fitnessCertificate", required = false) MultipartFile fitnessCertificate) {
+        RegisterResponse data = authService.registerJockey(request, license, fitnessCertificate);
+        return ApiResponse.<RegisterResponse>builder()
                 .success(true)
-                .message("Jockey account created successfully")
+                .message("Jockey registration submitted. Your account is pending referee approval.")
                 .data(data)
                 .build();
     }

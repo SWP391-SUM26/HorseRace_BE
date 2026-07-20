@@ -17,7 +17,9 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ImageUploadService {
 
-    public static final String PUBLIC_URL_PREFIX = "/api/v1/files/";
+    /** @deprecated moved to {@link LocalFileStorageService#PUBLIC_URL_PREFIX}; kept for callers. */
+    @Deprecated
+    public static final String PUBLIC_URL_PREFIX = LocalFileStorageService.PUBLIC_URL_PREFIX;
 
     private static final Set<String> ALLOWED_TYPES =
             Set.of("image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif");
@@ -37,14 +39,15 @@ public class ImageUploadService {
         if (contentType == null || !ALLOWED_TYPES.contains(contentType.toLowerCase())) {
             throw new AppException(ErrorCode.INVALID_FILE_TYPE);
         }
-        return PUBLIC_URL_PREFIX + fileStorageService.store(file, folder);
+        // The active storage impl decides the URL scheme (local /api/v1/files/… vs Cloudinary CDN).
+        return fileStorageService.publicUrl(fileStorageService.store(file, folder));
     }
 
-    /** Best-effort delete of a previously stored public URL (no-op for null/external URLs). */
+    /** Best-effort delete of a previously stored public URL (no-op for null/external/legacy URLs). */
     public void deleteByUrl(String publicUrl) {
-        if (publicUrl == null || !publicUrl.startsWith(PUBLIC_URL_PREFIX)) {
-            return;
+        String key = fileStorageService.resolveKey(publicUrl);
+        if (key != null) {
+            fileStorageService.delete(key);
         }
-        fileStorageService.delete(publicUrl.substring(PUBLIC_URL_PREFIX.length()));
     }
 }

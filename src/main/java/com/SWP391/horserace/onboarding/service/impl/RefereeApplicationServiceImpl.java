@@ -1,6 +1,7 @@
 package com.SWP391.horserace.onboarding.service.impl;
 
 import com.SWP391.horserace.horses.repository.HorseRepository;
+import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
 import com.SWP391.horserace.onboarding.dto.ApplicationDetail;
 import com.SWP391.horserace.onboarding.dto.ApplicationSummary;
 import com.SWP391.horserace.onboarding.dto.OnboardingStatsResponse;
@@ -27,9 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
-import java.util.EnumSet;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -37,14 +36,11 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class RefereeApplicationServiceImpl implements RefereeApplicationService {
 
-    /** Statuses from which a referee may still take a decision. */
-    private static final Set<ApplicationStatus> DECIDABLE =
-            EnumSet.of(ApplicationStatus.PENDING, ApplicationStatus.UNDER_REVIEW, ApplicationStatus.INFO_REQUESTED);
-
     private final MembershipApplicationRepository applicationRepository;
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final HorseRepository horseRepository;
+    private final JockeyProfileRepository jockeyProfileRepository;
 
     @Override
     public Page<ApplicationSummary> list(ApplicationStatus status, RequestedRole requestedRole,
@@ -85,6 +81,11 @@ public class RefereeApplicationServiceImpl implements RefereeApplicationService 
         // Soft-deleted accounts are intentionally excluded so an approval never resurrects a removed user.
         User user = userRepository.findByEmailAndDeletedFalse(app.getEmail()).orElse(null);
         if (user == null) {
+            // Reject a duplicate phone before creating the account (only when the applicant supplied one).
+            if (app.getPhone() != null && !app.getPhone().isBlank()
+                    && userRepository.existsByPhone(app.getPhone())) {
+                throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+            }
             user = User.builder()
                     .role(role)
                     .userCode(generateUserCode())
@@ -153,7 +154,7 @@ public class RefereeApplicationServiceImpl implements RefereeApplicationService 
     }
 
     private void ensureDecidable(MembershipApplication app) {
-        if (!DECIDABLE.contains(app.getStatus())) {
+        if (!app.getStatus().isDecidable()) {
             throw new AppException(ErrorCode.APPLICATION_ALREADY_DECIDED);
         }
     }
@@ -209,6 +210,18 @@ public class RefereeApplicationServiceImpl implements RefereeApplicationService 
                     .orElse(0L);
         }
 
+        // JOCKEY applicants: surface the auth-gated document download paths so the referee can review.
+        String jockeyLicenseUrl = null;
+        String jockeyFitnessCertificateUrl = null;
+        if (a.getRequestedRole() == RequestedRole.JOCKEY) {
+            var profile = userRepository.findByEmail(a.getEmail())
+                    .flatMap(u -> jockeyProfileRepository.findById(u.getUserId()));
+            if (profile.isPresent()) {
+                jockeyLicenseUrl = profile.get().getJockeyLicenseUrl();
+                jockeyFitnessCertificateUrl = profile.get().getFitnessCertificateUrl();
+            }
+        }
+
         ApplicationDetail.Eligibility eligibility = ApplicationDetail.Eligibility.builder()
                 .idVerification(ApplicationDetail.IdVerification.builder()
                         .status(a.getIdVerificationStatus())
@@ -242,6 +255,8 @@ public class RefereeApplicationServiceImpl implements RefereeApplicationService 
                         .horsesRegistered(horsesRegistered)
                         .build())
                 .eligibility(eligibility)
+                .jockeyLicenseUrl(jockeyLicenseUrl)
+                .jockeyFitnessCertificateUrl(jockeyFitnessCertificateUrl)
                 .submittedAt(a.getSubmittedAt())
                 .reviewedAt(a.getReviewedAt())
                 .rejectionReason(a.getRejectionReason())

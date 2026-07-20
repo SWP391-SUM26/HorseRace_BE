@@ -34,6 +34,15 @@ public interface RegistrationRepository
     /** Count of APPROVED (i.e. registered/confirmed) entries for a tournament — surfaced in TournamentResponse (§C4). */
     long countByTournament_TournamentIdAndStatus(UUID tournamentId, RegistrationStatus status);
 
+    /** All of an owner's race-targeted registrations (race + horse + tournament fetched) for the per-race report. */
+    @Query("SELECT r FROM TournamentRegistration r "
+            + "JOIN FETCH r.horse h "
+            + "JOIN FETCH r.race rc "
+            + "LEFT JOIN FETCH r.tournament t "
+            + "WHERE r.owner.userId = :ownerUserId AND r.race IS NOT NULL "
+            + "ORDER BY r.createdAt DESC")
+    List<TournamentRegistration> findOwnerRaceRegistrations(@Param("ownerUserId") UUID ownerUserId);
+
     // ---- KPI aggregate (FE-v2 §7 registration stats) ----
 
     /** Status -> count over all registrations (used to build the KPI aggregate). */
@@ -44,6 +53,21 @@ public interface RegistrationRepository
     @Query("SELECT r.status AS status, COUNT(r) AS cnt FROM TournamentRegistration r "
             + "WHERE r.tournament.tournamentId = :tournamentId GROUP BY r.status")
     List<StatusCount> countGroupByStatusForTournament(@Param("tournamentId") UUID tournamentId);
+
+    /** APPROVED registrations for a tournament that have NO race entry in the given race (#8). */
+    @Query("""
+        SELECT r FROM TournamentRegistration r
+          JOIN FETCH r.horse h
+          JOIN FETCH r.owner o
+         WHERE r.tournament.tournamentId = :tournamentId
+           AND r.status = com.SWP391.horserace.registrations.entity.RegistrationStatus.APPROVED
+           AND NOT EXISTS (
+             SELECT 1 FROM RaceEntry re
+              WHERE re.registration = r AND re.race.raceId = :raceId
+           )
+        """)
+    List<TournamentRegistration> findApprovedNotEnteredInRace(@Param("tournamentId") UUID tournamentId,
+                                                              @Param("raceId") UUID raceId);
 
     /** Projection row for the group-by-status KPI query. */
     interface StatusCount {

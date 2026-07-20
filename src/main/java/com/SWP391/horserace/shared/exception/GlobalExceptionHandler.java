@@ -1,6 +1,7 @@
 package com.SWP391.horserace.shared.exception;
 
 import com.SWP391.horserace.shared.dto.ApiResponse;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -22,13 +23,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(value = Exception.class)
     public ResponseEntity<ApiResponse<Void>> handlingRuntimeException(Exception exception) {
+        // FR-10: full detail (class/message/stack) is logged server-side ONLY. The client body
+        // carries the generic message so an uncaught exception can never leak internals/secrets.
         log.error("Exception: ", exception);
-        // DEV: include actual exception details for debugging
-        String debugMessage = ErrorCode.UNCATEGORIZED_EXCEPTION.getMessage()
-                + " [" + exception.getClass().getSimpleName() + ": " + exception.getMessage() + "]";
         ApiResponse<Void> apiResponse = ApiResponse.<Void>builder()
                 .success(false)
-                .message(debugMessage)
+                .message(ErrorCode.UNCATEGORIZED_EXCEPTION.getMessage())
                 .build();
         return ResponseEntity.status(ErrorCode.UNCATEGORIZED_EXCEPTION.getStatusCode()).body(apiResponse);
     }
@@ -36,9 +36,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(value = AppException.class)
     public ResponseEntity<ApiResponse<Void>> handlingAppException(AppException exception) {
         ErrorCode errorCode = exception.getErrorCode();
+        // Prefer the exception's own message: it equals the ErrorCode default for single-arg
+        // AppException, but carries the specific detail for AppException(errorCode, message)
+        // (e.g. RACE_NOT_READY listing which conditions are unmet).
+        String message = exception.getMessage() != null ? exception.getMessage() : errorCode.getMessage();
         ApiResponse<Void> apiResponse = ApiResponse.<Void>builder()
                 .success(false)
-                .message(errorCode.getMessage())
+                .message(message)
                 .build();
         return ResponseEntity.status(errorCode.getStatusCode()).body(apiResponse);
     }
@@ -92,8 +96,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler({HttpMessageNotReadableException.class,
             MethodArgumentTypeMismatchException.class,
-            MissingServletRequestParameterException.class,
-            BindException.class})
+            MissingServletRequestParameterException.class})
     public ResponseEntity<ApiResponse<Void>> handlingBadInput(Exception exception) {
         log.warn("Bad request: {}", exception.getMessage());
         return ResponseEntity.badRequest().body(ApiResponse.<Void>builder()
@@ -102,24 +105,44 @@ public class GlobalExceptionHandler {
                 .build());
     }
 
-    @ExceptionHandler(value = MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiResponse<Void>> handlingValidation(MethodArgumentNotValidException exception) {
-        String enumKey = exception.getFieldError() != null ? exception.getFieldError().getDefaultMessage() : "INVALID_KEY";
+    /**
+     * Merged field-level validation handler (FR-09). Covers BOTH
+     * {@link MethodArgumentNotValidException} (@Valid @RequestBody) and plain {@link BindException}
+     * (@ModelAttribute binding) — both extend {@code BindException}, so one param serves both. Maps
+     * EVERY failing field (not just the first) to a {@link FieldErrorItem}, resolving each message via
+     * {@link #resolveMessage(String)} so DTO annotations carrying an {@code ErrorCode} enum name (e.g.
+     * {@code message = "WEAK_PASSWORD"}) still resolve to that code's message while literal messages
+     * pass through. Status is ALWAYS 400 (a validation failure is a bad request).
+     *
+     * <p>Note: this maps only {@code getBindingResult().getFieldErrors()} — class-level
+     * ({@code ObjectError}) cross-field constraints are not surfaced here (none exist today).
+     */
+    @ExceptionHandler({MethodArgumentNotValidException.class, BindException.class})
+    public ResponseEntity<ApiResponse<List<FieldErrorItem>>> handlingValidation(BindException exception) {
+        List<FieldErrorItem> items = exception.getBindingResult().getFieldErrors().stream()
+                .map(fe -> new FieldErrorItem(fe.getField(), resolveMessage(fe.getDefaultMessage())))
+                .toList();
 
-        ErrorCode errorCode = ErrorCode.INVALID_KEY;
-        String message = enumKey;
-        
-        try {
-            errorCode = ErrorCode.valueOf(enumKey);
-            message = errorCode.getMessage();
-        } catch (IllegalArgumentException e) {
-            // Fallback: If the default message is not a valid enum key, use it as a literal string
-        }
-
-        ApiResponse<Void> apiResponse = ApiResponse.<Void>builder()
+        String message = items.isEmpty() ? "Validation failed" : items.get(0).message();
+        return ResponseEntity.badRequest().body(ApiResponse.<List<FieldErrorItem>>builder()
                 .success(false)
                 .message(message)
-                .build();
-        return ResponseEntity.status(errorCode.getStatusCode()).body(apiResponse);
+                .data(items)
+                .build());
+    }
+
+    /**
+     * Resolve one field's default message: {@code null} → the generic INVALID_KEY message; an
+     * {@code ErrorCode} enum name → that code's message; otherwise the literal string as-is.
+     */
+    private String resolveMessage(String raw) {
+        if (raw == null) {
+            return ErrorCode.INVALID_KEY.getMessage();
+        }
+        try {
+            return ErrorCode.valueOf(raw).getMessage();
+        } catch (IllegalArgumentException e) {
+            return raw;
+        }
     }
 }

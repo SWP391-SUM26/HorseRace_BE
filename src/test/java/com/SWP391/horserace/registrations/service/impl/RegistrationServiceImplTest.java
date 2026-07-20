@@ -48,6 +48,8 @@ class RegistrationServiceImplTest {
     @Mock UserRepository userRepository;
     @Mock RaceRepository raceRepository;
     @Mock RaceEntryRepository raceEntryRepository;
+    @Mock com.SWP391.horserace.races.service.RaceEntryGate raceEntryGate;
+    @Mock com.SWP391.horserace.attachments.repository.AttachmentRepository attachmentRepository;
 
     private RegistrationServiceImpl service;
 
@@ -63,7 +65,11 @@ class RegistrationServiceImplTest {
     void setUp() {
         service = new RegistrationServiceImpl(
                 registrationRepository, tournamentRepository, horseRepository, userRepository,
-                raceRepository, raceEntryRepository);
+                raceRepository, raceEntryRepository, raceEntryGate, attachmentRepository);
+        // #7: by default a registration HAS its owner-uploaded document (approve tests focus on other logic).
+        org.mockito.Mockito.lenient().when(attachmentRepository
+                .existsByOwnerEntityTypeAndOwnerEntityIdAndUploadedBy_UserId(org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(true);
 
         owner = User.builder().userId(ownerId).fullName("Owen Owner").build();
         horse = Horse.builder().horseId(horseId).owner(owner).horseCode("HRS0001").name("Thunder").build();
@@ -252,6 +258,23 @@ class RegistrationServiceImplTest {
         assertThat(res.getStatus()).isEqualTo(RegistrationStatus.APPROVED);
         assertThat(res.getApprovedByUserId()).isEqualTo(reviewerId);
         assertThat(res.getReviewedAt()).isNotNull();
+    }
+
+    @Test
+    void approve_noDocument_throwsRegistrationDocumentRequired() {
+        // #7: no TOURNAMENT_REGISTRATION attachment → approval blocked.
+        UUID id = UUID.randomUUID();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(id).owner(owner).tournament(tournament).horse(horse)
+                .status(RegistrationStatus.SUBMITTED).build();
+        when(registrationRepository.findById(id)).thenReturn(Optional.of(reg));
+        when(attachmentRepository.existsByOwnerEntityTypeAndOwnerEntityIdAndUploadedBy_UserId(
+                "TOURNAMENT_REGISTRATION", id, ownerId)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.approveRegistration(UUID.randomUUID(), id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.REGISTRATION_DOCUMENT_REQUIRED);
+        verify(registrationRepository, never()).save(any());
     }
 
     @Test
@@ -448,5 +471,78 @@ class RegistrationServiceImplTest {
         RegistrationResponse res = service.getRegistrationById(id);
 
         assertThat(res.getCategory()).isEqualTo("GROUP_1");
+    }
+
+    // ── delete (soft-remove + scratch race entry) — Feature #10 ──
+
+    @Test
+    void deleteRegistration_nonApproved_removesWithoutEntryLookup() {
+        UUID id = UUID.randomUUID();
+        UUID currentUserId = UUID.randomUUID();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(id).owner(owner).tournament(tournament).horse(horse)
+                .status(RegistrationStatus.SUBMITTED).build();
+        when(registrationRepository.findById(id)).thenReturn(Optional.of(reg));
+
+        service.deleteRegistration(currentUserId, id);
+
+        assertThat(reg.getStatus()).isEqualTo(RegistrationStatus.REMOVED);
+        verify(raceEntryRepository, never()).findByRegistration_RegistrationId(any());
+    }
+
+    @Test
+    void deleteRegistration_approved_scratchesRaceEntry() {
+        UUID id = UUID.randomUUID();
+        UUID currentUserId = UUID.randomUUID();
+        Race race = Race.builder().raceId(UUID.randomUUID()).name("Race 1")
+                .tournament(tournament).status(RaceStatus.OPEN).build();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(id).owner(owner).tournament(tournament).horse(horse)
+                .status(RegistrationStatus.APPROVED).build();
+        RaceEntry entry = RaceEntry.builder()
+                .entryId(UUID.randomUUID()).race(race).registration(reg)
+                .status(RaceEntryStatus.ENTERED).build();
+        when(registrationRepository.findById(id)).thenReturn(Optional.of(reg));
+        when(raceEntryRepository.findByRegistration_RegistrationId(id)).thenReturn(Optional.of(entry));
+
+        service.deleteRegistration(currentUserId, id);
+
+        ArgumentCaptor<RaceEntry> captor = ArgumentCaptor.forClass(RaceEntry.class);
+        verify(raceEntryRepository).save(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo(RaceEntryStatus.SCRATCHED);
+        assertThat(reg.getStatus()).isEqualTo(RegistrationStatus.REMOVED);
+    }
+
+    @Test
+    void deleteRegistration_approved_raceFinalized_refuses() {
+        // Race FINISHED (an OFFICIAL race behaves identically) → refuse: reg stays APPROVED,
+        // and the entry is never scratched.
+        UUID id = UUID.randomUUID();
+        UUID currentUserId = UUID.randomUUID();
+        Race race = Race.builder().raceId(UUID.randomUUID()).name("Race 1")
+                .tournament(tournament).status(RaceStatus.FINISHED).build();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(id).owner(owner).tournament(tournament).horse(horse)
+                .status(RegistrationStatus.APPROVED).build();
+        RaceEntry entry = RaceEntry.builder()
+                .entryId(UUID.randomUUID()).race(race).registration(reg)
+                .status(RaceEntryStatus.ENTERED).build();
+        when(registrationRepository.findById(id)).thenReturn(Optional.of(reg));
+        when(raceEntryRepository.findByRegistration_RegistrationId(id)).thenReturn(Optional.of(entry));
+
+        assertThatThrownBy(() -> service.deleteRegistration(currentUserId, id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_ALREADY_FINALIZED);
+
+        assertThat(reg.getStatus()).isEqualTo(RegistrationStatus.APPROVED);
+        verify(raceEntryRepository, never()).save(any());
+        verify(registrationRepository, never()).save(any());
+    }
+
+    @Test
+    void deleteRegistration_null_user_unauthenticated() {
+        assertThatThrownBy(() -> service.deleteRegistration(null, UUID.randomUUID()))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNAUTHENTICATED);
     }
 }

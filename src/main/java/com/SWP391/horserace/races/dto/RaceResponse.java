@@ -23,6 +23,8 @@ public class RaceResponse {
     private OffsetDateTime actualStartAt;
     private OffsetDateTime actualEndAt;
     private OffsetDateTime predictionCutoffAt;
+    /** Set by the auto-cancel sweeper when the race is under-filled past its cutoff; null otherwise. */
+    private OffsetDateTime cancelProposedAt;
     private Integer maxParticipants;
     private Integer minParticipants;
     private String venue;
@@ -35,10 +37,13 @@ public class RaceResponse {
     private long confirmedCount;
     private Integer goingMoisturePct;
     private BigDecimal totalPurse;
+    private BigDecimal entryFee;
     private List<PrizeDistributionDto> prizeDistribution;
     private RaceStatus status;
     private UUID tournamentId;
     private String tournamentName;
+    /** Cover image of the parent tournament (races have no own image); null if the tournament has none. */
+    private String tournamentImageUrl;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

@@ -30,6 +30,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -141,38 +143,21 @@ class RefereeServiceImplTest {
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.REPORT_INVALID_STATUS);
     }
 
-    // ── submitReport ──
+    // ── submitReport: DEPRECATED (FR-20) — the DRAFT→SUBMITTED transition is blocked ──
 
     @Test
-    void submitReport_fromDraft_setsSubmittedAndTimestamp() {
+    void submitReport_isDeprecated_throws() {
         UUID id = UUID.randomUUID();
         RefereeReport report = RefereeReport.builder()
                 .reportId(id).race(race()).author(author())
                 .reportStatus(ReportStatus.DRAFT)
                 .build();
         when(refereeReportRepository.findById(id)).thenReturn(Optional.of(report));
-        when(refereeReportRepository.save(any(RefereeReport.class))).thenAnswer(i -> i.getArgument(0));
-
-        var res = service.submitReport(currentUserId, id);
-
-        assertThat(res.getReportStatus()).isEqualTo(ReportStatus.SUBMITTED);
-        assertThat(res.getSubmittedAt()).isNotNull();
-        assertThat(report.getReportStatus()).isEqualTo(ReportStatus.SUBMITTED);
-        assertThat(report.getSubmittedAt()).isNotNull();
-    }
-
-    @Test
-    void submitReport_fromSubmitted_invalidStatus() {
-        UUID id = UUID.randomUUID();
-        RefereeReport report = RefereeReport.builder()
-                .reportId(id).race(race()).author(author())
-                .reportStatus(ReportStatus.SUBMITTED)
-                .build();
-        when(refereeReportRepository.findById(id)).thenReturn(Optional.of(report));
 
         assertThatThrownBy(() -> service.submitReport(currentUserId, id))
                 .isInstanceOf(AppException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.REPORT_INVALID_STATUS);
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.REFEREE_REPORT_DEPRECATED);
+        verify(refereeReportRepository, never()).save(any());
     }
 
     // ── recordHealthCheck ──

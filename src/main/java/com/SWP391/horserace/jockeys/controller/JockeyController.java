@@ -6,12 +6,16 @@ import com.SWP391.horserace.jockeys.dto.JockeyResponse;
 import com.SWP391.horserace.jockeys.dto.JockeyStatsResponse;
 import com.SWP391.horserace.jockeys.dto.UpdateJockeyProfileRequest;
 import com.SWP391.horserace.jockeys.service.JockeyService;
+import com.SWP391.horserace.onboarding.dto.RejectRequest;
 import com.SWP391.horserace.shared.dto.ApiResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -28,6 +32,11 @@ import java.util.UUID;
 public class JockeyController {
 
     private final JockeyService jockeyService;
+
+    // NOTE: the GET read endpoints below are intentionally authenticated-but-NOT-ADMIN-gated.
+    // They are shared with the owner Jockey Market + the jockey leaderboard (non-admin callers),
+    // so blanket-@PreAuthorize("hasRole('ADMIN')") would 403 those surfaces (plan Risk 3).
+    // Only the approve/reject mutations at the bottom are ADMIN-gated.
 
     /** GET /api/v1/jockeys — list all active jockeys. */
     @GetMapping
@@ -142,6 +151,39 @@ public class JockeyController {
                 .success(true)
                 .message("Fetched jockey")
                 .data(jockeyService.getJockeyById(id))
+                .build();
+    }
+
+    /**
+     * PATCH /api/v1/jockeys/{id}/approve — ADMIN approves a PENDING jockey:
+     * activates the account (ACTIVE + kyc VERIFIED) and marks the JOCKEY application APPROVED.
+     */
+    @PatchMapping("/{id}/approve")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<JockeyResponse> approveJockey(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UUID adminUserId) {
+        return ApiResponse.<JockeyResponse>builder()
+                .success(true)
+                .message("Jockey approved")
+                .data(jockeyService.approveJockey(id, adminUserId))
+                .build();
+    }
+
+    /**
+     * PATCH /api/v1/jockeys/{id}/reject — ADMIN rejects a jockey with a REQUIRED reason
+     * (blank reason → field-level 400 via {@link RejectRequest}). The account stays non-active.
+     */
+    @PatchMapping("/{id}/reject")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<JockeyResponse> rejectJockey(
+            @PathVariable UUID id,
+            @Valid @RequestBody RejectRequest request,
+            @AuthenticationPrincipal UUID adminUserId) {
+        return ApiResponse.<JockeyResponse>builder()
+                .success(true)
+                .message("Jockey rejected")
+                .data(jockeyService.rejectJockey(id, request.getReason(), adminUserId))
                 .build();
     }
 }

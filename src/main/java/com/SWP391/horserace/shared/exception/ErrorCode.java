@@ -20,6 +20,7 @@ public enum ErrorCode {
     TOKEN_INVALID(1008, "Invalid or expired access token", HttpStatus.UNAUTHORIZED),
     REFRESH_TOKEN_INVALID(1009, "Invalid or expired refresh token", HttpStatus.UNAUTHORIZED),
     ACCOUNT_INACTIVE(1010, "Account is not active", HttpStatus.FORBIDDEN),
+    ACCOUNT_PENDING_APPROVAL(1024, "Your account is pending approval and cannot log in yet", HttpStatus.FORBIDDEN),
     GOOGLE_AUTH_FAILED(1011, "Google authentication failed", HttpStatus.UNAUTHORIZED),
     ROLE_NOT_EXISTED(1012, "Default role not found", HttpStatus.INTERNAL_SERVER_ERROR),
 
@@ -30,6 +31,7 @@ public enum ErrorCode {
 
     // ---- registration ----
     EMAIL_ALREADY_EXISTS(1016, "Email is already registered", HttpStatus.CONFLICT),
+    PHONE_ALREADY_EXISTS(1025, "Phone number is already registered", HttpStatus.CONFLICT),
     PASSWORD_MISMATCH(1017, "Passwords do not match", HttpStatus.BAD_REQUEST),
 
     // ---- password reset ----
@@ -37,10 +39,13 @@ public enum ErrorCode {
     RESET_CODE_USED(1019, "Reset code has already been used", HttpStatus.BAD_REQUEST),
     RESET_CODE_COOLDOWN(1020, "Please wait before requesting a new code", HttpStatus.TOO_MANY_REQUESTS),
     EMAIL_SEND_FAILED(1021, "Failed to send email", HttpStatus.INTERNAL_SERVER_ERROR),
-    PASSWORD_TOO_WEAK(1022, "Password must be at least 8 characters and contain 1 number and 1 symbol", HttpStatus.BAD_REQUEST),
+    PASSWORD_TOO_WEAK(1022, "Password must be at least 8 characters and contain an uppercase letter, a lowercase letter, a number, and a symbol", HttpStatus.BAD_REQUEST),
 
     // ---- admin user management ----
     INVALID_USER_STATUS(1023, "Invalid user status. Allowed: ACTIVE, INACTIVE, SUSPENDED, BANNED", HttpStatus.BAD_REQUEST),
+    CANNOT_CREATE_ADMIN(1026, "Cannot create an ADMIN account via user provisioning", HttpStatus.FORBIDDEN),
+    CANNOT_MODIFY_SELF(1027, "You cannot change your own account via admin user-management", HttpStatus.FORBIDDEN),
+    LAST_ADMIN_PROTECTED(1028, "Cannot demote, suspend, or delete the last active administrator", HttpStatus.FORBIDDEN),
 
     // ---- jockey ----
     JOCKEY_NOT_FOUND(2001, "Jockey profile not found", HttpStatus.NOT_FOUND),
@@ -57,6 +62,7 @@ public enum ErrorCode {
     OWNER_NOT_MATCH(2010, "You are not the owner of this horse entry", HttpStatus.FORBIDDEN),
     INVITATION_NOT_ACCEPTED(2011, "Only ACCEPTED rides can be withdrawn", HttpStatus.BAD_REQUEST),
     WITHDRAW_TOO_LATE(2012, "A jockey must withdraw at least 5 days before the race", HttpStatus.BAD_REQUEST),
+    JOCKEY_ALREADY_RIDING_RACE(2013, "This jockey has already accepted a ride in this race", HttpStatus.CONFLICT),
 
     // ---- tournament ----
     TOURNAMENT_NOT_FOUND(3001, "Tournament not found", HttpStatus.NOT_FOUND),
@@ -69,6 +75,7 @@ public enum ErrorCode {
     STAFF_NOT_REFEREE(4002, "User is not a referee", HttpStatus.BAD_REQUEST),
     RACE_NOT_FOUND(4003, "Race not found", HttpStatus.NOT_FOUND),
     REFEREE_ALREADY_ASSIGNED(4004, "Referee is already assigned to this race", HttpStatus.CONFLICT),
+    REFEREE_TIME_CONFLICT(4015, "Referee is already assigned to another race at an overlapping time", HttpStatus.CONFLICT),
     REFEREE_ASSIGNMENT_NOT_FOUND(4005, "Referee assignment not found", HttpStatus.NOT_FOUND),
     ASSIGNMENT_ALREADY_REVOKED(4006, "Assignment has already been revoked", HttpStatus.BAD_REQUEST),
     STAFF_EMAIL_EXISTED(4007, "Email is already registered", HttpStatus.CONFLICT),
@@ -79,6 +86,14 @@ public enum ErrorCode {
     TOURNAMENT_INVITATION_NOT_FOUND(4012, "Tournament referee invitation not found", HttpStatus.NOT_FOUND),
     NOT_INVITED_REFEREE(4013, "This invitation does not belong to you", HttpStatus.FORBIDDEN),
     TOURNAMENT_INVITATION_NOT_PENDING(4014, "Only pending (INVITED) invitations can be changed", HttpStatus.BAD_REQUEST),
+    // ---- referee race-assignment accept/decline (CN1) — 4014/4015 taken, use 4016+ ----
+    REFEREE_ASSIGNMENT_NOT_OWNED(4016, "This assignment does not belong to you", HttpStatus.FORBIDDEN),
+    REFEREE_ASSIGNMENT_NOT_PENDING(4017, "Only an ASSIGNED assignment can be accepted or declined", HttpStatus.CONFLICT),
+    REFEREE_EMAIL_UNVERIFIED(4018, "Referee must verify their email before being assigned to a race", HttpStatus.BAD_REQUEST),
+    REFEREE_REPORT_DEPRECATED(4019, "The referee report workflow is deprecated; use race violations instead", HttpStatus.BAD_REQUEST),
+    // ---- referee emailed OTP submission code (CN3 / referee-flow Phase 3) ----
+    REFEREE_CODE_THROTTLED(4020, "Please wait before requesting another code", HttpStatus.TOO_MANY_REQUESTS),
+    REFEREE_CODE_LOCKED(4021, "Too many invalid attempts; request a new code", HttpStatus.TOO_MANY_REQUESTS),
 
     // ---- horse management ----
     HORSE_NOT_FOUND(5001, "Horse not found", HttpStatus.NOT_FOUND),
@@ -87,6 +102,8 @@ public enum ErrorCode {
     NOT_HORSE_OWNER(5005, "You are not the owner of this horse", HttpStatus.FORBIDDEN),
     HORSE_NO_APPROVED_REGISTRATION(5006, "Horse has no approved registration for this race's tournament", HttpStatus.BAD_REQUEST),
     MEDICAL_RECORD_NOT_FOUND(5007, "Medical record not found", HttpStatus.NOT_FOUND),
+    HORSE_NOT_FIT_TO_RACE(5008, "Horse is not fit to race (injured, unfit, or in quarantine)", HttpStatus.BAD_REQUEST),
+    HORSE_BELOW_MIN_AGE(5009, "Horse is below the minimum racing age", HttpStatus.BAD_REQUEST),
 
     // ---- file upload / storage ----
     FILE_EMPTY(6001, "Uploaded file is empty", HttpStatus.BAD_REQUEST),
@@ -109,16 +126,22 @@ public enum ErrorCode {
     RACE_TOURNAMENT_MISMATCH(8004, "Registration and race belong to different tournaments", HttpStatus.BAD_REQUEST),
     RACE_FULL(8005, "Race has reached its maximum number of participants", HttpStatus.BAD_REQUEST),
     REGISTRATION_NOT_APPROVED(8006, "Registration is not approved", HttpStatus.BAD_REQUEST),
+    RACE_NOT_READY(8007, "Race is not ready to run", HttpStatus.BAD_REQUEST),
+    RACE_INVALID_TIMING(8008, "Registration cutoff must be before the scheduled start time", HttpStatus.BAD_REQUEST),
+    RACE_ALREADY_FINALIZED(8009, "Cannot remove a registration whose race has already finished or been made official", HttpStatus.CONFLICT),
+    RACE_INVALID_PARTICIPANT_RANGE(8010, "Minimum participants cannot exceed maximum participants", HttpStatus.BAD_REQUEST),
 
     // ---- prediction system ----
     PREDICTION_NOT_FOUND(9001, "Prediction not found", HttpStatus.NOT_FOUND),
     PREDICTION_ALREADY_EXISTS(9002, "You have already made this type of prediction for this race and entry", HttpStatus.CONFLICT),
-    PREDICTION_RACE_NOT_OPEN(9003, "Race is not open for predictions", HttpStatus.BAD_REQUEST),
+    PREDICTION_RACE_NOT_OPEN(9003, "Betting is only open once the race is locked, and before the cutoff", HttpStatus.BAD_REQUEST),
     PREDICTION_ENTRY_NOT_FOUND(9004, "Race entry not found", HttpStatus.NOT_FOUND),
     PREDICTION_ENTRY_MISMATCH(9005, "The predicted entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
     PREDICTION_CANNOT_CANCEL(9006, "Prediction cannot be cancelled at this stage", HttpStatus.BAD_REQUEST),
     IDEMPOTENCY_KEY_EXISTED(9007, "Idempotency key already exists", HttpStatus.CONFLICT),
     BETTING_POOL_CLOSED(9008, "Betting pool is not open", HttpStatus.BAD_REQUEST),
+    PREDICTION_ENTRY_REQUIRED(9009, "A predicted runner is required for WIN/PLACE/SHOW bets", HttpStatus.BAD_REQUEST),
+    PREDICTION_ENTRY_SCRATCHED(9010, "Cannot bet on a scratched runner", HttpStatus.BAD_REQUEST),
 
     // ---- referee management ----
     REPORT_NOT_FOUND(9101, "Referee report not found", HttpStatus.NOT_FOUND),
@@ -134,12 +157,25 @@ public enum ErrorCode {
     INSPECTION_ENTRY_RACE_MISMATCH(9401, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
     INSPECTION_CONFIRM_REQUIRED(9402, "Submission must be confirmed", HttpStatus.BAD_REQUEST),
 
+    // ---- per-race document review (CN2 / referee-flow Phase 2) ----
+    ENTRY_RACE_MISMATCH(9403, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
+    ENTRY_REVIEW_REASON_REQUIRED(9404, "A rejection reason is required", HttpStatus.BAD_REQUEST),
+    // ---- tournament/race date validation (#2) + registration document (#7) ----
+    INVALID_DATE_RANGE(9405, "End date cannot be before start date", HttpStatus.BAD_REQUEST),
+    DATE_IN_PAST(9406, "Date cannot be in the past", HttpStatus.BAD_REQUEST),
+    REGISTRATION_DOCUMENT_REQUIRED(9407, "A vaccination/medical document must be attached before approval", HttpStatus.BAD_REQUEST),
+    INVALID_REGISTRATION_WINDOW(9408, "Registration window must fall within the tournament window", HttpStatus.BAD_REQUEST),
+
     // ---- results record/read/edit/certify (FE-v2 §5) ----
     RESULT_NOT_FOUND(9501, "Race result not found", HttpStatus.NOT_FOUND),
     RESULT_INQUIRIES_UNRESOLVED(9502, "All inquiries must be resolved before certification", HttpStatus.BAD_REQUEST),
     RESULT_ENTRY_RACE_MISMATCH(9503, "The entry does not belong to the specified race", HttpStatus.BAD_REQUEST),
     RESULT_ALREADY_OFFICIAL(9504, "Official results can no longer be deleted", HttpStatus.BAD_REQUEST),
     RACE_NOT_FINISHED(9505, "Results and violations can only be filed after the race has finished", HttpStatus.BAD_REQUEST),
+    RESULT_ALREADY_SUBMITTED(9506, "This race report has already been submitted by the referee", HttpStatus.CONFLICT),
+    RESULT_UNDER_REVIEW_BLOCKS_CERTIFY(9507, "Cannot certify while a result is under review", HttpStatus.BAD_REQUEST),
+    REPORT_RESULTS_REQUIRED(9508, "A race report must include at least one result", HttpStatus.BAD_REQUEST),
+    DUPLICATE_FINISH_POSITION(9509, "Two entries cannot share the same finish position", HttpStatus.BAD_REQUEST),
 
     // ---- violations / inquiries (FE-v2 §3) ----
     VIOLATION_NOT_FOUND(9601, "Violation not found", HttpStatus.NOT_FOUND),
@@ -147,14 +183,32 @@ public enum ErrorCode {
     VIOLATION_ALREADY_RULED(9603, "This violation has already been ruled on", HttpStatus.BAD_REQUEST),
 
     // ---- attachments (FE-v2 §6) ----
-    ATTACHMENT_INVALID_OWNER_TYPE(9701, "Invalid ownerEntityType. Allowed: RACE_RESULT, VIOLATION, RACE", HttpStatus.BAD_REQUEST),
+    ATTACHMENT_INVALID_OWNER_TYPE(9701, "Invalid ownerEntityType. Allowed: RACE_RESULT, VIOLATION, RACE, TOURNAMENT_REGISTRATION, JOCKEY_PROFILE (owner/horse papers must go through /api/v1/owner/documents)", HttpStatus.BAD_REQUEST),
     ATTACHMENT_INVALID_SENSITIVITY(9702, "Invalid sensitivityLevel. Allowed: PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED", HttpStatus.BAD_REQUEST),
 
     // ---- referee applicant onboarding (FE-v2 Registration Approval) ----
     APPLICATION_NOT_FOUND(9301, "Membership application not found", HttpStatus.NOT_FOUND),
     APPLICATION_ALREADY_DECIDED(9302, "Application has already been decided", HttpStatus.BAD_REQUEST),
     APPLICATION_INVALID_STATUS(9303, "Invalid status transition for this application", HttpStatus.BAD_REQUEST),
-    APPLICATION_ROLE_NOT_FOUND(9304, "Target role for the requested role mapping was not found", HttpStatus.INTERNAL_SERVER_ERROR);
+    APPLICATION_ROLE_NOT_FOUND(9304, "Target role for the requested role mapping was not found", HttpStatus.INTERNAL_SERVER_ERROR),
+
+    // ---- wallet / pari-mutuel betting (pari-mutuel Phase 01) ----
+    WALLET_NOT_FOUND(9801, "Wallet not found", HttpStatus.NOT_FOUND),
+    INSUFFICIENT_BALANCE(9802, "Insufficient wallet balance", HttpStatus.BAD_REQUEST),
+    WALLET_INACTIVE(9803, "Wallet is not active", HttpStatus.BAD_REQUEST),
+    BET_AMOUNT_TOO_LOW(9804, "Minimum bet is 10,000 VND", HttpStatus.BAD_REQUEST),
+    BET_TYPE_UNSUPPORTED(9805, "Only WIN, PLACE, SHOW bets are supported", HttpStatus.BAD_REQUEST),
+    VNPAY_CHECKSUM_INVALID(9806, "VNPay checksum verification failed", HttpStatus.BAD_REQUEST),
+    VNPAY_TXN_NOT_FOUND(9807, "Payment transaction not found", HttpStatus.NOT_FOUND),
+    VNPAY_AMOUNT_MISMATCH(9808, "Payment amount does not match", HttpStatus.BAD_REQUEST),
+    PAYMENT_ALREADY_PROCESSED(9809, "Payment already processed", HttpStatus.CONFLICT),
+    WITHDRAWAL_NOT_FOUND(9810, "Withdrawal request not found", HttpStatus.NOT_FOUND),
+    WITHDRAWAL_INVALID_STATE(9811, "Withdrawal is not in a PENDING state", HttpStatus.BAD_REQUEST),
+    TOPUP_AMOUNT_INVALID(9812, "Top-up amount is invalid", HttpStatus.BAD_REQUEST),
+    WITHDRAWAL_AMOUNT_INVALID(9813, "Withdrawal amount must be at least 10,000 VND", HttpStatus.BAD_REQUEST),
+    PAYMENT_GATEWAY_NOT_CONFIGURED(9814, "Payment gateway is not configured", HttpStatus.SERVICE_UNAVAILABLE),
+    HOUSE_WALLET_UNAVAILABLE(9815, "House wallet is not configured", HttpStatus.SERVICE_UNAVAILABLE),
+    HOUSE_WITHDRAWAL_FORBIDDEN(9816, "The house/escrow wallet cannot be withdrawn from", HttpStatus.FORBIDDEN);
 
     private final int code;
     private final String message;

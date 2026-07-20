@@ -8,5 +8,7 @@ public enum UserStatus {
     ACTIVE,
     INACTIVE,
     SUSPENDED,
-    BANNED
+    BANNED,
+    /** Awaiting approval (e.g. self-registered jockey pending referee review) — cannot log in yet. */
+    PENDING
 }

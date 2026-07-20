@@ -10,6 +10,7 @@ import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.entity.HorseGender;
 import com.SWP391.horserace.horses.entity.HorseHealthStatus;
 import com.SWP391.horserace.horses.entity.HorseStatus;
+import com.SWP391.horserace.horses.repository.HorseMedicalRecordRepository;
 import com.SWP391.horserace.horses.repository.HorseRepository;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
 import com.SWP391.horserace.races.entity.Race;
@@ -64,6 +65,10 @@ class HorseServiceImplTest {
         RaceEntryRepository raceEntryRepository;
         @Mock
         RaceResultRepository raceResultRepository;
+        @Mock
+        com.SWP391.horserace.races.service.RaceEntryGate raceEntryGate;
+        @Mock
+        HorseMedicalRecordRepository medicalRecordRepository;
 
         private HorseServiceImpl service;
 
@@ -79,7 +84,8 @@ class HorseServiceImplTest {
                 // tested here.
                 service = new HorseServiceImpl(horseRepository, userRepository,
                                 new ImageUploadService(Mockito.mock(FileStorageService.class)),
-                                registrationRepository, raceRepository, raceEntryRepository, raceResultRepository);
+                                registrationRepository, raceRepository, raceEntryRepository, raceResultRepository,
+                                raceEntryGate, medicalRecordRepository);
         }
 
         private static HorseRequest req(String name, HorseGender gender) {
@@ -145,6 +151,38 @@ class HorseServiceImplTest {
                 assertThat(res.getFitnessCertExpiresAt()).isEqualTo(expires);
                 assertThat(res.getPassportScanStatus()).isEqualTo("VALID");
                 assertThat(res.getCogginsTestDate()).isEqualTo(coggins);
+        }
+
+        // ── #9 regression: focused Horse fields survive mapToResponse ──
+
+        @Test
+        void getHorseById_responseCarriesFocusedFields() {
+                UUID id = UUID.randomUUID();
+                Horse horse = Horse.builder()
+                                .horseId(id).owner(owner).horseCode("HRS0001").name("Midnight Thunder")
+                                .microchipNo("985141000123456")
+                                .gender(HorseGender.MALE)
+                                .color("Bay")
+                                .dateOfBirth(java.time.LocalDate.of(2019, 4, 1))
+                                .weight(new java.math.BigDecimal("512.50"))
+                                .originCountry("Ireland")
+                                .healthStatus(HorseHealthStatus.HEALTHY)
+                                .registrationStatus("REGISTERED")
+                                .status(HorseStatus.ACTIVE)
+                                .build();
+                when(horseRepository.findByHorseIdAndDeletedFalse(id)).thenReturn(Optional.of(horse));
+
+                HorseResponse res = service.getHorseById(id);
+
+                assertThat(res.getMicrochipNo()).isEqualTo("985141000123456");
+                assertThat(res.getGender()).isEqualTo(HorseGender.MALE);
+                assertThat(res.getColor()).isEqualTo("Bay");
+                assertThat(res.getDateOfBirth()).isEqualTo(java.time.LocalDate.of(2019, 4, 1));
+                assertThat(res.getWeight()).isEqualByComparingTo("512.50");
+                assertThat(res.getOriginCountry()).isEqualTo("Ireland");
+                assertThat(res.getHealthStatus()).isEqualTo(HorseHealthStatus.HEALTHY);
+                assertThat(res.getRegistrationStatus()).isEqualTo("REGISTERED");
+                assertThat(res.getStatus()).isEqualTo(HorseStatus.ACTIVE);
         }
 
         @Test
@@ -374,7 +412,7 @@ class HorseServiceImplTest {
                 UUID raceId = UUID.randomUUID();
                 UUID tournamentId = UUID.randomUUID();
                 Tournament t = Tournament.builder().tournamentId(tournamentId).name("Spring Cup").build();
-                Race race = Race.builder().raceId(raceId).status(RaceStatus.SCHEDULED).tournament(t).build();
+                Race race = Race.builder().raceId(raceId).status(RaceStatus.OPEN).tournament(t).build();
                 when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
 
                 TournamentRegistration reg = TournamentRegistration.builder()

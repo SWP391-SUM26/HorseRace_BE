@@ -9,9 +9,11 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -37,6 +39,21 @@ public class TournamentController {
                 .success(true)
                 .message("Tournament created successfully")
                 .data(response)
+                .build();
+    }
+
+    /**
+     * POST /api/v1/tournaments/{id}/image — upload/replace the cover image (multipart, field "file").
+     * Public image → Cloudinary CDN (or local disk) depending on {@code app.storage.provider}.
+     */
+    @PostMapping(value = "/{id}/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<TournamentResponse> uploadImage(@PathVariable UUID id,
+                                                       @RequestParam("file") MultipartFile file) {
+        return ApiResponse.<TournamentResponse>builder()
+                .success(true)
+                .message("Tournament image uploaded")
+                .data(tournamentService.uploadImage(id, file))
                 .build();
     }
 

@@ -37,6 +37,12 @@ public class SecurityConfig {
     private static final String[] PUBLIC_PATHS = {
             "/api/v1/auth/**",
             "/api/v1/files/**",   // public file serving (avatars/horse photos); <img> sends no JWT
+            // VNPay callbacks carry no JWT — the vnp_SecureHash checksum is the only auth.
+            // The IPN is the authoritative server-to-server credit; the return URL is the
+            // browser redirect (status only unless the guarded fallback is enabled). The rest
+            // of /api/v1/wallet/** stays authenticated.
+            "/api/v1/wallet/vnpay-ipn",
+            "/api/v1/wallet/vnpay-return",
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/v3/api-docs/**",

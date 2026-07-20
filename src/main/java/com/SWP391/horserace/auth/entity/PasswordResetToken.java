@@ -48,6 +48,11 @@ public class PasswordResetToken {
     @Column(name = "used_at")
     private OffsetDateTime usedAt;
 
+    /** Number of wrong-code attempts against this token; the token is invalidated past a limit. */
+    @Column(name = "attempt_count", nullable = false)
+    @Builder.Default
+    private int attemptCount = 0;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private OffsetDateTime createdAt;

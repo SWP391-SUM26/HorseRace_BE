@@ -10,5 +10,6 @@ public enum RegistrationStatus {
     UNDER_REVIEW,
     APPROVED,
     REJECTED,
-    WITHDRAWN
+    WITHDRAWN,
+    REMOVED
 }

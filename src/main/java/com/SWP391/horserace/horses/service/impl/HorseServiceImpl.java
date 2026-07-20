@@ -63,6 +63,7 @@ public class HorseServiceImpl implements HorseService {
     private final RaceRepository raceRepository;
     private final RaceEntryRepository raceEntryRepository;
     private final RaceResultRepository raceResultRepository;
+    private final com.SWP391.horserace.races.service.RaceEntryGate raceEntryGate;
     private final com.SWP391.horserace.horses.repository.HorseMedicalRecordRepository medicalRecordRepository;
 
     @Override
@@ -377,7 +378,8 @@ public class HorseServiceImpl implements HorseService {
         Race race = raceRepository.findByRaceIdAndDeletedFalse(request.raceId())
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
 
-        if (race.getStatus() != RaceStatus.SCHEDULED && race.getStatus() != RaceStatus.OPEN) {
+        // Only OPEN races accept entries.
+        if (race.getStatus() != RaceStatus.OPEN) {
             throw new AppException(ErrorCode.RACE_NOT_OPEN_FOR_ENTRY);
         }
 
@@ -391,6 +393,9 @@ public class HorseServiceImpl implements HorseService {
                 .findFirstByHorse_HorseIdAndTournament_TournamentIdAndStatus(
                         horse.getHorseId(), tournamentId, RegistrationStatus.APPROVED)
                 .orElseThrow(() -> new AppException(ErrorCode.HORSE_NO_APPROVED_REGISTRATION));
+
+        // Eligibility (health + age) + entry-fee debit before the entry is created.
+        raceEntryGate.admit(registration, race);
 
         RaceEntry entry = RaceEntry.builder()
                 .registration(registration)
@@ -420,6 +425,7 @@ public class HorseServiceImpl implements HorseService {
                         .tournamentName(r.getTournament() != null ? r.getTournament().getName() : null)
                         .scheduledStartAt(r.getScheduledStartAt())
                         .status(r.getStatus() != null ? r.getStatus().name() : null)
+                        .entryFee(r.getEntryFee())
                         .build())
                 .collect(Collectors.toList());
     }
@@ -472,7 +478,24 @@ public class HorseServiceImpl implements HorseService {
         com.SWP391.horserace.horses.entity.HorseMedicalRecord rec = medicalRecordRepository
                 .findByRecordIdAndHorse_HorseId(recordId, horseId)
                 .orElseThrow(() -> new AppException(ErrorCode.MEDICAL_RECORD_NOT_FOUND));
+        imageUploadService.deleteByUrl(rec.getFileUrl()); // best-effort cleanup of the attached file
         medicalRecordRepository.delete(rec);
+    }
+
+    @Override
+    @Transactional
+    public com.SWP391.horserace.horses.dto.MedicalRecordResponse uploadMedicalRecordFile(
+            UUID currentUserId, UUID horseId, UUID recordId, MultipartFile file) {
+        loadOwnedHorse(currentUserId, horseId);
+        com.SWP391.horserace.horses.entity.HorseMedicalRecord rec = medicalRecordRepository
+                .findByRecordIdAndHorse_HorseId(recordId, horseId)
+                .orElseThrow(() -> new AppException(ErrorCode.MEDICAL_RECORD_NOT_FOUND));
+        String oldUrl = rec.getFileUrl();
+        rec.setFileUrl(imageUploadService.storeImageAsUrl(file, "medical"));
+        rec.setFileName(file.getOriginalFilename());
+        com.SWP391.horserace.horses.dto.MedicalRecordResponse saved = mapMedical(medicalRecordRepository.save(rec));
+        imageUploadService.deleteByUrl(oldUrl); // remove the replaced file (no-op on first upload)
+        return saved;
     }
 
     private com.SWP391.horserace.horses.dto.MedicalRecordResponse mapMedical(com.SWP391.horserace.horses.entity.HorseMedicalRecord r) {
@@ -482,6 +505,8 @@ public class HorseServiceImpl implements HorseService {
                 .title(r.getTitle())
                 .note(r.getNote())
                 .recordDate(r.getRecordDate())
+                .fileUrl(r.getFileUrl())
+                .fileName(r.getFileName())
                 .createdAt(r.getCreatedAt())
                 .build();
     }

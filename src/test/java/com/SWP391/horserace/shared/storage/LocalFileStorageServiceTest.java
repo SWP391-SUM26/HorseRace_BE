@@ -65,4 +65,18 @@ class LocalFileStorageServiceTest {
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.FILE_NOT_FOUND);
     }
+
+    @Test
+    void publicUrl_prefixesLocalRoute_andResolveKeyRoundTrips() {
+        String key = "tournaments/abc.png";
+        String url = storage.publicUrl(key);
+        assertThat(url).isEqualTo("/api/v1/files/tournaments/abc.png");
+        assertThat(storage.resolveKey(url)).isEqualTo(key);
+    }
+
+    @Test
+    void resolveKey_foreignOrNullUrl_returnsNull() {
+        assertThat(storage.resolveKey("https://res.cloudinary.com/x/image/upload/a.png")).isNull();
+        assertThat(storage.resolveKey(null)).isNull();
+    }
 }

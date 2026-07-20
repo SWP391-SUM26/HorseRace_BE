@@ -16,8 +16,13 @@ import java.util.UUID;
 
 /**
  * Maps the {@code betting_pool} table — PARI-MUTUEL model: stakes are pooled per
- * (race, prediction_type) and split among winners at settlement:
- * {@code payout_i = total_stake * (1 - rake%) * stake_i / Σ(winning stakes)}.
+ * (race, prediction_type) and split among winners at settlement.
+ *
+ * <p><b>Important:</b> {@link #totalStake} is a DISPLAY-ONLY running counter — it is maintained by
+ * unlocked read-modify-write on bet/cancel and can drift/lose updates under concurrent betting.
+ * Live odds ({@code getLivePoolOdds}) and settlement MUST recompute the authoritative total by
+ * summing live {@code Prediction} rows, NOT by reading {@code totalStake}. The payout formula is
+ * {@code payout_i = Σ(live stake) * (1 - rakePercent) * stake_i / Σ(winning stakes)}.
  */
 @Entity
 @Table(name = "betting_pool")
@@ -46,6 +51,7 @@ public class BettingPool {
     @Builder.Default
     private BigDecimal totalStake = BigDecimal.ZERO;
 
+    /** House take-out as a FRACTION in [0,1] (e.g. 0.15 = 15%), NOT a 0–100 percentage. */
     @Column(name = "rake_percent", nullable = false, precision = 5, scale = 2)
     @Builder.Default
     private BigDecimal rakePercent = BigDecimal.ZERO;

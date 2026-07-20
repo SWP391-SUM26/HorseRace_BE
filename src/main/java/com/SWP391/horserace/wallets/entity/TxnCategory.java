@@ -9,5 +9,6 @@ public enum TxnCategory {
     PRIZE,
     REFUND,
     ADJUSTMENT,
-    REWARD
+    REWARD,
+    ENTRY_FEE
 }

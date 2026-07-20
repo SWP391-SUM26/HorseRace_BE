@@ -15,5 +15,7 @@ public class MedicalRecordResponse {
     private String title;
     private String note;
     private LocalDate recordDate;
+    private String fileUrl;
+    private String fileName;
     private OffsetDateTime createdAt;
 }

@@ -13,6 +13,10 @@ import com.SWP391.horserace.jockeys.dto.UnassignedEntryResponse;
 import com.SWP391.horserace.jockeys.dto.UpdateJockeyProfileRequest;
 import com.SWP391.horserace.jockeys.entity.JockeyProfile;
 import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
+import com.SWP391.horserace.onboarding.entity.ApplicationStatus;
+import com.SWP391.horserace.onboarding.entity.MembershipApplication;
+import com.SWP391.horserace.onboarding.entity.RequestedRole;
+import com.SWP391.horserace.onboarding.repository.MembershipApplicationRepository;
 import com.SWP391.horserace.races.entity.RaceResult;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
@@ -20,8 +24,10 @@ import com.SWP391.horserace.races.repository.RaceRepository;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
+import com.SWP391.horserace.users.entity.KycStatus;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.entity.UserStatus;
+import com.SWP391.horserace.users.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -51,6 +57,8 @@ class JockeyServiceImplTest {
     @Mock RaceRepository raceRepository;
     @Mock HorseRepository horseRepository;
     @Mock com.SWP391.horserace.races.repository.RaceResultRepository raceResultRepository;
+    @Mock MembershipApplicationRepository membershipApplicationRepository;
+    @Mock UserRepository userRepository;
 
     private JockeyServiceImpl service;
 
@@ -62,7 +70,7 @@ class JockeyServiceImplTest {
     void setUp() {
         service = new JockeyServiceImpl(
                 jockeyProfileRepository, jockeyAssignmentRepository, raceRepository, horseRepository,
-                raceResultRepository);
+                raceResultRepository, membershipApplicationRepository, userRepository);
     }
 
     private JockeyProfile profile(UUID userId, BigDecimal winRate, BigDecimal rating, String recentForm) {
@@ -444,5 +452,144 @@ class JockeyServiceImplTest {
         assertThat(insights.getMostActiveOwners().get(0).getName()).isEqualTo("Kingsway Elite");
         assertThat(insights.getMostActiveOwners().get(0).getRequests()).isEqualTo(3);
         assertThat(insights.getMostActiveOwners().get(1).getOwnerUserId()).isEqualTo(ownerB);
+    }
+
+    // =========================================================================
+    // Admin jockey docs + approve/reject (registration-flow-fixes Phase 01)
+    // =========================================================================
+
+    /** A PENDING jockey user + profile (as created by AuthServiceImpl.registerJockey). */
+    private JockeyProfile pendingJockey(UUID id, String email) {
+        User user = User.builder()
+                .userId(id)
+                .userCode("USR-" + id.toString().substring(0, 4))
+                .fullName("Pending Jockey")
+                .email(email)
+                .status(UserStatus.PENDING)
+                .kycStatus(KycStatus.PENDING)
+                .build();
+        return JockeyProfile.builder()
+                .jockeyUserId(id)
+                .jockeyUser(user)
+                .winCount(0)
+                .build();
+    }
+
+    private MembershipApplication jockeyApplication(String email, ApplicationStatus status) {
+        return MembershipApplication.builder()
+                .requestedRole(RequestedRole.JOCKEY)
+                .email(email)
+                .status(status)
+                .build();
+    }
+
+    // (1) FR-01 — the read DTO now carries the credential doc URLs.
+    @Test
+    void mapToResponse_includesDocumentUrls() {
+        UUID id = UUID.randomUUID();
+        JockeyProfile p = profile(id, new BigDecimal("50.00"), new BigDecimal("4.0"), "W");
+        p.setJockeyLicenseUrl("/api/v1/attachments/aaa/download");
+        p.setFitnessCertificateUrl("/api/v1/attachments/bbb/download");
+        when(jockeyProfileRepository.findByIdAndUserActive(id)).thenReturn(Optional.of(p));
+
+        JockeyResponse r = service.getJockeyById(id);
+
+        assertThat(r.getJockeyLicenseUrl()).isEqualTo("/api/v1/attachments/aaa/download");
+        assertThat(r.getFitnessCertificateUrl()).isEqualTo("/api/v1/attachments/bbb/download");
+    }
+
+    // (2) FR-02 — approve flips PENDING→ACTIVE + kyc VERIFIED + application APPROVED.
+    @Test
+    void approveJockey_flipsPendingToActiveAndApprovesApplication() {
+        UUID jockeyId = UUID.randomUUID();
+        UUID adminId = UUID.randomUUID();
+        JockeyProfile p = pendingJockey(jockeyId, "rider@x.com");
+        MembershipApplication app = jockeyApplication("rider@x.com", ApplicationStatus.PENDING);
+        when(jockeyProfileRepository.findByIdAndUserActive(jockeyId)).thenReturn(Optional.of(p));
+        when(membershipApplicationRepository
+                .findFirstByEmailAndRequestedRoleOrderBySubmittedAtDesc("rider@x.com", RequestedRole.JOCKEY))
+                .thenReturn(Optional.of(app));
+
+        service.approveJockey(jockeyId, adminId);
+
+        assertThat(p.getJockeyUser().getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(p.getJockeyUser().getKycStatus()).isEqualTo(KycStatus.VERIFIED);
+        assertThat(app.getStatus()).isEqualTo(ApplicationStatus.APPROVED);
+        assertThat(app.getReviewedByUserId()).isEqualTo(adminId);
+        assertThat(app.getReviewedAt()).isNotNull();
+        verify(userRepository).save(p.getJockeyUser());
+        verify(membershipApplicationRepository).save(app);
+    }
+
+    // (3) FR-02 — reject sets the application REJECTED (+reason) and keeps the account non-active.
+    @Test
+    void rejectJockey_setsApplicationRejectedAndKeepsAccountNonActive() {
+        UUID jockeyId = UUID.randomUUID();
+        UUID adminId = UUID.randomUUID();
+        JockeyProfile p = pendingJockey(jockeyId, "rider@x.com");
+        MembershipApplication app = jockeyApplication("rider@x.com", ApplicationStatus.PENDING);
+        when(jockeyProfileRepository.findByIdAndUserActive(jockeyId)).thenReturn(Optional.of(p));
+        when(membershipApplicationRepository
+                .findFirstByEmailAndRequestedRoleOrderBySubmittedAtDesc("rider@x.com", RequestedRole.JOCKEY))
+                .thenReturn(Optional.of(app));
+
+        service.rejectJockey(jockeyId, "Credentials unreadable", adminId);
+
+        assertThat(app.getStatus()).isEqualTo(ApplicationStatus.REJECTED);
+        assertThat(app.getRejectionReason()).isEqualTo("Credentials unreadable");
+        assertThat(app.getReviewedByUserId()).isEqualTo(adminId);
+        assertThat(app.getReviewedAt()).isNotNull();
+        // Account must NOT be activated by a rejection.
+        assertThat(p.getJockeyUser().getStatus()).isEqualTo(UserStatus.PENDING);
+        assertThat(p.getJockeyUser().getKycStatus()).isNotEqualTo(KycStatus.VERIFIED);
+        verify(userRepository, never()).save(any());
+        verify(membershipApplicationRepository).save(app);
+    }
+
+    // (4) FR-02 — an already-decided application → APPLICATION_ALREADY_DECIDED, no user save.
+    //     Proves the finder is status-agnostic and ensureDecidable runs AFTER the fetch.
+    @Test
+    void approveJockey_alreadyDecided_throwsApplicationAlreadyDecided() {
+        UUID jockeyId = UUID.randomUUID();
+        UUID adminId = UUID.randomUUID();
+        JockeyProfile p = pendingJockey(jockeyId, "rider@x.com");
+        MembershipApplication app = jockeyApplication("rider@x.com", ApplicationStatus.APPROVED);
+        when(jockeyProfileRepository.findByIdAndUserActive(jockeyId)).thenReturn(Optional.of(p));
+        when(membershipApplicationRepository
+                .findFirstByEmailAndRequestedRoleOrderBySubmittedAtDesc("rider@x.com", RequestedRole.JOCKEY))
+                .thenReturn(Optional.of(app));
+
+        assertThatThrownBy(() -> service.approveJockey(jockeyId, adminId))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.APPLICATION_ALREADY_DECIDED);
+
+        verify(userRepository, never()).save(any());
+        verify(membershipApplicationRepository, never()).save(any());
+    }
+
+    // (5) — missing/inactive jockey → JOCKEY_NOT_FOUND.
+    @Test
+    void approveJockey_missingJockey_throwsJockeyNotFound() {
+        UUID jockeyId = UUID.randomUUID();
+        when(jockeyProfileRepository.findByIdAndUserActive(jockeyId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.approveJockey(jockeyId, UUID.randomUUID()))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.JOCKEY_NOT_FOUND);
+    }
+
+    // (6) — jockey exists but no JOCKEY application for the email → APPLICATION_NOT_FOUND.
+    @Test
+    void approveJockey_noApplication_throwsApplicationNotFound() {
+        UUID jockeyId = UUID.randomUUID();
+        JockeyProfile p = pendingJockey(jockeyId, "rider@x.com");
+        when(jockeyProfileRepository.findByIdAndUserActive(jockeyId)).thenReturn(Optional.of(p));
+        when(membershipApplicationRepository
+                .findFirstByEmailAndRequestedRoleOrderBySubmittedAtDesc("rider@x.com", RequestedRole.JOCKEY))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.approveJockey(jockeyId, UUID.randomUUID()))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.APPLICATION_NOT_FOUND);
     }
 }

@@ -4,6 +4,7 @@ import com.SWP391.horserace.registrations.entity.RegistrationStatus;
 import com.SWP391.horserace.registrations.repository.RegistrationRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
+import com.SWP391.horserace.shared.storage.ImageUploadService;
 import com.SWP391.horserace.tournaments.dto.EligibilityDto;
 import com.SWP391.horserace.tournaments.dto.TournamentFilterRequest;
 import com.SWP391.horserace.tournaments.dto.TournamentRequest;
@@ -42,19 +43,18 @@ public class TournamentServiceImpl implements TournamentService {
     private final UserRepository userRepository;
     private final VenueRepository venueRepository;
     private final RegistrationRepository registrationRepository;
+    private final ImageUploadService imageUploadService;
 
     @Override
     @Transactional
     public TournamentResponse createTournament(TournamentRequest request, UUID userId) {
-        if (tournamentRepository.existsByTournamentCode(request.getTournamentCode())) {
-            throw new AppException(ErrorCode.TOURNAMENT_CODE_EXISTED);
-        }
-
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
 
+        validateDates(request);
+
         Tournament tournament = Tournament.builder()
-                .tournamentCode(request.getTournamentCode())
+                .tournamentCode(generateTournamentCode())
                 .name(request.getName())
                 .description(request.getDescription())
                 .startDate(request.getStartDate())
@@ -66,7 +66,9 @@ public class TournamentServiceImpl implements TournamentService {
                 .totalPurse(request.getTotalPurse())
                 .entryCap(request.getEntryCap())
                 .eligibility(toEligibilityEntity(request.getEligibility()))
-                .status(request.getStatus() != null ? request.getStatus() : TournamentStatus.DRAFT)
+                // FR-03: a tournament is ALWAYS created in DRAFT — any client-supplied status is ignored.
+                // The publish→open→…→complete state machine is the only legal path onward.
+                .status(TournamentStatus.DRAFT)
                 .createdBy(user)
                 .build();
 
@@ -135,12 +137,9 @@ public class TournamentServiceImpl implements TournamentService {
             throw new AppException(ErrorCode.TOURNAMENT_NOT_FOUND);
         }
 
-        if (!tournament.getTournamentCode().equals(request.getTournamentCode()) && 
-            tournamentRepository.existsByTournamentCode(request.getTournamentCode())) {
-            throw new AppException(ErrorCode.TOURNAMENT_CODE_EXISTED);
-        }
+        validateDates(request);
 
-        tournament.setTournamentCode(request.getTournamentCode());
+        // tournamentCode is immutable — auto-generated at creation, never changed on update.
         tournament.setName(request.getName());
         tournament.setDescription(request.getDescription());
         tournament.setStartDate(request.getStartDate());
@@ -261,9 +260,76 @@ public class TournamentServiceImpl implements TournamentService {
         return mapToResponse(tournamentRepository.save(tournament));
     }
 
+    @Override
+    @Transactional
+    public TournamentResponse uploadImage(UUID id, org.springframework.web.multipart.MultipartFile file) {
+        Tournament tournament = loadActive(id);
+        String oldImageUrl = tournament.getImageUrl();
+        // Validates (type/size) and stores via the active provider (Cloudinary CDN or local disk).
+        tournament.setImageUrl(imageUploadService.storeImageAsUrl(file, "tournaments"));
+        TournamentResponse response = mapToResponse(tournamentRepository.save(tournament));
+        imageUploadService.deleteByUrl(oldImageUrl); // best-effort cleanup of the replaced image
+        return response;
+    }
+
     // =========================================================================
     // PRIVATE HELPERS
     // =========================================================================
+
+    /** Sequential code TRNnnnnn, skipping any already taken (the DB UNIQUE is the final guard). */
+    private String generateTournamentCode() {
+        long n = tournamentRepository.count() + 1;
+        String code;
+        do {
+            code = String.format("TRN%05d", n++);
+        } while (tournamentRepository.existsByTournamentCode(code));
+        return code;
+    }
+
+    /**
+     * Validate tournament dates (#2). NULL-safe — dates are optional, so a comparison only runs when
+     * the operand(s) are present. Compares at DAY granularity in the app's timezone so a same-day
+     * (today) date the FE sends as {@code T00:00:00Z} is accepted, not rejected as past, and "today"
+     * matches the user's local calendar day (not the server's UTC clock).
+     */
+    private void validateDates(TournamentRequest r) {
+        java.time.LocalDate today = java.time.LocalDate.now(APP_ZONE);
+        if (r.getEndDate() != null && r.getStartDate() != null
+                && appDate(r.getEndDate()).isBefore(appDate(r.getStartDate()))) {
+            throw new AppException(ErrorCode.INVALID_DATE_RANGE);
+        }
+        if (r.getRegistrationCloseAt() != null && r.getRegistrationOpenAt() != null
+                && appDate(r.getRegistrationCloseAt()).isBefore(appDate(r.getRegistrationOpenAt()))) {
+            throw new AppException(ErrorCode.INVALID_DATE_RANGE);
+        }
+        // No supplied date may be in the past (each checked independently).
+        requireNotPast(r.getStartDate(), today);
+        requireNotPast(r.getEndDate(), today);
+        requireNotPast(r.getRegistrationOpenAt(), today);
+        requireNotPast(r.getRegistrationCloseAt(), today);
+        // FR-12: the registration window must fall WITHIN the tournament window (day granularity).
+        // Only compared when the relevant operands are present (dates are optional).
+        if (r.getStartDate() != null && r.getRegistrationOpenAt() != null
+                && appDate(r.getRegistrationOpenAt()).isBefore(appDate(r.getStartDate()))) {
+            throw new AppException(ErrorCode.INVALID_REGISTRATION_WINDOW);
+        }
+        if (r.getEndDate() != null && r.getRegistrationCloseAt() != null
+                && appDate(r.getRegistrationCloseAt()).isAfter(appDate(r.getEndDate()))) {
+            throw new AppException(ErrorCode.INVALID_REGISTRATION_WINDOW);
+        }
+    }
+
+    private void requireNotPast(OffsetDateTime date, java.time.LocalDate today) {
+        if (date != null && appDate(date).isBefore(today)) {
+            throw new AppException(ErrorCode.DATE_IN_PAST);
+        }
+    }
+
+    private static final java.time.ZoneId APP_ZONE = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+
+    private static java.time.LocalDate appDate(OffsetDateTime odt) {
+        return odt.atZoneSameInstant(APP_ZONE).toLocalDate();
+    }
 
     private Tournament loadActive(UUID id) {
         Tournament tournament = tournamentRepository.findById(id)
@@ -354,6 +420,7 @@ public class TournamentServiceImpl implements TournamentService {
                 .venues(mapVenues(tournament))
                 .registeredEntriesCount(registeredCount)
                 .status(tournament.getStatus())
+                .imageUrl(tournament.getImageUrl())
                 .createdAt(tournament.getCreatedAt())
                 .updatedAt(tournament.getUpdatedAt())
                 .build();

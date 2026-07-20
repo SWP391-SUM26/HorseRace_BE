@@ -6,6 +6,7 @@ import com.SWP391.horserace.roles.repository.RoleRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.shared.storage.ImageUploadService;
+import com.SWP391.horserace.shared.util.PhoneUtil;
 import com.SWP391.horserace.users.dto.ChangeRoleRequest;
 import com.SWP391.horserace.users.dto.ChangeStatusRequest;
 import com.SWP391.horserace.users.dto.CreateUserRequest;
@@ -42,6 +43,8 @@ public class UserServiceImpl implements UserService {
 
     private static final Logger log = LoggerFactory.getLogger(UserServiceImpl.class);
 
+    private static final String ADMIN_ROLE = "ADMIN";
+
     /** Allow-list of entity fields a client may sort by, mapped from the public sortBy values. */
     private static final Map<String, String> SORTABLE_FIELDS = Map.of(
             "createdat", "createdAt",
@@ -51,14 +54,20 @@ public class UserServiceImpl implements UserService {
             "lastloginat", "lastLoginAt",
             "status", "status");
 
-    /** Default temporary password applied when the admin omits {@code tempPassword}. */
-    private static final String DEFAULT_TEMP_PASSWORD = "123456";
+    /** Character pool for generated passwords (ensures upper/lower/digit/symbol coverage). */
+    private static final String PW_UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    private static final String PW_LOWER = "abcdefghijkmnpqrstuvwxyz";
+    private static final String PW_DIGIT = "23456789";
+    private static final String PW_SYMBOL = "!@#$%^&*?";
+    private static final java.security.SecureRandom PW_RANDOM = new java.security.SecureRandom();
 
     private final UserRepository userRepository;
     private final ImageUploadService imageUploadService;
     private final PermissionRepository permissionRepository;
     private final RoleRepository roleRepository;
     private final com.SWP391.horserace.races.repository.RaceResultRepository raceResultRepository;
+    private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+    private final com.SWP391.horserace.auth.service.EmailService emailService;
 
     @Override
     @Transactional(readOnly = true)
@@ -135,19 +144,31 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public UserResponse changeRole(UUID id, ChangeRoleRequest request) {
+    public UserResponse changeRole(UUID actingUserId, UUID id, ChangeRoleRequest request) {
+        guardNotSelf(actingUserId, id);
         User user = loadActiveUser(id);
         Role role = roleRepository.findByRoleCode(request.roleCode().trim().toUpperCase())
                 .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
+        // Never demote the last active administrator out of the ADMIN role.
+        if (!ADMIN_ROLE.equalsIgnoreCase(role.getRoleCode()) && isLastActiveAdmin(user)) {
+            throw new AppException(ErrorCode.LAST_ADMIN_PROTECTED);
+        }
         user.setRole(role);
         return mapToResponse(userRepository.save(user));
     }
 
     @Override
     @Transactional
-    public UserResponse changeStatus(UUID id, ChangeStatusRequest request) {
+    public UserResponse changeStatus(UUID actingUserId, UUID id, ChangeStatusRequest request) {
         User user = loadActiveUser(id);
         UserStatus status = parseStatus(request.status());
+        // Deactivating (anything other than ACTIVE) must not lock the actor out or remove the last admin.
+        if (status != UserStatus.ACTIVE) {
+            guardNotSelf(actingUserId, id);
+            if (isLastActiveAdmin(user)) {
+                throw new AppException(ErrorCode.LAST_ADMIN_PROTECTED);
+            }
+        }
         user.setStatus(status);
         if (request.reason() != null && !request.reason().isBlank()) {
             // No dedicated audit column today — log the reason for traceability.
@@ -164,25 +185,75 @@ public class UserServiceImpl implements UserService {
             throw new AppException(ErrorCode.EMAIL_ALREADY_EXISTS);
         }
 
-        Role role = roleRepository.findByRoleCode(request.roleCode().trim().toUpperCase())
+        String normalizedRole = request.roleCode().trim().toUpperCase();
+        if ("ADMIN".equals(normalizedRole)) {
+            // Admins cannot provision another ADMIN via this endpoint (privilege-escalation guard).
+            throw new AppException(ErrorCode.CANNOT_CREATE_ADMIN);
+        }
+        Role role = roleRepository.findByRoleCode(normalizedRole)
                 .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
 
-        String tempPassword = (request.tempPassword() != null && !request.tempPassword().isBlank())
-                ? request.tempPassword()
-                : DEFAULT_TEMP_PASSWORD;
+        // Reject a duplicate phone before the DB UNIQUE is the last resort (only when supplied).
+        // FR-11: normalize (strip spaces/dashes) before the check AND store the normalized value.
+        String normalizedPhone = PhoneUtil.normalize(request.phone());
+        if (normalizedPhone != null && !normalizedPhone.isBlank()
+                && userRepository.existsByPhone(normalizedPhone)) {
+            throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+        }
+
+        // Generate a strong random password, store it bcrypt-hashed, email the raw value to the user.
+        String rawPassword = generatePassword();
 
         User user = User.builder()
                 .role(role)
                 .userCode(generateUserCode())
                 .fullName(request.fullName().trim())
                 .email(normalizedEmail)
-                .phone(request.phone() != null ? request.phone().trim() : null)
-                // Stored {noop}-prefixed so the DelegatingPasswordEncoder can verify it; rotate later.
-                .passwordHash("{noop}" + tempPassword)
+                .phone(normalizedPhone)
+                .passwordHash(passwordEncoder.encode(rawPassword))
                 .status(UserStatus.ACTIVE)
+                // Admin-provisioned: the generated password is emailed to this exact address, so an
+                // admin who creates the account vouches for the email — mark it verified so staff
+                // (e.g. referees, whose assignment requires a verified email) are usable immediately.
+                .emailVerified(true)
                 .build();
 
-        return mapToResponse(userRepository.save(user));
+        UserResponse response = mapToResponse(userRepository.save(user));
+        emailService.sendNewAccountPassword(normalizedEmail, rawPassword);
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public void resendPassword(UUID id) {
+        // Intentionally allowed for any target (incl. ADMIN): the new password is emailed to the
+        // TARGET's inbox, not the caller — so it's not a credential-takeover, just an operator
+        // action. (Unlike createUser's ADMIN block, this does not escalate privilege.)
+        User user = loadActiveUser(id);
+        String rawPassword = generatePassword();
+        user.setPasswordHash(passwordEncoder.encode(rawPassword));
+        userRepository.save(user);
+        emailService.sendNewAccountPassword(user.getEmail(), rawPassword);
+    }
+
+    /** Generates a 12-char password with at least one upper, lower, digit, and symbol. */
+    private String generatePassword() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(PW_UPPER.charAt(PW_RANDOM.nextInt(PW_UPPER.length())));
+        sb.append(PW_LOWER.charAt(PW_RANDOM.nextInt(PW_LOWER.length())));
+        sb.append(PW_DIGIT.charAt(PW_RANDOM.nextInt(PW_DIGIT.length())));
+        sb.append(PW_SYMBOL.charAt(PW_RANDOM.nextInt(PW_SYMBOL.length())));
+        String all = PW_UPPER + PW_LOWER + PW_DIGIT + PW_SYMBOL;
+        for (int i = 4; i < 12; i++) {
+            sb.append(all.charAt(PW_RANDOM.nextInt(all.length())));
+        }
+        // shuffle so the guaranteed chars aren't always at the front
+        char[] chars = sb.toString().toCharArray();
+        for (int i = chars.length - 1; i > 0; i--) {
+            int j = PW_RANDOM.nextInt(i + 1);
+            char t = chars[i]; chars[i] = chars[j]; chars[j] = t;
+        }
+        return new String(chars);
     }
 
     @Override
@@ -201,7 +272,11 @@ public class UserServiceImpl implements UserService {
             user.setFullName(request.fullName().trim());
         }
         if (request.phone() != null) {
-            user.setPhone(request.phone().trim());
+            String phone = PhoneUtil.normalize(request.phone());
+            if (!phone.isBlank() && userRepository.existsByPhoneAndUserIdNot(phone, userId)) {
+                throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+            }
+            user.setPhone(phone);
         }
         if (request.avatarUrl() != null) {
             user.setAvatarUrl(request.avatarUrl().trim());
@@ -221,7 +296,11 @@ public class UserServiceImpl implements UserService {
             user.setFullName(request.fullName().trim());
         }
         if (request.phone() != null) {
-            user.setPhone(request.phone().trim());
+            String phone = PhoneUtil.normalize(request.phone());
+            if (!phone.isBlank() && userRepository.existsByPhoneAndUserIdNot(phone, id)) {
+                throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+            }
+            user.setPhone(phone);
         }
         if (request.avatarUrl() != null) {
             user.setAvatarUrl(request.avatarUrl().trim());
@@ -258,8 +337,12 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public void deleteUser(UUID id) {
+    public void deleteUser(UUID actingUserId, UUID id) {
+        guardNotSelf(actingUserId, id);
         User user = loadActiveUser(id);
+        if (isLastActiveAdmin(user)) {
+            throw new AppException(ErrorCode.LAST_ADMIN_PROTECTED);
+        }
         user.setDeleted(true);
         user.setDeletedAt(OffsetDateTime.now());
         userRepository.save(user);
@@ -268,6 +351,24 @@ public class UserServiceImpl implements UserService {
     private User loadActiveUser(UUID userId) {
         return userRepository.findByUserIdAndDeletedFalse(userId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+    }
+
+    /** An admin must not change their own account via the admin user-management endpoints. */
+    private void guardNotSelf(UUID actingUserId, UUID targetId) {
+        if (actingUserId != null && actingUserId.equals(targetId)) {
+            throw new AppException(ErrorCode.CANNOT_MODIFY_SELF);
+        }
+    }
+
+    /** True when removing this user (demote/suspend/delete) would leave zero active administrators. */
+    private boolean isLastActiveAdmin(User user) {
+        if (user.getRole() == null || !ADMIN_ROLE.equalsIgnoreCase(user.getRole().getRoleCode())) {
+            return false;
+        }
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            return false;
+        }
+        return userRepository.countByRole_RoleCodeAndStatusAndDeletedFalse(ADMIN_ROLE, UserStatus.ACTIVE) <= 1;
     }
 
     /** Translate the public {@code sortBy}/{@code sortDir} into a JPA {@link Sort} over an allow-listed field. */

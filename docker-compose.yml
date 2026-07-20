@@ -1,5 +1,11 @@
-version: '3.8'
-
+# HorseRace_BE — Docker setup
+#
+#   docker compose up -d                        → DB only (daily dev; run the BE on host with ./mvnw)
+#   docker compose --profile full up -d --build → BE + DB (teammate / demo, one command)
+#
+# The DB auto-initializes from db/schema_v4.sql + db/seed.sql the FIRST time the
+# `postgres_data` volume is empty (Postgres skips init scripts once data exists).
+# To reset from scratch:  docker compose down -v  &&  docker compose up -d
 services:
   db:
     image: postgres:15
@@ -13,6 +19,30 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # Auto-init on first boot (empty volume only). Numeric prefixes force order: schema before seed.
+      - ./src/main/resources/db/schema_v4.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./src/main/resources/db/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d horserace_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: horserace_api
+    restart: always
+    profiles: ["full"]          # only starts with:  docker compose --profile full up
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/horserace_db
+      SPRING_DATASOURCE_PASSWORD: 12345
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./uploads:/app/uploads   # attachment files persist across image rebuilds
 
 volumes:
   postgres_data:

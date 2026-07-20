@@ -5,13 +5,16 @@ import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.entity.HorseStatus;
 import com.SWP391.horserace.horses.repository.HorseRepository;
 import com.SWP391.horserace.owner.dto.OwnerOverviewResponse;
+import com.SWP391.horserace.owner.dto.OwnerRaceReportRow;
 import com.SWP391.horserace.owner.service.OwnerService;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
+import com.SWP391.horserace.races.entity.RaceEntryStatus;
 import com.SWP391.horserace.races.entity.RaceResult;
 import com.SWP391.horserace.races.repository.RaceEntryRepository;
 import com.SWP391.horserace.races.repository.RaceResultRepository;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
+import com.SWP391.horserace.registrations.repository.RegistrationRepository;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.users.entity.User;
@@ -21,7 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +36,7 @@ public class OwnerServiceImpl implements OwnerService {
     private final HorseRepository horseRepository;
     private final RaceEntryRepository raceEntryRepository;
     private final RaceResultRepository raceResultRepository;
+    private final RegistrationRepository registrationRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -129,6 +136,67 @@ public class OwnerServiceImpl implements OwnerService {
                 .filter(id -> id != null)
                 .distinct()
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<OwnerRaceReportRow> getRaceReport(UUID ownerUserId) {
+        if (ownerUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        List<TournamentRegistration> regs = registrationRepository.findOwnerRaceRegistrations(ownerUserId);
+        if (regs.isEmpty()) {
+            return List.of();
+        }
+
+        // Batch-load entries by registration id, then results by entry id — two queries total
+        // instead of 2N (see JockeyAssignmentServiceImpl.getMyRides for the same pattern).
+        List<UUID> regIds = regs.stream().map(TournamentRegistration::getRegistrationId).toList();
+        Map<UUID, RaceEntry> entryByRegId = raceEntryRepository.findByRegistration_RegistrationIdIn(regIds).stream()
+                .filter(e -> e.getRegistration() != null)
+                .collect(Collectors.toMap(e -> e.getRegistration().getRegistrationId(), Function.identity(), (a, b) -> a));
+
+        List<UUID> entryIds = entryByRegId.values().stream().map(RaceEntry::getEntryId).toList();
+        Map<UUID, RaceResult> resultByEntryId = entryIds.isEmpty()
+                ? Map.of()
+                : raceResultRepository.findByEntry_EntryIdIn(entryIds).stream()
+                    .filter(r -> r.getEntry() != null)
+                    .collect(Collectors.toMap(r -> r.getEntry().getEntryId(), Function.identity(), (a, b) -> a));
+
+        return regs.stream()
+                .map(reg -> mapToReportRow(reg, entryByRegId.get(reg.getRegistrationId()), resultByEntryId))
+                .toList();
+    }
+
+    private OwnerRaceReportRow mapToReportRow(TournamentRegistration reg, RaceEntry entry,
+                                              Map<UUID, RaceResult> resultByEntryId) {
+        Race race = reg.getRace();
+        Horse horse = reg.getHorse();
+        // A registration becomes a race entry only on approval; no entry ⇒ "did not participate".
+        RaceResult result = entry != null ? resultByEntryId.get(entry.getEntryId()) : null;
+        // "Participated" (actually ran) = became an entry and was not scratched. A SCRATCHED entry
+        // was withdrawn before the off, so it counts as "did not run"; DISQUALIFIED still ran.
+        boolean participated = entry != null && entry.getStatus() != RaceEntryStatus.SCRATCHED;
+        return OwnerRaceReportRow.builder()
+                .raceId(race != null ? race.getRaceId() : null)
+                .raceCode(race != null ? race.getRaceCode() : null)
+                .raceName(race != null ? race.getName() : null)
+                .raceStatus(race != null && race.getStatus() != null ? race.getStatus().name() : null)
+                .scheduledStartAt(race != null ? race.getScheduledStartAt() : null)
+                .tournamentName(reg.getTournament() != null ? reg.getTournament().getName() : null)
+                .horseId(horse != null ? horse.getHorseId() : null)
+                .horseName(horse != null ? horse.getName() : null)
+                .registrationId(reg.getRegistrationId())
+                .registrationCode(reg.getRegistrationCode())
+                .registrationStatus(reg.getStatus() != null ? reg.getStatus().name() : null)
+                .rejectionReason(reg.getRejectionReason())
+                .entered(entry != null)
+                .participated(participated)
+                .entryStatus(entry != null && entry.getStatus() != null ? entry.getStatus().name() : null)
+                .entryNo(entry != null ? entry.getEntryNo() : null)
+                .finishPosition(result != null ? result.getFinishPosition() : null)
+                .finishTimeMs(result != null ? result.getFinishTimeMs() : null)
+                .build();
     }
 
     // ── helpers ──

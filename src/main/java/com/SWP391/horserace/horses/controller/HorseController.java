@@ -206,6 +206,16 @@ public class HorseController {
         return ApiResponse.<Void>builder().success(true).message("Medical record deleted").build();
     }
 
+    /** POST /api/v1/horses/{id}/medical-records/{recordId}/file — upload/replace the record's attached file (owner). */
+    @PostMapping(value = "/{id}/medical-records/{recordId}/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<com.SWP391.horserace.horses.dto.MedicalRecordResponse> uploadMedicalRecordFile(
+            @AuthenticationPrincipal UUID userId, @PathVariable UUID id, @PathVariable UUID recordId,
+            @RequestParam("file") MultipartFile file) {
+        return ApiResponse.<com.SWP391.horserace.horses.dto.MedicalRecordResponse>builder()
+                .success(true).message("Medical record file uploaded")
+                .data(horseService.uploadMedicalRecordFile(userId, id, recordId, file)).build();
+    }
+
     /** GET /api/v1/horses/{id}/enterable-races — open races this horse can still be entered into. */
     @GetMapping("/{id}/enterable-races")
     public ApiResponse<java.util.List<com.SWP391.horserace.horses.dto.EnterableRaceResponse>> enterableRaces(

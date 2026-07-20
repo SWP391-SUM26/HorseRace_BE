@@ -61,7 +61,20 @@ public class ViolationServiceImpl implements ViolationService {
         }
         // Referees must quote their admin-issued per-race code to file a violation (admins bypass).
         refereeCodeValidator.validate(currentUserId, raceId, request != null ? request.refCode() : null);
+        return doCreateViolation(currentUserId, raceId, request);
+    }
 
+    @Override
+    @Transactional
+    public ViolationDetailResponse createViolationTrusted(UUID currentUserId, UUID raceId, CreateViolationRequest request) {
+        if (currentUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        // No refCode gate — the combined report was already authenticated by the emailed OTP (CN3).
+        return doCreateViolation(currentUserId, raceId, request);
+    }
+
+    private ViolationDetailResponse doCreateViolation(UUID currentUserId, UUID raceId, CreateViolationRequest request) {
         Race race = raceRepository.findById(raceId)
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
 

@@ -82,6 +82,10 @@ public class Tournament {
     @Builder.Default
     private TournamentStatus status = TournamentStatus.DRAFT;
 
+    /** Public cover image URL (Cloudinary CDN or local /api/v1/files/…); set via the image endpoint. */
+    @Column(name = "image_url", columnDefinition = "text")
+    private String imageUrl;
+
     @OneToMany(mappedBy = "tournament", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<TournamentVenue> venues = new ArrayList<>();

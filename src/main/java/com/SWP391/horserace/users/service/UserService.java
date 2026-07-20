@@ -29,14 +29,17 @@ public interface UserService {
     /** Admin: aggregate user counts (total + by role + by status) over non-deleted users. */
     UserStatsResponse getUserStats();
 
-    /** Admin: change a user's role by role code. */
-    UserResponse changeRole(UUID id, ChangeRoleRequest request);
+    /** Admin: change a user's role by role code. {@code actingUserId} is the admin performing it. */
+    UserResponse changeRole(UUID actingUserId, UUID id, ChangeRoleRequest request);
 
-    /** Admin: change a user's status (ACTIVE / INACTIVE / SUSPENDED / BANNED). */
-    UserResponse changeStatus(UUID id, ChangeStatusRequest request);
+    /** Admin: change a user's status (ACTIVE / INACTIVE / SUSPENDED). {@code actingUserId} is the admin performing it. */
+    UserResponse changeStatus(UUID actingUserId, UUID id, ChangeStatusRequest request);
 
     /** Admin: provision a new ACTIVE user with the given role; rejects duplicate emails. */
     UserResponse createUser(CreateUserRequest request);
+
+    /** Admin: regenerate a user's password (bcrypt) and re-email it (e.g. when the first email failed). */
+    void resendPassword(UUID id);
 
     /** The current authenticated user's own profile. */
     UserResponse getMyProfile(UUID userId);
@@ -59,6 +62,6 @@ public interface UserService {
      */
     List<String> getMyPermissions(UUID userId);
 
-    /** Admin: soft-delete a user by id (sets is_deleted/deleted_at). */
-    void deleteUser(UUID id);
+    /** Admin: soft-delete a user by id (sets is_deleted/deleted_at). {@code actingUserId} is the admin performing it. */
+    void deleteUser(UUID actingUserId, UUID id);
 }

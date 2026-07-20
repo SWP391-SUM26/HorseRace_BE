@@ -1,5 +1,6 @@
 package com.SWP391.horserace.predictions.service;
 
+import com.SWP391.horserace.predictions.dto.PoolOddsResponse;
 import com.SWP391.horserace.predictions.dto.PredictionRequest;
 import com.SWP391.horserace.predictions.dto.PredictionResponse;
 
@@ -15,4 +16,7 @@ public interface PredictionService {
     PredictionResponse getPredictionDetail(UUID userId, UUID predictionId);
 
     void cancelPrediction(UUID userId, UUID predictionId);
+
+    /** Live, estimated pari-mutuel odds per runner for every pool of a race (summed from live bets). */
+    List<PoolOddsResponse> getLivePoolOdds(UUID raceId);
 }

@@ -66,6 +66,10 @@ public class Race {
     @Column(name = "prediction_cutoff_at")
     private OffsetDateTime predictionCutoffAt;
 
+    /** Set by the auto-cancel sweeper when this OPEN race is under-filled past cutoff (awaits admin). */
+    @Column(name = "cancel_proposed_at")
+    private OffsetDateTime cancelProposedAt;
+
     @Column(name = "max_participants")
     private Integer maxParticipants;
 
@@ -85,6 +89,10 @@ public class Race {
 
     @Column(name = "total_purse")
     private BigDecimal totalPurse;
+
+    /** Fee the owner pays (into the house wallet) when the horse enters this race. */
+    @Column(name = "entry_fee")
+    private BigDecimal entryFee;
 
     // ── FE-v2 Results + Certify (mục 5): telemetry / photofinish / certification ──
 
