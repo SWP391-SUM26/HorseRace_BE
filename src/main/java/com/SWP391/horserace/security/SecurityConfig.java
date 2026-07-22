@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -56,6 +57,16 @@ public class SecurityConfig {
             "/error"
     };
 
+    // Read-only, aggregate-only endpoints the public Home page (pre-login) renders — standings,
+    // race listings/fields, and horse career stats. GET only: POST/PUT/DELETE on these same paths
+    // stay behind auth via anyRequest().authenticated().
+    private static final String[] PUBLIC_GET_PATHS = {
+            "/api/v1/standings/**",
+            "/api/v1/races",
+            "/api/v1/races/{id}/entries",
+            "/api/v1/horses/{id}/stats",
+    };
+
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final JwtAuthEntryPoint jwtAuthEntryPoint;
     private final RestAccessDeniedHandler restAccessDeniedHandler;
@@ -73,6 +84,7 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_PATHS).permitAll()
+                        .requestMatchers(HttpMethod.GET, PUBLIC_GET_PATHS).permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(jwtAuthEntryPoint)

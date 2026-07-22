@@ -43,6 +43,10 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/horserace_db
       SPRING_DATASOURCE_PASSWORD: 12345
+      # Must match wherever `npm run dev` actually serves the FE. Vite falls back to the next free
+      # port when 5173/5174 are taken (e.g. by unrelated containers on the host) — check the FE's
+      # own startup log before assuming 5173/5174.
+      APP_VNPAY_RETURN_URL: http://localhost:5175/app/wallet/return
     ports:
       - "8080:8080"
     volumes:

@@ -70,6 +70,7 @@ class RaceServiceImplTest {
     @Mock com.SWP391.horserace.notifications.service.NotificationService notificationService;
     @Mock com.SWP391.horserace.inspections.repository.EntryDocumentReviewRepository entryDocumentReviewRepository;
     @Mock com.SWP391.horserace.inspections.repository.RaceEntryInspectionRepository raceEntryInspectionRepository;
+    @Mock com.SWP391.horserace.assignments.service.JockeyFeeGate jockeyFeeGate;
 
     private RaceServiceImpl service;
 
@@ -83,7 +84,8 @@ class RaceServiceImplTest {
         service = new RaceServiceImpl(
                 raceRepository, prizeRepository, raceEntryRepository, registrationRepository, tournamentRepository,
                 userRepository, jockeyAssignmentRepository, venueRepository, refereeAssignmentRepository,
-                raceEntryGate, notificationService, entryDocumentReviewRepository, raceEntryInspectionRepository);
+                raceEntryGate, notificationService, entryDocumentReviewRepository, raceEntryInspectionRepository,
+                jockeyFeeGate);
         tournament = Tournament.builder().tournamentId(tournamentId).name("Spring Cup").build();
     }
 

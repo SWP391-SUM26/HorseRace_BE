@@ -85,42 +85,22 @@ class RaceEntryGateTest {
                 .entryFeeAmount(new BigDecimal(amount)).build();
     }
 
+    /**
+     * chargeEntryFeeOnce is intentionally a no-op (see RaceEntryGate — owners stopped paying entry
+     * fees once the purse became sponsor-funded; the only money an owner spends now is the jockey's
+     * wage). This replaces the old "charges on first claim" test, which asserted a ledger write that
+     * no longer happens.
+     */
     @Test
-    void charge_claimWon_debitsOwnerCreditsHouse_taggedByRegistration() {
-        UUID houseId = UUID.randomUUID();
-        UUID ownerId = UUID.randomUUID();
-        UUID regId = UUID.randomUUID();
-        User owner = User.builder().userId(ownerId).build();
-        Race race = raceWithFee(new BigDecimal("50000"));
-        TournamentRegistration reg = TournamentRegistration.builder()
-                .registrationId(regId).owner(owner).build();
-        when(registrationRepository.claimEntryFeeCharge(eq(regId), any(), any())).thenReturn(1);
-        when(houseWalletService.houseUserId()).thenReturn(houseId);
-
-        gate.chargeEntryFeeOnce(reg, race);
-
-        verify(walletService).getOrCreateWallet(ownerId);
-        // Tagged by REGISTRATION, not race — a race tag cannot say which registration paid.
-        verify(walletLedgerService).applyEntry(eq(houseId), eq(EntryType.CREDIT), eq(TxnCategory.ENTRY_FEE),
-                eq(new BigDecimal("50000")), eq(REG_REF), eq(regId));
-        verify(walletLedgerService).applyEntry(eq(ownerId), eq(EntryType.DEBIT), eq(TxnCategory.ENTRY_FEE),
-                eq(new BigDecimal("50000")), eq(REG_REF), eq(regId));
-        // The in-memory entity must reflect the charge — the caller maps it to a response next.
-        assertThat(reg.getEntryFeePaidAt()).isNotNull();
-        assertThat(reg.getEntryFeeAmount()).isEqualByComparingTo("50000");
-    }
-
-    /** THE double-charge test: someone already paid, so not a single ledger row may be written. */
-    @Test
-    void charge_claimLost_movesNoMoney() {
+    void charge_isANoOp_regardlessOfFeeOrRegistration() {
         UUID regId = UUID.randomUUID();
         User owner = User.builder().userId(UUID.randomUUID()).build();
         TournamentRegistration reg = TournamentRegistration.builder()
                 .registrationId(regId).owner(owner).build();
-        when(registrationRepository.claimEntryFeeCharge(eq(regId), any(), any())).thenReturn(0);
 
         gate.chargeEntryFeeOnce(reg, raceWithFee(new BigDecimal("50000")));
 
+        verify(registrationRepository, never()).claimEntryFeeCharge(any(), any(), any());
         verify(walletLedgerService, never()).applyEntry(any(), any(), any(), any(), any(), any());
     }
 

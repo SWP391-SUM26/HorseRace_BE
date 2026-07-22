@@ -131,4 +131,22 @@ public interface RaceEntryRepository extends JpaRepository<RaceEntry, UUID> {
          ORDER BY rc.scheduledStartAt ASC NULLS LAST
         """)
     java.util.List<RaceEntry> findUpcomingByOwnerUserId(@Param("ownerUserId") UUID ownerUserId);
+
+    /**
+     * The owner's entries for races that have gone OFFICIAL (results certified, prize + jockey fee
+     * already settled at certify time) — the source rows for the owner's race-earnings breakdown.
+     * Race, tournament and horse are eagerly fetched.
+     */
+    @Query("""
+        SELECT re FROM RaceEntry re
+          JOIN FETCH re.race rc
+          JOIN FETCH rc.tournament t
+          JOIN FETCH re.registration r
+          JOIN FETCH r.horse h
+         WHERE r.owner.userId = :ownerUserId
+           AND rc.status = com.SWP391.horserace.races.entity.RaceStatus.OFFICIAL
+           AND rc.deleted = false
+         ORDER BY rc.scheduledStartAt DESC NULLS LAST
+        """)
+    java.util.List<RaceEntry> findOfficialByOwnerUserId(@Param("ownerUserId") UUID ownerUserId);
 }

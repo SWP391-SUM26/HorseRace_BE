@@ -5,6 +5,7 @@ import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.entity.HorseStatus;
 import com.SWP391.horserace.horses.repository.HorseRepository;
 import com.SWP391.horserace.owner.dto.OwnerOverviewResponse;
+import com.SWP391.horserace.owner.dto.OwnerRaceEarningsRow;
 import com.SWP391.horserace.owner.dto.OwnerRaceReportRow;
 import com.SWP391.horserace.owner.service.OwnerService;
 import com.SWP391.horserace.races.entity.Race;
@@ -38,6 +39,8 @@ public class OwnerServiceImpl implements OwnerService {
     private final RaceResultRepository raceResultRepository;
     private final RegistrationRepository registrationRepository;
     private final com.SWP391.horserace.wallets.repository.WalletTransactionRepository walletTransactionRepository;
+    private final com.SWP391.horserace.prizes.repository.PrizeRepository prizeRepository;
+    private final com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository jockeyAssignmentRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -366,6 +369,81 @@ public class OwnerServiceImpl implements OwnerService {
                 .transactions(txns)
                 .totalTransactions(pageAll.getTotalElements())
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<OwnerRaceEarningsRow> getRaceEarnings(UUID ownerUserId, int limit) {
+        if (ownerUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        int cappedLimit = limit <= 0 ? 20 : Math.min(limit, 200);
+
+        List<RaceEntry> entries = raceEntryRepository.findOfficialByOwnerUserId(ownerUserId);
+        if (entries.isEmpty()) {
+            return List.of();
+        }
+
+        List<UUID> raceIds = entries.stream().map(e -> e.getRace().getRaceId()).distinct().toList();
+        List<UUID> entryIds = entries.stream().map(RaceEntry::getEntryId).toList();
+
+        Map<UUID, BigDecimal> prizeByRace = new java.util.HashMap<>();
+        for (var row : prizeRepository.sumOwnerPrizeByRaceIds(raceIds, ownerUserId)) {
+            prizeByRace.put(row.getRaceId(), row.getTotal());
+        }
+        Map<UUID, BigDecimal> feeByRace = new java.util.HashMap<>();
+        for (var row : jockeyAssignmentRepository.sumJockeyFeePaidByRaceIds(raceIds, ownerUserId)) {
+            feeByRace.put(row.getRaceId(), row.getTotal());
+        }
+        Map<UUID, String> jockeyNameByEntry = new java.util.HashMap<>();
+        for (var ride : jockeyAssignmentRepository.findAcceptedByEntryIds(entryIds)) {
+            if (ride.getEntry() != null && ride.getJockey() != null) {
+                jockeyNameByEntry.put(ride.getEntry().getEntryId(), ride.getJockey().getFullName());
+            }
+        }
+
+        // Group entries by race — an owner can run more than one horse in the same race.
+        Map<UUID, List<RaceEntry>> entriesByRace = new java.util.LinkedHashMap<>();
+        for (RaceEntry e : entries) {
+            entriesByRace.computeIfAbsent(e.getRace().getRaceId(), k -> new java.util.ArrayList<>()).add(e);
+        }
+
+        List<OwnerRaceEarningsRow> rows = new java.util.ArrayList<>();
+        for (var group : entriesByRace.entrySet()) {
+            UUID raceId = group.getKey();
+            List<RaceEntry> raceEntries = group.getValue();
+            Race race = raceEntries.get(0).getRace();
+
+            String horseName = raceEntries.stream()
+                    .map(e -> e.getRegistration() != null && e.getRegistration().getHorse() != null
+                            ? e.getRegistration().getHorse().getName() : null)
+                    .filter(java.util.Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.joining(", "));
+            String jockeyName = raceEntries.stream()
+                    .map(e -> jockeyNameByEntry.get(e.getEntryId()))
+                    .filter(java.util.Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.joining(", "));
+
+            BigDecimal prizeWon = prizeByRace.getOrDefault(raceId, BigDecimal.ZERO);
+            BigDecimal jockeyPaid = feeByRace.getOrDefault(raceId, BigDecimal.ZERO);
+
+            rows.add(OwnerRaceEarningsRow.builder()
+                    .raceId(raceId)
+                    .raceCode(race.getRaceCode())
+                    .raceName(race.getName())
+                    .tournamentName(race.getTournament() != null ? race.getTournament().getName() : null)
+                    .scheduledStartAt(race.getScheduledStartAt())
+                    .horseName(horseName.isEmpty() ? "—" : horseName)
+                    .jockeyName(jockeyName.isEmpty() ? "—" : jockeyName)
+                    .prizeWon(prizeWon)
+                    .jockeyPaid(jockeyPaid)
+                    .net(prizeWon.subtract(jockeyPaid))
+                    .build());
+        }
+
+        return rows.size() > cappedLimit ? rows.subList(0, cappedLimit) : rows;
     }
 
     private static String describe(com.SWP391.horserace.wallets.entity.WalletTransaction t) {
