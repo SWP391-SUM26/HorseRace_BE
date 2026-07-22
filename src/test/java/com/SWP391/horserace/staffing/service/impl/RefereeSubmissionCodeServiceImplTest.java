@@ -73,8 +73,8 @@ class RefereeSubmissionCodeServiceImplTest {
     }
 
     private void confirmedAssignment() {
-        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
-                raceId, userId, RefereeAssignmentStatus.CONFIRMED)).thenReturn(true);
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                raceId, userId, RefereeAssignmentStatus.OFFICIATING)).thenReturn(true);
     }
 
     // ── requestCode ──
@@ -117,8 +117,8 @@ class RefereeSubmissionCodeServiceImplTest {
     @Test
     void requestCode_notConfirmedReferee_throws() {
         when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(verifiedReferee()));
-        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
-                raceId, userId, RefereeAssignmentStatus.CONFIRMED)).thenReturn(false);
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                raceId, userId, RefereeAssignmentStatus.OFFICIATING)).thenReturn(false);
 
         assertThatThrownBy(() -> service.requestCode(userId, raceId))
                 .isInstanceOf(AppException.class)

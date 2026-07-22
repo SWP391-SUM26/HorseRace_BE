@@ -63,9 +63,10 @@ public class RefereeSubmissionCodeServiceImpl implements RefereeSubmissionCodeSe
         User user = userRepository.findByUserIdAndDeletedFalse(refereeUserId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
 
-        // Only a CONFIRMED referee on this race may request a code.
-        if (!refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
-                raceId, refereeUserId, RefereeAssignmentStatus.CONFIRMED)) {
+        // A referee assigned to this race may request a code — being assigned is enough (ASSIGNED or
+        // CONFIRMED); accepting is not required, but a DECLINED/REVOKED assignment does not qualify.
+        if (!refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                raceId, refereeUserId, RefereeAssignmentStatus.OFFICIATING)) {
             throw new AppException(ErrorCode.REFEREE_NOT_ASSIGNED);
         }
 

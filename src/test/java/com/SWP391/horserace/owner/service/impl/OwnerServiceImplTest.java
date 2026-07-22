@@ -41,6 +41,7 @@ class OwnerServiceImplTest {
     @Mock RaceEntryRepository raceEntryRepository;
     @Mock RaceResultRepository raceResultRepository;
     @Mock RegistrationRepository registrationRepository;
+    @Mock com.SWP391.horserace.wallets.repository.WalletTransactionRepository walletTransactionRepository;
 
     private OwnerServiceImpl service;
 
@@ -51,7 +52,7 @@ class OwnerServiceImplTest {
     void setUp() {
         owner = User.builder().userId(ownerId).fullName("Owen Owner").build();
         service = new OwnerServiceImpl(
-                horseRepository, raceEntryRepository, raceResultRepository, registrationRepository);
+                horseRepository, raceEntryRepository, raceResultRepository, registrationRepository, walletTransactionRepository);
     }
 
     private Horse horse(String code, String name, HorseStatus status, BigDecimal earnings) {

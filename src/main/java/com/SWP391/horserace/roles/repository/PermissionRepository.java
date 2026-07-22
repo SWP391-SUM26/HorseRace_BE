@@ -22,4 +22,9 @@ public interface PermissionRepository extends JpaRepository<Permission, UUID> {
      */
     @Query("SELECT p.code FROM Role r JOIN r.permissions p WHERE r.roleId = :roleId")
     List<String> findPermissionCodesByRoleId(@Param("roleId") UUID roleId);
+
+    /** Resolve permissions by code — used when replacing a role's permission set. */
+    List<Permission> findByCodeIn(java.util.Collection<String> codes);
+
+    List<Permission> findAllByOrderByCodeAsc();
 }

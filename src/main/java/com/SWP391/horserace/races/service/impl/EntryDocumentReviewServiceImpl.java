@@ -136,9 +136,10 @@ public class EntryDocumentReviewServiceImpl implements EntryDocumentReviewServic
         if (isAdmin) {
             return;
         }
-        // RT-CRITICAL-4: a referee may only review races they are CONFIRMED to officiate (IDOR guard).
-        if (!refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
-                raceId, callerId, RefereeAssignmentStatus.CONFIRMED)) {
+        // RT-CRITICAL-4: a referee may only review races they are assigned to officiate (IDOR guard).
+        // Being assigned is enough (ASSIGNED or CONFIRMED); DECLINED/REVOKED do not qualify.
+        if (!refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                raceId, callerId, RefereeAssignmentStatus.OFFICIATING)) {
             throw new AppException(ErrorCode.REFEREE_NOT_ASSIGNED);
         }
     }

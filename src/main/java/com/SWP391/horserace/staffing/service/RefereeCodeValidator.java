@@ -16,6 +16,10 @@ import java.util.UUID;
  * Gates report submissions (results, violations) behind the per-race code the admin issued to the
  * officiating referee. An ADMIN may submit without a code; an assigned referee must quote the exact
  * code on their assignment so the admin can audit who filed each report.
+ *
+ * <p>The referee only needs to be assigned to the race (status ASSIGNED or CONFIRMED) — accepting is
+ * not required — same gate as OTP issuance and result certification. A DECLINED or REVOKED assignment
+ * cannot file reports even if the caller somehow knows the per-race code.
  */
 @Service
 @RequiredArgsConstructor
@@ -44,9 +48,11 @@ public class RefereeCodeValidator {
             return;
         }
 
+        // A referee assigned to the race may file reports — consistent with OTP issuance and result
+        // certification. Being assigned is enough (ASSIGNED or CONFIRMED); DECLINED/REVOKED do not qualify.
         RefereeAssignment assignment = refereeAssignmentRepository
-                .findFirstByRace_RaceIdAndReferee_UserIdAndStatusNot(
-                        raceId, userId, RefereeAssignmentStatus.REVOKED)
+                .findFirstByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                        raceId, userId, RefereeAssignmentStatus.OFFICIATING)
                 .orElseThrow(() -> new AppException(ErrorCode.REFEREE_NOT_ASSIGNED));
 
         if (providedCode == null || providedCode.isBlank()) {

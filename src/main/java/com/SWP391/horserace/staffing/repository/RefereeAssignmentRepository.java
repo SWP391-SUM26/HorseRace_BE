@@ -36,6 +36,14 @@ public interface RefereeAssignmentRepository extends JpaRepository<RefereeAssign
      */
     boolean existsByRace_RaceIdAndReferee_UserIdAndStatus(UUID raceId, UUID refereeUserId, RefereeAssignmentStatus status);
 
+    /**
+     * True if this referee has an assignment for the race in any of the given statuses. Officiating
+     * gates pass {@link RefereeAssignmentStatus#OFFICIATING} (ASSIGNED or CONFIRMED) — being assigned
+     * is enough; accepting is not required, but DECLINED/REVOKED do not qualify.
+     */
+    boolean existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+            UUID raceId, UUID refereeUserId, java.util.Collection<RefereeAssignmentStatus> statuses);
+
     /** The signed-in referee's UPCOMING races they've CONFIRMED, soonest first (FR-17 dashboard scope). */
     @Query("SELECT ra.race FROM RefereeAssignment ra "
             + "WHERE ra.referee.userId = :refereeUserId "
@@ -63,6 +71,11 @@ public interface RefereeAssignmentRepository extends JpaRepository<RefereeAssign
     /** The signed-in referee's active assignment for a race (to validate their per-race code). */
     Optional<RefereeAssignment> findFirstByRace_RaceIdAndReferee_UserIdAndStatusNot(
             UUID raceId, UUID refereeUserId, RefereeAssignmentStatus status);
+
+    /** The referee's assignment for a race in any of the given statuses — used to gate officiating
+     *  on {@link RefereeAssignmentStatus#OFFICIATING} (ASSIGNED or CONFIRMED). */
+    Optional<RefereeAssignment> findFirstByRace_RaceIdAndReferee_UserIdAndStatusIn(
+            UUID raceId, UUID refereeUserId, java.util.Collection<RefereeAssignmentStatus> statuses);
 
     /**
      * The (race, referee) assignment row regardless of status — INCLUDING REVOKED. Used to

@@ -1,6 +1,8 @@
 package com.SWP391.horserace.jockeys.service.impl;
 
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
+import com.SWP391.horserace.prizes.entity.BeneficiaryType;
+import com.SWP391.horserace.prizes.repository.PrizeRepository;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.repository.HorseRepository;
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
@@ -59,6 +61,7 @@ class JockeyServiceImplTest {
     @Mock com.SWP391.horserace.races.repository.RaceResultRepository raceResultRepository;
     @Mock MembershipApplicationRepository membershipApplicationRepository;
     @Mock UserRepository userRepository;
+    @Mock PrizeRepository prizeRepository;
 
     private JockeyServiceImpl service;
 
@@ -70,7 +73,7 @@ class JockeyServiceImplTest {
     void setUp() {
         service = new JockeyServiceImpl(
                 jockeyProfileRepository, jockeyAssignmentRepository, raceRepository, horseRepository,
-                raceResultRepository, membershipApplicationRepository, userRepository);
+                raceResultRepository, membershipApplicationRepository, userRepository, prizeRepository);
     }
 
     private JockeyProfile profile(UUID userId, BigDecimal winRate, BigDecimal rating, String recentForm) {
@@ -372,6 +375,7 @@ class JockeyServiceImplTest {
         p.setWinCount(7);
         when(jockeyProfileRepository.findByIdAndUserActive(caller)).thenReturn(Optional.of(p));
         when(jockeyAssignmentRepository.findAcceptedRidesByJockey(caller)).thenReturn(List.of());
+        when(prizeRepository.sumByBeneficiary(caller, BeneficiaryType.JOCKEY)).thenReturn(BigDecimal.ZERO);
 
         JockeyStatsResponse stats = service.getMyStats(caller);
 
@@ -380,9 +384,12 @@ class JockeyServiceImplTest {
         assertThat(stats.getWinRate()).isEqualTo(0.0);
         assertThat(stats.getTop3Rate()).isEqualTo(0.0);
         assertThat(stats.getAvgPlacement()).isEqualTo(0.0);
-        assertThat(stats.getCareerWins()).isEqualTo(7);
+        // Computed from results, NOT profile.winCount (stubbed to 7 above). Nothing ever writes
+        // that column, so reporting it contradicted the `wins: 0` sitting right next to it.
+        assertThat(stats.getCareerWins()).isZero();
         assertThat(stats.getCareerEarnings()).isEqualByComparingTo("0");
         assertThat(stats.getSeasonEarnings()).isEqualByComparingTo("0");
+        assertThat(stats.getHorseEarnings()).isEqualByComparingTo("0");
     }
 
     @Test
@@ -402,6 +409,9 @@ class JockeyServiceImplTest {
                 acceptedRide(en1), acceptedRide(en2), acceptedRide(en3), acceptedRide(en4)));
         when(raceResultRepository.findByEntry_EntryIdIn(anyCollection())).thenReturn(List.of(
                 result(en1, 1), result(en2, 2), result(en3, 3)));  // en4 has no result
+        // What actually reached the rider's wallet: a 10% cut of the 175 the horses won.
+        when(prizeRepository.sumByBeneficiary(caller, BeneficiaryType.JOCKEY))
+                .thenReturn(new BigDecimal("17.50"));
 
         JockeyStatsResponse stats = service.getMyStats(caller);
 
@@ -411,9 +421,13 @@ class JockeyServiceImplTest {
         assertThat(stats.getWinRate()).isEqualTo(33.3);          // 1/3*100
         assertThat(stats.getTop3Rate()).isEqualTo(100.0);        // 3/3*100
         assertThat(stats.getAvgPlacement()).isEqualTo(2.0);      // (1+2+3)/3
-        assertThat(stats.getCareerWins()).isEqualTo(100);
-        assertThat(stats.getCareerEarnings()).isEqualByComparingTo("175"); // 100+50+25 (en4 excluded)
-        assertThat(stats.getSeasonEarnings()).isEqualByComparingTo("175");
+        assertThat(stats.getCareerWins()).isEqualTo(1);          // computed, not profile.winCount (100)
+        // THE regression this suite exists to hold: the jockey's earnings are the prize rows
+        // credited to THEM (17.50), not the horses' combined purse (175). Reporting the latter
+        // overstated every rider's income by the owner's share — 10x on the default split.
+        assertThat(stats.getCareerEarnings()).isEqualByComparingTo("17.50");
+        assertThat(stats.getSeasonEarnings()).isEqualByComparingTo("17.50");
+        assertThat(stats.getHorseEarnings()).isEqualByComparingTo("175"); // 100+50+25 (en4 excluded)
     }
 
     // =========================================================================

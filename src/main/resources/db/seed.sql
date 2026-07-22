@@ -19,9 +19,7 @@ INSERT INTO role (role_code, role_name, description, status) VALUES
     ('HORSE_OWNER',  'Horse Owner',    'Registers and manages horses', 'ACTIVE'),
     ('JOCKEY',       'Jockey',         'Rides horses in races',   'ACTIVE'),
     ('RACE_REFEREE', 'Race Referee',   'Officiates races',        'ACTIVE'),
-    ('SPECTATOR',    'Spectator',      'Watches and predicts',    'ACTIVE'),
-    ('TRAINER',      'Trainer',        'Trains horses for races',  'ACTIVE'),
-    ('VET',          'Veterinarian',   'Performs horse health checks', 'ACTIVE');
+    ('SPECTATOR',    'Spectator',      'Watches and predicts',    'ACTIVE');
 
 -- =========================================================
 -- PERMISSIONS (V4) + role -> permission mapping ("phân quyền cho các role")

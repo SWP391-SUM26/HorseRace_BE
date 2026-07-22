@@ -18,6 +18,9 @@ import java.io.IOException;
 @RequiredArgsConstructor
 public class JwtAuthEntryPoint implements AuthenticationEntryPoint {
 
+    /** Set only when the 401 means the session itself is dead. Read by the FE axios interceptor. */
+    public static final String SESSION_INVALID_HEADER = "X-Session-Invalid";
+
     private final ObjectMapper objectMapper;
 
     @Override
@@ -25,6 +28,12 @@ public class JwtAuthEntryPoint implements AuthenticationEntryPoint {
                          AuthenticationException authException) throws IOException {
         ErrorCode ec = ErrorCode.UNAUTHENTICATED;
         response.setStatus(ec.getStatusCode().value());
+        // Marks THIS 401 as "the credential is gone/expired", as opposed to the ~62 service-layer
+        // `AppException(UNAUTHENTICATED)` guards that also surface as 401 but mean a business
+        // precondition failed. Without the distinction the client cannot tell them apart and ends
+        // up destroying a perfectly valid session. This entry point is the only place Spring
+        // rejects a request for lack of authentication, so it is the only place the flag belongs.
+        response.setHeader(SESSION_INVALID_HEADER, "1");
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         ApiResponse<Void> body = ApiResponse.<Void>builder()
                 .success(false)

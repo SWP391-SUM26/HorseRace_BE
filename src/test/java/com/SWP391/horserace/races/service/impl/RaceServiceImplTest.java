@@ -8,6 +8,7 @@ import com.SWP391.horserace.races.dto.AssignParticipantRequest;
 import com.SWP391.horserace.races.dto.MyEntryResponse;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
 import com.SWP391.horserace.races.dto.RaceFilterRequest;
+import com.SWP391.horserace.races.dto.PrizeDistributionDto;
 import com.SWP391.horserace.races.dto.RaceRequest;
 import com.SWP391.horserace.races.dto.RaceResponse;
 import com.SWP391.horserace.races.dto.ScheduleRaceRequest;
@@ -16,6 +17,7 @@ import com.SWP391.horserace.races.entity.RaceEntry;
 import com.SWP391.horserace.races.entity.RaceEntryStatus;
 import com.SWP391.horserace.races.entity.RaceStatus;
 import com.SWP391.horserace.races.repository.RaceEntryRepository;
+import com.SWP391.horserace.prizes.repository.PrizeRepository;
 import com.SWP391.horserace.races.repository.RaceRepository;
 import com.SWP391.horserace.registrations.entity.RegistrationStatus;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
@@ -24,6 +26,7 @@ import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
 import com.SWP391.horserace.tournaments.entity.Tournament;
 import com.SWP391.horserace.tournaments.repository.TournamentRepository;
+import com.SWP391.horserace.roles.entity.Role;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,6 +58,7 @@ import static org.mockito.Mockito.when;
 class RaceServiceImplTest {
 
     @Mock RaceRepository raceRepository;
+    @Mock PrizeRepository prizeRepository;
     @Mock RaceEntryRepository raceEntryRepository;
     @Mock RegistrationRepository registrationRepository;
     @Mock TournamentRepository tournamentRepository;
@@ -77,7 +81,7 @@ class RaceServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new RaceServiceImpl(
-                raceRepository, raceEntryRepository, registrationRepository, tournamentRepository,
+                raceRepository, prizeRepository, raceEntryRepository, registrationRepository, tournamentRepository,
                 userRepository, jockeyAssignmentRepository, venueRepository, refereeAssignmentRepository,
                 raceEntryGate, notificationService, entryDocumentReviewRepository, raceEntryInspectionRepository);
         tournament = Tournament.builder().tournamentId(tournamentId).name("Spring Cup").build();
@@ -535,8 +539,9 @@ class RaceServiceImplTest {
                 .raceCode("RACE00001").status(RaceStatus.OPEN).maxParticipants(8).build();
     }
 
+    /** Owned by {@code currentUserId} — entering a horse debits the owner, so the caller must be them. */
     private TournamentRegistration approvedReg(UUID regId, UUID tId) {
-        User owner = User.builder().userId(UUID.randomUUID()).fullName("Owen Owner").build();
+        User owner = User.builder().userId(currentUserId).fullName("Owen Owner").build();
         Horse horse = Horse.builder().horseId(UUID.randomUUID()).owner(owner).name("Thunder").build();
         Tournament t = Tournament.builder().tournamentId(tId).name("Spring Cup").build();
         return TournamentRegistration.builder()
@@ -689,7 +694,7 @@ class RaceServiceImplTest {
                 .status(JockeyAssignmentStatus.ACCEPTED).build();
 
         when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(openRace(raceId)));
-        when(raceEntryRepository.findByRaceIdAndOwnerUserId(raceId, ownerId)).thenReturn(Optional.of(entry));
+        when(raceEntryRepository.findAllByRaceIdAndOwnerUserId(raceId, ownerId)).thenReturn(List.of(entry));
         when(jockeyAssignmentRepository.findAcceptedByEntryId(entryId)).thenReturn(Optional.of(ja));
 
         MyEntryResponse res = service.getMyEntry(raceId, ownerId);
@@ -716,7 +721,7 @@ class RaceServiceImplTest {
         UUID raceId = UUID.randomUUID();
         UUID ownerId = UUID.randomUUID();
         when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(openRace(raceId)));
-        when(raceEntryRepository.findByRaceIdAndOwnerUserId(raceId, ownerId)).thenReturn(Optional.empty());
+        when(raceEntryRepository.findAllByRaceIdAndOwnerUserId(raceId, ownerId)).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.getMyEntry(raceId, ownerId))
                 .isInstanceOf(AppException.class)
@@ -913,5 +918,237 @@ class RaceServiceImplTest {
 
         verify(raceRepository).markClosed(id);
         verify(raceRepository, never()).save(any());
+    }
+
+    // =========================================================================
+    // Prize / purse budget rules (9901–9914) and the tournament date window
+    // =========================================================================
+
+    /** A dated, funded tournament — the bare fixture has neither, so budget rules are inert on it. */
+    private Tournament fundedTournament(String purse) {
+        return Tournament.builder().tournamentId(tournamentId).name("Spring Cup")
+                .totalPurse(new java.math.BigDecimal(purse))
+                .startDate(OffsetDateTime.now().plusDays(10))
+                .endDate(OffsetDateTime.now().plusDays(20))
+                .build();
+    }
+
+    private RaceRequest reqWithPurse(String purse, java.util.List<PrizeDistributionDto> tiers,
+                                     OffsetDateTime start) {
+        return new RaceRequest(tournamentId, "Race X", "FLAT", 1200, "GOOD", "SUNNY",
+                start, null, 8, null, null, null,
+                purse == null ? null : new java.math.BigDecimal(purse), null, tiers);
+    }
+
+    @Test
+    void createRace_tiersDoNotSumToPurse_throws() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(fundedTournament("1000")));
+
+        var tiers = java.util.List.of(new PrizeDistributionDto("1", new java.math.BigDecimal("400")),
+                new PrizeDistributionDto("2", new java.math.BigDecimal("300")));  // 700 != 1000
+
+        assertThatThrownBy(() -> service.createRace(currentUserId,
+                reqWithPurse("1000", tiers, OffsetDateTime.now().plusDays(12))))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.PRIZE_DISTRIBUTION_MISMATCH);
+    }
+
+    /**
+     * "1st" and "1" are the SAME finish position — parsePlace maps both to 1 and the payout map is a
+     * HashMap, so the second silently overwrote the first and one tier's money vanished at certify.
+     */
+    @Test
+    void createRace_sameParsedPlaceSpelledTwoWays_throws() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(fundedTournament("1000")));
+
+        var tiers = java.util.List.of(new PrizeDistributionDto("1st", new java.math.BigDecimal("600")),
+                new PrizeDistributionDto("1", new java.math.BigDecimal("400")));
+
+        assertThatThrownBy(() -> service.createRace(currentUserId,
+                reqWithPurse("1000", tiers, OffsetDateTime.now().plusDays(12))))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.PRIZE_DISTRIBUTION_DUPLICATE_PLACE);
+    }
+
+    @Test
+    void createRace_purseExceedsRemainingTournamentBudget_throws() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(fundedTournament("1000")));
+        when(raceRepository.sumAllocatedPurse(tournamentId, null)).thenReturn(new java.math.BigDecimal("900"));
+
+        var tiers = java.util.List.of(new PrizeDistributionDto("1", new java.math.BigDecimal("500")));
+
+        assertThatThrownBy(() -> service.createRace(currentUserId,
+                reqWithPurse("500", tiers, OffsetDateTime.now().plusDays(12))))  // 900 + 500 > 1000
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_PURSE_EXCEEDS_TOURNAMENT);
+    }
+
+    @Test
+    void createRace_purseOmitted_splitsRemainingBudgetAndDefaultsTiersThatSumExactly() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(fundedTournament("1000")));
+        when(raceRepository.sumAllocatedPurse(tournamentId, null)).thenReturn(java.math.BigDecimal.ZERO);
+        when(raceRepository.countActiveByTournament(tournamentId)).thenReturn(1L);
+        when(raceRepository.count()).thenReturn(0L);
+        when(raceRepository.existsByRaceCode(any())).thenReturn(false);
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.createRace(currentUserId, reqWithPurse(null, null, OffsetDateTime.now().plusDays(12)));
+
+        ArgumentCaptor<Race> captor = ArgumentCaptor.forClass(Race.class);
+        verify(raceRepository).save(captor.capture());
+        Race saved = captor.getValue();
+        // 1000 remaining over (1 existing + this one) = 500
+        assertThat(saved.getTotalPurse()).isEqualByComparingTo("500");
+        // The tiers must add up to the purse EXACTLY — 1st absorbs the rounding remainder.
+        java.math.BigDecimal sum = saved.getPrizeDistribution().stream()
+                .map(com.SWP391.horserace.races.entity.PrizeDistributionItem::getAmount)
+                .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+        assertThat(sum).isEqualByComparingTo(saved.getTotalPurse());
+    }
+
+    /** Rounding must never leave a gap: 1000/3 is not exact, yet the tiers still total the purse. */
+    @Test
+    void createRace_indivisiblePurse_tiersStillSumExactly() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(fundedTournament("1000")));
+        when(raceRepository.sumAllocatedPurse(tournamentId, null)).thenReturn(java.math.BigDecimal.ZERO);
+        when(raceRepository.countActiveByTournament(tournamentId)).thenReturn(2L);
+        when(raceRepository.count()).thenReturn(0L);
+        when(raceRepository.existsByRaceCode(any())).thenReturn(false);
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.createRace(currentUserId, reqWithPurse(null, null, OffsetDateTime.now().plusDays(12)));
+
+        ArgumentCaptor<Race> captor = ArgumentCaptor.forClass(Race.class);
+        verify(raceRepository).save(captor.capture());
+        Race saved = captor.getValue();
+        assertThat(saved.getTotalPurse()).isEqualByComparingTo("333.33");  // rounded DOWN, never over
+        java.math.BigDecimal sum = saved.getPrizeDistribution().stream()
+                .map(com.SWP391.horserace.races.entity.PrizeDistributionItem::getAmount)
+                .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+        assertThat(sum).isEqualByComparingTo("333.33");
+    }
+
+    @Test
+    void createRace_startBeforeTournamentOpens_throws() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(fundedTournament("1000")));
+
+        assertThatThrownBy(() -> service.createRace(currentUserId,
+                reqWithPurse(null, java.util.List.of(), OffsetDateTime.now().plusDays(5))))  // opens on day 10
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_OUTSIDE_TOURNAMENT_WINDOW);
+    }
+
+    @Test
+    void createRace_startAfterTournamentEnds_throws() {
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(fundedTournament("1000")));
+
+        assertThatThrownBy(() -> service.createRace(currentUserId,
+                reqWithPurse(null, java.util.List.of(), OffsetDateTime.now().plusDays(25))))  // ends on day 20
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_OUTSIDE_TOURNAMENT_WINDOW);
+    }
+
+    /**
+     * Both ends are INCLUSIVE. Six seeded races start exactly on their tournament's opening day and
+     * are still SCHEDULED/OPEN, i.e. editable — an exclusive rule would break a live click-path.
+     */
+    @Test
+    void createRace_startExactlyOnTournamentBoundaryDays_isAllowed() {
+        Tournament t = fundedTournament("1000");
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(t));
+        when(raceRepository.count()).thenReturn(0L);
+        when(raceRepository.existsByRaceCode(any())).thenReturn(false);
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+
+        assertThat(service.createRace(currentUserId,
+                reqWithPurse("0", java.util.List.of(), t.getStartDate()))).isNotNull();
+        assertThat(service.createRace(currentUserId,
+                reqWithPurse("0", java.util.List.of(), t.getEndDate()))).isNotNull();
+    }
+
+    @Test
+    void deleteRace_withPrizesAlreadyPaid_throws() {
+        UUID id = UUID.randomUUID();
+        Race race = Race.builder().raceId(id).status(RaceStatus.OFFICIAL).build();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+        when(prizeRepository.existsByRace_RaceId(id)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.deleteRace(currentUserId, id))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RACE_HAS_PAID_PRIZES);
+        verify(raceRepository, never()).save(any(Race.class));
+    }
+
+    // ── entering a horse debits the owner's wallet, so only they (or staff) may do it ──
+
+    /**
+     * Regression: this endpoint had no @PreAuthorize and no ownership check, so ANY authenticated
+     * user could post a stranger's registrationId and drain that owner's wallet.
+     */
+    @Test
+    void assign_byAnotherUser_isRejected() {
+        UUID id = UUID.randomUUID();
+        UUID regId = UUID.randomUUID();
+        UUID attacker = UUID.randomUUID();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(openRace(id)));
+        when(registrationRepository.findById(regId)).thenReturn(Optional.of(approvedReg(regId, tournamentId)));
+        when(userRepository.findByUserIdAndDeletedFalse(attacker))
+                .thenReturn(Optional.of(User.builder().userId(attacker)
+                        .role(Role.builder().roleCode("SPECTATOR").build()).build()));
+
+        assertThatThrownBy(() -> service.assignParticipant(attacker, id,
+                new AssignParticipantRequest(regId, 1, 1)))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.NOT_REGISTRATION_OWNER);
+
+        verify(raceEntryGate, never()).chargeEntryFeeOnce(any(), any());
+        verify(raceEntryRepository, never()).save(any(RaceEntry.class));
+    }
+
+    @Test
+    void assign_byAdmin_isAllowed() {
+        UUID id = UUID.randomUUID();
+        UUID regId = UUID.randomUUID();
+        UUID adminId = UUID.randomUUID();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(openRace(id)));
+        when(registrationRepository.findById(regId)).thenReturn(Optional.of(approvedReg(regId, tournamentId)));
+        when(userRepository.findByUserIdAndDeletedFalse(adminId))
+                .thenReturn(Optional.of(User.builder().userId(adminId)
+                        .role(Role.builder().roleCode("ADMIN").build()).build()));
+        when(raceEntryRepository.count()).thenReturn(0L);
+        when(raceEntryRepository.save(any(RaceEntry.class))).thenAnswer(i -> i.getArgument(0));
+
+        assertThat(service.assignParticipant(adminId, id, new AssignParticipantRequest(regId, 1, 1)))
+                .isNotNull();
+    }
+
+    // ── cancelling a race must return every entry fee ──
+
+    @Test
+    void cancelRace_refundsEveryPaidRegistration() {
+        UUID id = UUID.randomUUID();
+        Race race = openRace(id);
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(race));
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+        TournamentRegistration r1 = approvedReg(UUID.randomUUID(), tournamentId);
+        TournamentRegistration r2 = approvedReg(UUID.randomUUID(), tournamentId);
+        when(registrationRepository.findUnrefundedPaidByRace(id)).thenReturn(List.of(r1, r2));
+
+        service.cancelRace(currentUserId, id);
+
+        verify(raceEntryGate).refundEntryFeeOnce(r1);
+        verify(raceEntryGate).refundEntryFeeOnce(r2);
+    }
+
+    @Test
+    void cancelRace_nothingPaid_movesNoMoney() {
+        UUID id = UUID.randomUUID();
+        when(raceRepository.findByRaceIdAndDeletedFalse(id)).thenReturn(Optional.of(openRace(id)));
+        when(raceRepository.save(any(Race.class))).thenAnswer(i -> i.getArgument(0));
+        when(registrationRepository.findUnrefundedPaidByRace(id)).thenReturn(List.of());
+
+        service.cancelRace(currentUserId, id);
+
+        verify(raceEntryGate, never()).refundEntryFeeOnce(any());
     }
 }

@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -50,6 +51,9 @@ public interface RaceEntryRepository extends JpaRepository<RaceEntry, UUID> {
     /**
      * The entry in a race that belongs to a specific owner (via its registration), with
      * registration, horse, and owner eagerly fetched. Used for the owner's "Your Horse Status" card.
+     *
+     * <p>Returns a LIST: an owner may run several horses in the same race, so this was previously
+     * an Optional that blew up with NonUniqueResultException the moment that happened.
      */
     @Query("""
         SELECT re FROM RaceEntry re
@@ -59,8 +63,26 @@ public interface RaceEntryRepository extends JpaRepository<RaceEntry, UUID> {
          WHERE re.race.raceId = :raceId
            AND o.userId = :ownerUserId
         """)
-    Optional<RaceEntry> findByRaceIdAndOwnerUserId(@Param("raceId") UUID raceId,
-                                                   @Param("ownerUserId") UUID ownerUserId);
+    List<RaceEntry> findAllByRaceIdAndOwnerUserId(@Param("raceId") UUID raceId,
+                                                  @Param("ownerUserId") UUID ownerUserId);
+
+    /**
+     * One specific entry, scoped to its owner — the IDOR guard for owner-side mutations. Returning
+     * empty for someone else's entry is deliberate: the caller cannot tell "not yours" from
+     * "doesn't exist".
+     */
+    @Query("""
+        SELECT re FROM RaceEntry re
+          JOIN FETCH re.registration r
+          JOIN FETCH r.horse h
+          JOIN FETCH r.owner o
+         WHERE re.entryId = :entryId
+           AND re.race.raceId = :raceId
+           AND o.userId = :ownerUserId
+        """)
+    Optional<RaceEntry> findByEntryIdAndRaceIdAndOwnerUserId(@Param("entryId") UUID entryId,
+                                                             @Param("raceId") UUID raceId,
+                                                             @Param("ownerUserId") UUID ownerUserId);
 
     long countByRace_RaceId(UUID raceId);
 

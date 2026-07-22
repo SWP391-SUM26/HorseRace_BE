@@ -15,7 +15,9 @@ import com.SWP391.horserace.races.dto.AssignParticipantRequest;
 import com.SWP391.horserace.races.dto.MyEntryResponse;
 import com.SWP391.horserace.races.dto.PrizeDistributionDto;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
+import com.SWP391.horserace.races.dto.RaceFieldOptionsResponse;
 import com.SWP391.horserace.races.dto.RaceFilterRequest;
+import com.SWP391.horserace.prizes.repository.PrizeRepository;
 import com.SWP391.horserace.races.dto.RaceRequest;
 import com.SWP391.horserace.races.dto.RaceResponse;
 import com.SWP391.horserace.races.dto.RaceStatsResponse;
@@ -50,6 +52,10 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.HashSet;
+import java.util.Set;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -65,6 +71,7 @@ public class RaceServiceImpl implements RaceService {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final RaceRepository raceRepository;
+    private final PrizeRepository prizeRepository;
     private final RaceEntryRepository raceEntryRepository;
     private final RegistrationRepository registrationRepository;
     private final TournamentRepository tournamentRepository;
@@ -76,6 +83,7 @@ public class RaceServiceImpl implements RaceService {
     private final com.SWP391.horserace.notifications.service.NotificationService notificationService;
     private final EntryDocumentReviewRepository entryDocumentReviewRepository;
     private final RaceEntryInspectionRepository raceEntryInspectionRepository;
+    private final com.SWP391.horserace.assignments.service.JockeyFeeGate jockeyFeeGate;
 
     /** Auto-close lead: how far before the prediction cutoff (fallback: start) an OPEN race auto-closes. */
     @Value("${app.race.auto-close-lead-ms:1800000}")
@@ -140,12 +148,27 @@ public class RaceServiceImpl implements RaceService {
         }
 
         validateDates(request.scheduledStartAt(), request.predictionCutoffAt());
+        validateWithinTournamentWindow(tournament, request.scheduledStartAt());
 
         // FR-12: min must not exceed max when both are supplied.
         if (request.minParticipants() != null && request.maxParticipants() != null
                 && request.minParticipants() > request.maxParticipants()) {
             throw new AppException(ErrorCode.RACE_INVALID_PARTICIPANT_RANGE);
         }
+
+        // Purse omitted -> split what's left of the tournament budget evenly across the races that
+        // would then exist. Rounded DOWN, so any remainder stays unallocated rather than busting
+        // the ceiling; the admin can still set an explicit figure.
+        BigDecimal totalPurse = request.totalPurse();
+        if (totalPurse == null && tournament.getTotalPurse() != null) {
+            totalPurse = defaultEvenSplit(tournament);
+        }
+        List<PrizeDistributionDto> tiers = request.prizeDistribution();
+        if ((tiers == null || tiers.isEmpty()) && totalPurse != null && totalPurse.signum() > 0) {
+            tiers = defaultTiers(totalPurse);
+        }
+        validatePrizeDistribution(totalPurse, tiers);
+        validateTournamentBudget(tournament, totalPurse, null);
 
         Race race = Race.builder()
                 .tournament(tournament)
@@ -161,9 +184,9 @@ public class RaceServiceImpl implements RaceService {
                 .minParticipants(request.minParticipants())
                 .venue(request.venue())
                 .venueRef(resolveVenue(request.venueId()))
-                .totalPurse(request.totalPurse())
+                .totalPurse(totalPurse)
                 .entryFee(request.entryFee())
-                .prizeDistribution(toPrizeItems(request.prizeDistribution()))
+                .prizeDistribution(toPrizeItems(tiers))
                 // Status is always SCHEDULED on create; lifecycle changes go through
                 // schedule()/cancel(), never a client-supplied status.
                 .status(RaceStatus.SCHEDULED)
@@ -196,6 +219,16 @@ public class RaceServiceImpl implements RaceService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public RaceFieldOptionsResponse getFieldOptions() {
+        return RaceFieldOptionsResponse.builder()
+                .raceTypes(raceRepository.findDistinctRaceTypes())
+                .trackConditions(raceRepository.findDistinctTrackConditions())
+                .weatherConditions(raceRepository.findDistinctWeatherConditions())
+                .build();
+    }
+
+    @Override
     @Transactional
     public RaceResponse updateRace(UUID currentUserId, UUID id, RaceRequest request) {
         if (currentUserId == null) {
@@ -220,6 +253,20 @@ public class RaceServiceImpl implements RaceService {
                 && appDate(request.scheduledStartAt()).isBefore(java.time.LocalDate.now(APP_ZONE))) {
             throw new AppException(ErrorCode.DATE_IN_PAST);
         }
+        // Only when the caller actually moves the race — otherwise renaming a race that already sits
+        // on a window boundary would fail for a date the caller never touched.
+        if (request.scheduledStartAt() != null) {
+            validateWithinTournamentWindow(race.getTournament(), request.scheduledStartAt());
+        }
+
+        // Budget rules on the EFFECTIVE values. Checking the request alone would let an admin lower
+        // totalPurse without touching the tiers, leaving a race that pays out more than its purse.
+        BigDecimal effPurse = request.totalPurse() != null ? request.totalPurse() : race.getTotalPurse();
+        List<PrizeDistributionDto> effTiers = request.prizeDistribution() != null
+                ? request.prizeDistribution()
+                : mapPrizeDistribution(race.getPrizeDistribution());
+        validatePrizeDistribution(effPurse, effTiers);
+        validateTournamentBudget(race.getTournament(), effPurse, race.getRaceId());
 
         // FR-12: min must not exceed max on the EFFECTIVE (new-or-existing) values.
         Integer effMin = request.minParticipants() != null ? request.minParticipants() : race.getMinParticipants();
@@ -264,6 +311,11 @@ public class RaceServiceImpl implements RaceService {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
         Race race = loadRace(id);
+        // Money has already left the house for this race; hiding it would silently free its budget
+        // for re-allocation while the payouts stand.
+        if (prizeRepository.existsByRace_RaceId(id)) {
+            throw new AppException(ErrorCode.RACE_HAS_PAID_PRIZES);
+        }
         race.setDeleted(true);
         race.setDeletedAt(OffsetDateTime.now());
         raceRepository.save(race);
@@ -287,6 +339,13 @@ public class RaceServiceImpl implements RaceService {
         if (race.getScheduledStartAt() != null
                 && appDate(race.getScheduledStartAt()).isBefore(java.time.LocalDate.now(APP_ZONE))) {
             throw new AppException(ErrorCode.DATE_IN_PAST);
+        }
+        validateWithinTournamentWindow(race.getTournament(), race.getScheduledStartAt());
+        // Opening a race for betting commits its purse — a purse with no tiers pays nobody when the
+        // referee certifies, silently, while the UI advertises the full amount.
+        if (race.getTotalPurse() != null && race.getTotalPurse().signum() > 0
+                && (race.getPrizeDistribution() == null || race.getPrizeDistribution().isEmpty())) {
+            throw new AppException(ErrorCode.PRIZE_DISTRIBUTION_REQUIRED);
         }
         // predictionCutoffAt is optional — only overwrite when supplied so an omitted
         // value doesn't wipe a cutoff already set at create time.
@@ -382,6 +441,22 @@ public class RaceServiceImpl implements RaceService {
 
         race.setStatus(RaceStatus.CANCELLED);
         RaceResponse response = mapToResponse(raceRepository.save(race));
+
+        // Give every owner their entry fee back. Cancelling used to keep the money: the only
+        // "refund-all" on this path is the pari-mutuel BETTOR refund in the controller, which never
+        // touches entry fees.
+        //
+        // Driven off registrations, not race_entry: a registration can pay at submit and never be
+        // approved, so it has no entry row at all and iterating entries would strand its money.
+        // Inside this transaction on purpose — a race left CANCELLED with fees half-returned has no
+        // sweep job to finish the work, so a failed cancel the admin can retry is the better outcome.
+        registrationRepository.findUnrefundedPaidByRace(id)
+                .forEach(raceEntryGate::refundEntryFeeOnce);
+
+        // The race is off, so no rider is owed a wage: unlock every escrowed hire fee and let the
+        // owners spend (or withdraw) their money again. Same transaction, same reasoning as above.
+        jockeyFeeGate.releaseAllForRace(id);
+
         notifyRaceCancelled(race); // best-effort notify referee/owner/jockey (FR-07)
         return response;
     }
@@ -484,6 +559,11 @@ public class RaceServiceImpl implements RaceService {
 
         TournamentRegistration registration = registrationRepository.findById(request.registrationId())
                 .orElseThrow(() -> new AppException(ErrorCode.REGISTRATION_NOT_FOUND));
+        // Entering a horse DEBITS the registration owner's wallet, so only they (or staff acting on
+        // their behalf) may do it. Without this, any authenticated user could post an arbitrary
+        // registrationId and spend a stranger's money. Checked before the APPROVED test so a probe
+        // cannot learn which registration ids exist.
+        requireRegistrationOwnerOrStaff(currentUserId, registration);
         if (registration.getStatus() != RegistrationStatus.APPROVED) {
             throw new AppException(ErrorCode.REGISTRATION_NOT_APPROVED);
         }
@@ -501,8 +581,10 @@ public class RaceServiceImpl implements RaceService {
             throw new AppException(ErrorCode.RACE_FULL);
         }
 
-        // Eligibility (health + age) + entry-fee debit before the entry is created.
-        raceEntryGate.admit(registration, race);
+        // Eligibility re-runs here (a horse can be injured after registering); the charge is a
+        // no-op if the fee was already taken at submit.
+        raceEntryGate.checkEligibility(registration.getHorse(), race.getTournament());
+        raceEntryGate.chargeEntryFeeOnce(registration, race);
 
         RaceEntry entry = RaceEntry.builder()
                 .registration(registration)
@@ -548,13 +630,24 @@ public class RaceServiceImpl implements RaceService {
         }
         loadRace(raceId);
 
-        RaceEntry entry = raceEntryRepository.findByRaceIdAndOwnerUserId(raceId, ownerUserId)
+        // An owner may run several horses in one race, so this lookup returns a list. It used to be
+        // an Optional, which threw NonUniqueResultException as soon as that happened. The card shows
+        // the lowest lane; listEntries() is the endpoint for the full picture.
+        RaceEntry entry = raceEntryRepository.findAllByRaceIdAndOwnerUserId(raceId, ownerUserId)
+                .stream()
+                .min(java.util.Comparator.comparing(RaceEntry::getLaneNo,
+                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
                 .orElseThrow(() -> new AppException(ErrorCode.ENTRY_NOT_FOUND));
 
+        return toMyEntryResponse(entry);
+    }
+
+    /** Shared by getMyEntry and confirmParticipation so both report the same shape. */
+    private MyEntryResponse toMyEntryResponse(RaceEntry entry) {
         Horse horse = entry.getRegistration() != null ? entry.getRegistration().getHorse() : null;
         String jockeyName = jockeyAssignmentRepository.findAcceptedByEntryId(entry.getEntryId())
                 .map(JockeyAssignment::getJockey)
-                .map(u -> u.getFullName())
+                .map(User::getFullName)
                 .orElse(null);
 
         return MyEntryResponse.builder()
@@ -564,6 +657,42 @@ public class RaceServiceImpl implements RaceService {
                 .weightCarriedLbs(entry.getWeightCarriedLbs())
                 .entryStatus(entry.getStatus())
                 .build();
+    }
+
+    @Override
+    @Transactional
+    public MyEntryResponse confirmParticipation(UUID raceId, UUID entryId, UUID ownerUserId) {
+        if (ownerUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        Race race = loadRace(raceId);
+
+        // Keyed on a specific entry because an owner can run several horses in the same race —
+        // "confirm my entry" would be ambiguous. The owner id in the query is the IDOR guard: an
+        // entry belonging to someone else simply does not resolve.
+        RaceEntry entry = raceEntryRepository
+                .findByEntryIdAndRaceIdAndOwnerUserId(entryId, raceId, ownerUserId)
+                .orElseThrow(() -> new AppException(ErrorCode.ENTRY_NOT_FOUND));
+
+        // Confirming is only meaningful while the lineup can still change. Once the race is running
+        // or over, the entry status is a record of what happened and must not be rewritten.
+        if (race.getStatus() != RaceStatus.OPEN && race.getStatus() != RaceStatus.CLOSED
+                && race.getStatus() != RaceStatus.SCHEDULED) {
+            throw new AppException(ErrorCode.RACE_INVALID_STATUS);
+        }
+        if (entry.getStatus() == RaceEntryStatus.SCRATCHED
+                || entry.getStatus() == RaceEntryStatus.DISQUALIFIED) {
+            throw new AppException(ErrorCode.ENTRY_INVALID_STATUS);
+        }
+
+        // Idempotent: already confirmed → return the current state rather than erroring.
+        if (entry.getStatus() != RaceEntryStatus.CHECKED_IN) {
+            entry.setStatus(RaceEntryStatus.CHECKED_IN);
+            entry.setCheckedInAt(OffsetDateTime.now());
+            raceEntryRepository.save(entry);
+        }
+
+        return toMyEntryResponse(entry);
     }
 
     // ── helpers ──
@@ -608,6 +737,129 @@ public class RaceServiceImpl implements RaceService {
         if (predictionCutoffAt != null && appDate(predictionCutoffAt).isBefore(today)) {
             throw new AppException(ErrorCode.DATE_IN_PAST);
         }
+    }
+
+    /**
+     * A race must be held inside its tournament's calendar window, both ends inclusive.
+     *
+     * <p>Day granularity, not instants. {@code race} has no scheduled-end column, so "finishes
+     * before the tournament ends" is not directly representable for a race that has not run — but a
+     * flat race lasts a couple of minutes, so a race starting on the final day also finishes on it.
+     * Inclusive bounds are deliberate: six seeded races start exactly on their tournament's opening
+     * day, and an exclusive rule would make them uneditable.
+     */
+    private void validateWithinTournamentWindow(Tournament tournament, OffsetDateTime scheduledStartAt) {
+        if (tournament == null || scheduledStartAt == null) {
+            return;
+        }
+        java.time.LocalDate raceDay = appDate(scheduledStartAt);
+        if (tournament.getStartDate() != null && raceDay.isBefore(appDate(tournament.getStartDate()))) {
+            throw new AppException(ErrorCode.RACE_OUTSIDE_TOURNAMENT_WINDOW);
+        }
+        if (tournament.getEndDate() != null && raceDay.isAfter(appDate(tournament.getEndDate()))) {
+            throw new AppException(ErrorCode.RACE_OUTSIDE_TOURNAMENT_WINDOW);
+        }
+    }
+
+    /**
+     * The prize tiers must add up to exactly the race's purse, and each finish position may appear
+     * once.
+     *
+     * <p>Uniqueness is checked on the PARSED position, not the raw label: {@code parsePlace} maps
+     * both "1st" and "1" to 1, and the payout map is a {@code HashMap}, so two differently-spelled
+     * labels for the same position silently overwrote each other and one tier's money vanished.
+     */
+    private void validatePrizeDistribution(BigDecimal totalPurse, List<PrizeDistributionDto> tiers) {
+        if (tiers == null || tiers.isEmpty()) {
+            return; // a race may legitimately carry no prize money
+        }
+        Set<Integer> seen = new HashSet<>();
+        BigDecimal sum = BigDecimal.ZERO;
+        for (PrizeDistributionDto tier : tiers) {
+            Integer position = parsePlaceLabel(tier.place());
+            if (position == null || position <= 0) {
+                throw new AppException(ErrorCode.PRIZE_DISTRIBUTION_INVALID_PLACE);
+            }
+            if (!seen.add(position)) {
+                throw new AppException(ErrorCode.PRIZE_DISTRIBUTION_DUPLICATE_PLACE);
+            }
+            sum = sum.add(tier.amount() != null ? tier.amount() : BigDecimal.ZERO);
+        }
+        BigDecimal purse = totalPurse != null ? totalPurse : BigDecimal.ZERO;
+        if (sum.compareTo(purse) != 0) {
+            throw new AppException(ErrorCode.PRIZE_DISTRIBUTION_MISMATCH,
+                    "Tổng phân bổ " + sum.toPlainString() + " ≠ giải thưởng " + purse.toPlainString());
+        }
+    }
+
+    /** The tournament's purse is a hard ceiling on the sum of its races' purses. */
+    private void validateTournamentBudget(Tournament tournament, BigDecimal racePurse, UUID excludeRaceId) {
+        if (tournament == null || tournament.getTotalPurse() == null
+                || racePurse == null || racePurse.signum() <= 0) {
+            return; // no tournament budget set -> nothing to bust
+        }
+        BigDecimal allocatedElsewhere =
+                raceRepository.sumAllocatedPurse(tournament.getTournamentId(), excludeRaceId);
+        BigDecimal wouldBe = allocatedElsewhere.add(racePurse);
+        if (wouldBe.compareTo(tournament.getTotalPurse()) > 0) {
+            throw new AppException(ErrorCode.RACE_PURSE_EXCEEDS_TOURNAMENT,
+                    "Đã phân bổ " + allocatedElsewhere.toPlainString() + " + " + racePurse.toPlainString()
+                            + " > tổng giải " + tournament.getTotalPurse().toPlainString());
+        }
+    }
+
+    /** Mirrors {@code RaceResultServiceImpl.parsePlace} — "1st"/"1"/"10th" all yield the position. */
+    private static Integer parsePlaceLabel(String place) {
+        if (place == null) {
+            return null;
+        }
+        String digits = place.replaceAll("\\D", "");
+        if (digits.isEmpty()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(digits);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    /**
+     * The caller must be the registration's owner, or staff (ADMIN / RACE_REFEREE) acting for them.
+     * Staff are allowed because an admin legitimately places entries during scheduling.
+     */
+    private void requireRegistrationOwnerOrStaff(UUID callerId, TournamentRegistration registration) {
+        UUID ownerId = registration.getOwner() != null ? registration.getOwner().getUserId() : null;
+        if (callerId.equals(ownerId)) {
+            return;
+        }
+        String roleCode = userRepository.findByUserIdAndDeletedFalse(callerId)
+                .map(u -> u.getRole() != null ? u.getRole().getRoleCode() : null)
+                .orElse(null);
+        if (!"ADMIN".equals(roleCode) && !"RACE_REFEREE".equals(roleCode)) {
+            throw new AppException(ErrorCode.NOT_REGISTRATION_OWNER);
+        }
+    }
+
+    /** Remaining tournament budget shared across the existing races plus the one being created. */
+    private BigDecimal defaultEvenSplit(Tournament tournament) {
+        BigDecimal allocated = raceRepository.sumAllocatedPurse(tournament.getTournamentId(), null);
+        BigDecimal remaining = tournament.getTotalPurse().subtract(allocated).max(BigDecimal.ZERO);
+        long shares = raceRepository.countActiveByTournament(tournament.getTournamentId()) + 1;
+        return remaining.divide(BigDecimal.valueOf(shares), 2, RoundingMode.DOWN);
+    }
+
+    /**
+     * House standard 50/30/20, matching every hand-authored distribution in the seed. First place
+     * absorbs the rounding remainder so the tiers add up to the purse exactly, whatever the split.
+     */
+    private static List<PrizeDistributionDto> defaultTiers(BigDecimal purse) {
+        BigDecimal second = purse.multiply(new BigDecimal("0.30")).setScale(2, RoundingMode.DOWN);
+        BigDecimal third = purse.multiply(new BigDecimal("0.20")).setScale(2, RoundingMode.DOWN);
+        BigDecimal first = purse.subtract(second).subtract(third);
+        return List.of(new PrizeDistributionDto("1", first),
+                new PrizeDistributionDto("2", second),
+                new PrizeDistributionDto("3", third));
     }
 
     private static final java.time.ZoneId APP_ZONE = java.time.ZoneId.of("Asia/Ho_Chi_Minh");

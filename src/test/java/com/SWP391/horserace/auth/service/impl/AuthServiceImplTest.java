@@ -41,6 +41,7 @@ import static org.mockito.Mockito.when;
 class AuthServiceImplTest {
 
     @Mock UserRepository userRepository;
+    @Mock com.SWP391.horserace.users.service.UserCodeGenerator userCodeGenerator;
     @Mock RoleRepository roleRepository;
     @Mock PasswordEncoder passwordEncoder;
     @Mock JwtService jwtService;

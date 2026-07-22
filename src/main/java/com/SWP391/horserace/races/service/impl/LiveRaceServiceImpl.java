@@ -14,6 +14,10 @@ import com.SWP391.horserace.races.repository.RaceResultRepository;
 import com.SWP391.horserace.races.service.LiveRaceService;
 import com.SWP391.horserace.shared.exception.AppException;
 import com.SWP391.horserace.shared.exception.ErrorCode;
+import com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus;
+import com.SWP391.horserace.staffing.repository.RefereeAssignmentRepository;
+import com.SWP391.horserace.users.entity.User;
+import com.SWP391.horserace.users.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,10 +41,36 @@ public class LiveRaceServiceImpl implements LiveRaceService {
     private final RaceEntryRepository raceEntryRepository;
     private final JockeyAssignmentRepository jockeyAssignmentRepository;
 
+    private final RefereeAssignmentRepository refereeAssignmentRepository;
+    private final UserRepository userRepository;
+
     private final Map<UUID, Map<UUID, UpdateLivePositionRequest.RunnerTelemetry>> liveTelemetryCache = new ConcurrentHashMap<>();
 
+    /**
+     * Same guard as {@code EntryDocumentReviewServiceImpl}: role alone is not enough, the referee
+     * must be CONFIRMED on THIS race (IDOR). Without it any authenticated caller — including a
+     * spectator holding a bet — could rewrite the running order.
+     */
+    private void requireAdminOrConfirmedReferee(UUID callerId, UUID raceId) {
+        if (callerId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        User caller = userRepository.findByUserIdAndDeletedFalse(callerId)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+        boolean isAdmin = caller.getRole() != null && "ADMIN".equals(caller.getRole().getRoleCode());
+        if (isAdmin) {
+            return;
+        }
+        // Being assigned is enough (ASSIGNED or CONFIRMED); DECLINED/REVOKED do not qualify.
+        if (!refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                raceId, callerId, RefereeAssignmentStatus.OFFICIATING)) {
+            throw new AppException(ErrorCode.REFEREE_NOT_ASSIGNED);
+        }
+    }
+
     @Override
-    public void updateLivePositions(UUID raceId, UpdateLivePositionRequest request) {
+    public void updateLivePositions(UUID callerId, UUID raceId, UpdateLivePositionRequest request) {
+        requireAdminOrConfirmedReferee(callerId, raceId);
         Race race = raceRepository.findByRaceIdAndDeletedFalse(raceId)
                 .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
 

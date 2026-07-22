@@ -22,6 +22,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -36,6 +37,7 @@ class RaceEntryGateTest {
     @Mock WalletLedgerService walletLedgerService;
     @Mock WalletService walletService;
     @Mock HouseWalletService houseWalletService;
+    @Mock com.SWP391.horserace.registrations.repository.RegistrationRepository registrationRepository;
 
     @InjectMocks RaceEntryGate gate;
 
@@ -74,43 +76,119 @@ class RaceEntryGateTest {
         assertThatCode(() -> gate.checkEligibility(h, null)).doesNotThrowAnyException();
     }
 
-    @Test
-    void chargeEntryFee_debitsOwnerCreditsHouse() {
-        UUID houseId = UUID.randomUUID();
-        UUID ownerId = UUID.randomUUID();
-        User owner = User.builder().userId(ownerId).build();
-        Race race = raceWithFee(new BigDecimal("50000"));
-        when(houseWalletService.houseUserId()).thenReturn(houseId);
+    // ── money: charge / refund are exactly-once ──
 
-        gate.chargeEntryFee(regWith(owner), race);
+    private static final String REG_REF = "TOURNAMENT_REGISTRATION";
 
-        verify(walletService).getOrCreateWallet(ownerId);
-        verify(walletLedgerService).applyEntry(eq(houseId), eq(EntryType.CREDIT), eq(TxnCategory.ENTRY_FEE),
-                eq(new BigDecimal("50000")), eq("RACE"), eq(race.getRaceId()));
-        verify(walletLedgerService).applyEntry(eq(ownerId), eq(EntryType.DEBIT), eq(TxnCategory.ENTRY_FEE),
-                eq(new BigDecimal("50000")), eq("RACE"), eq(race.getRaceId()));
+    private TournamentRegistration paidReg(User owner, UUID regId, String amount) {
+        return TournamentRegistration.builder().registrationId(regId).owner(owner)
+                .entryFeeAmount(new BigDecimal(amount)).build();
     }
 
     @Test
-    void chargeEntryFee_noFee_noWalletCalls() {
+    void charge_claimWon_debitsOwnerCreditsHouse_taggedByRegistration() {
+        UUID houseId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        UUID regId = UUID.randomUUID();
+        User owner = User.builder().userId(ownerId).build();
+        Race race = raceWithFee(new BigDecimal("50000"));
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(regId).owner(owner).build();
+        when(registrationRepository.claimEntryFeeCharge(eq(regId), any(), any())).thenReturn(1);
+        when(houseWalletService.houseUserId()).thenReturn(houseId);
+
+        gate.chargeEntryFeeOnce(reg, race);
+
+        verify(walletService).getOrCreateWallet(ownerId);
+        // Tagged by REGISTRATION, not race — a race tag cannot say which registration paid.
+        verify(walletLedgerService).applyEntry(eq(houseId), eq(EntryType.CREDIT), eq(TxnCategory.ENTRY_FEE),
+                eq(new BigDecimal("50000")), eq(REG_REF), eq(regId));
+        verify(walletLedgerService).applyEntry(eq(ownerId), eq(EntryType.DEBIT), eq(TxnCategory.ENTRY_FEE),
+                eq(new BigDecimal("50000")), eq(REG_REF), eq(regId));
+        // The in-memory entity must reflect the charge — the caller maps it to a response next.
+        assertThat(reg.getEntryFeePaidAt()).isNotNull();
+        assertThat(reg.getEntryFeeAmount()).isEqualByComparingTo("50000");
+    }
+
+    /** THE double-charge test: someone already paid, so not a single ledger row may be written. */
+    @Test
+    void charge_claimLost_movesNoMoney() {
+        UUID regId = UUID.randomUUID();
         User owner = User.builder().userId(UUID.randomUUID()).build();
-        gate.chargeEntryFee(regWith(owner), raceWithFee(null));
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(regId).owner(owner).build();
+        when(registrationRepository.claimEntryFeeCharge(eq(regId), any(), any())).thenReturn(0);
+
+        gate.chargeEntryFeeOnce(reg, raceWithFee(new BigDecimal("50000")));
+
         verify(walletLedgerService, never()).applyEntry(any(), any(), any(), any(), any(), any());
     }
 
     @Test
-    void refundEntryFee_reversesToOwner() {
+    void charge_noFee_neverEvenClaims() {
+        User owner = User.builder().userId(UUID.randomUUID()).build();
+        gate.chargeEntryFeeOnce(regWith(owner), raceWithFee(null));
+        verify(registrationRepository, never()).claimEntryFeeCharge(any(), any(), any());
+        verify(walletLedgerService, never()).applyEntry(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void refund_claimWon_reversesToOwner() {
         UUID houseId = UUID.randomUUID();
         UUID ownerId = UUID.randomUUID();
+        UUID regId = UUID.randomUUID();
         User owner = User.builder().userId(ownerId).build();
-        Race race = raceWithFee(new BigDecimal("50000"));
+        TournamentRegistration reg = paidReg(owner, regId, "50000");
+        when(registrationRepository.claimEntryFeeRefund(eq(regId), any())).thenReturn(1);
         when(houseWalletService.houseUserId()).thenReturn(houseId);
 
-        gate.refundEntryFee(regWith(owner), race);
+        gate.refundEntryFeeOnce(reg);
 
         verify(walletLedgerService).applyEntry(eq(houseId), eq(EntryType.DEBIT), eq(TxnCategory.REFUND),
-                eq(new BigDecimal("50000")), eq("RACE"), eq(race.getRaceId()));
+                eq(new BigDecimal("50000")), eq(REG_REF), eq(regId));
         verify(walletLedgerService).applyEntry(eq(ownerId), eq(EntryType.CREDIT), eq(TxnCategory.REFUND),
-                eq(new BigDecimal("50000")), eq("RACE"), eq(race.getRaceId()));
+                eq(new BigDecimal("50000")), eq(REG_REF), eq(regId));
+        assertThat(reg.getEntryFeeRefundedAt()).isNotNull();
+    }
+
+    @Test
+    void refund_alreadyRefundedOrNeverPaid_movesNoMoney() {
+        UUID regId = UUID.randomUUID();
+        User owner = User.builder().userId(UUID.randomUUID()).build();
+        when(registrationRepository.claimEntryFeeRefund(eq(regId), any())).thenReturn(0);
+
+        gate.refundEntryFeeOnce(paidReg(owner, regId, "50000"));
+
+        verify(walletLedgerService, never()).applyEntry(any(), any(), any(), any(), any(), any());
+    }
+
+    /** Never charged -> nothing to give back, and no claim is even attempted. */
+    @Test
+    void refund_registrationThatNeverPaid_movesNoMoney() {
+        User owner = User.builder().userId(UUID.randomUUID()).build();
+        gate.refundEntryFeeOnce(regWith(owner));   // entryFeeAmount is null
+        verify(registrationRepository, never()).claimEntryFeeRefund(any(), any());
+        verify(walletLedgerService, never()).applyEntry(any(), any(), any(), any(), any(), any());
+    }
+
+    /**
+     * Refund the amount CHARGED, not the race's current fee. An admin editing the fee between
+     * charge and refund would otherwise unbalance the ENTRY_FEE/REFUND ledger permanently.
+     */
+    @Test
+    void refund_usesAmountCharged_notTheRacesCurrentFee() {
+        UUID houseId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        UUID regId = UUID.randomUUID();
+        User owner = User.builder().userId(ownerId).build();
+        TournamentRegistration reg = paidReg(owner, regId, "50000");   // paid 50,000
+        reg.setRace(raceWithFee(new BigDecimal("90000")));             // fee later raised to 90,000
+        when(registrationRepository.claimEntryFeeRefund(eq(regId), any())).thenReturn(1);
+        when(houseWalletService.houseUserId()).thenReturn(houseId);
+
+        gate.refundEntryFeeOnce(reg);
+
+        verify(walletLedgerService).applyEntry(eq(ownerId), eq(EntryType.CREDIT), eq(TxnCategory.REFUND),
+                eq(new BigDecimal("50000")), eq(REG_REF), eq(regId));
     }
 }

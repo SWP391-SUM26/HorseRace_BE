@@ -26,10 +26,16 @@ public class JockeyStatsResponse {
     private double top3Rate;
     /** Average finish position, rounded to 1 decimal (0 when no rides). */
     private double avgPlacement;
-    /** Career win tally from {@code jockey_profile.win_count}. */
+    /** Career win tally, computed from official results (not the never-written win_count column). */
     private int careerWins;
-    /** Sum of prize earned over the caller's rides (no season dimension yet — equals careerEarnings). */
+    /** The jockey's OWN take (no season dimension yet — equals careerEarnings). */
     private BigDecimal seasonEarnings;
-    /** Sum of prize earned over the caller's rides. */
+    /** The jockey's OWN take: sum of prize rows credited to them, i.e. what reached their wallet. */
     private BigDecimal careerEarnings;
+    /**
+     * Total prize won by the HORSES this jockey rode. Shown next to {@code careerEarnings} so the
+     * agreed share is legible instead of looking like a missing payment — these two were previously
+     * conflated, and the horse's figure was reported as the rider's income.
+     */
+    private BigDecimal horseEarnings;
 }

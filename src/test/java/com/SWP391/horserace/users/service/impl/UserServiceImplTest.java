@@ -37,6 +37,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.SWP391.horserace.users.repository.UserRepository;
+import com.SWP391.horserace.users.service.UserCodeGenerator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -60,6 +61,8 @@ class UserServiceImplTest {
     PasswordEncoder passwordEncoder;
     @Mock
     EmailService emailService;
+    @Mock
+    UserCodeGenerator userCodeGenerator;
 
     private UserServiceImpl service;
 
@@ -69,6 +72,7 @@ class UserServiceImplTest {
         // a real
         // instance over a mocked FileStorageService — not exercised by these tests.
         service = new UserServiceImpl(userRepository,
+                userCodeGenerator,
                 new ImageUploadService(Mockito.mock(FileStorageService.class)),
                 permissionRepository,
                 roleRepository,

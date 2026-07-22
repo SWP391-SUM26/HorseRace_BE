@@ -7,7 +7,9 @@ import com.SWP391.horserace.owner.service.OwnerService;
 import com.SWP391.horserace.shared.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -64,6 +66,22 @@ public class OwnerController {
                 .success(true)
                 .message("Fetched owner race report")
                 .data(ownerService.getRaceReport(userId))
+                .build();
+    }
+
+    /**
+     * GET /api/v1/owner/finances — earnings, expenses and recent ledger for the caller.
+     * Always scoped to the authenticated owner; there is no way to ask for someone else's books.
+     */
+    @GetMapping("/finances")
+    @PreAuthorize("hasRole('HORSE_OWNER')")
+    public ApiResponse<com.SWP391.horserace.owner.dto.OwnerFinanceResponse> getFinances(
+            @AuthenticationPrincipal UUID userId,
+            @RequestParam(value = "txnLimit", defaultValue = "20") int txnLimit) {
+        return ApiResponse.<com.SWP391.horserace.owner.dto.OwnerFinanceResponse>builder()
+                .success(true)
+                .message("Fetched owner finances")
+                .data(ownerService.getFinances(userId, txnLimit))
                 .build();
     }
 }

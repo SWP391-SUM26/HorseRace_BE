@@ -55,7 +55,7 @@ public class RaceResult {
     @Builder.Default
     private Integer currentVersionNo = 1;
 
-    /** PROVISIONAL | UNDER_REVIEW | OFFICIAL | AMENDED */
+    /** PROVISIONAL | OFFICIAL | AMENDED */
     @Enumerated(EnumType.STRING)
     @Column(name = "officiality_status", nullable = false, length = 50)
     @Builder.Default

@@ -28,6 +28,9 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
 
     boolean existsByEmail(String email);
 
+    /** user_code uniqueness guard — backs the sequential USRnnnn generator. */
+    boolean existsByUserCode(String userCode);
+
     /** Phone uniqueness guard on create (mirrors the DB UNIQUE on app_user.phone). */
     boolean existsByPhone(String phone);
 
@@ -39,6 +42,9 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
 
     /** Count non-deleted users with a given role code and status — powers the last-admin guard. */
     long countByRole_RoleCodeAndStatusAndDeletedFalse(String roleCode, UserStatus status);
+
+    /** Non-deleted users holding a role — powers the "N users" count on the permission matrix. */
+    long countByRole_RoleCodeAndDeletedFalse(String roleCode);
 
     /** Total non soft-deleted users (powers the Total Users KPI). */
     long countByDeletedFalse();
