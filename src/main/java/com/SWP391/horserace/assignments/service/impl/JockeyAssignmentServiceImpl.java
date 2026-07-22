@@ -11,6 +11,8 @@ import com.SWP391.horserace.assignments.service.JockeyAssignmentService;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.jockeys.entity.JockeyProfile;
 import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
+import com.SWP391.horserace.prizes.entity.Prize;
+import com.SWP391.horserace.prizes.repository.PrizeRepository;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
 import com.SWP391.horserace.races.entity.RaceResult;
@@ -33,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -43,11 +46,18 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
 
+
     private final JockeyAssignmentRepository assignmentRepository;
     private final RaceEntryRepository raceEntryRepository;
     private final JockeyProfileRepository jockeyProfileRepository;
     private final UserRepository userRepository;
     private final RaceResultRepository raceResultRepository;
+    private final PrizeRepository prizeRepository;
+    private final com.SWP391.horserace.assignments.service.JockeyFeeGate jockeyFeeGate;
+
+    /** House default when neither the invitation nor the jockey's profile names a share. */
+    private static final BigDecimal DEFAULT_JOCKEY_PRIZE_PCT = new BigDecimal("10");
+    private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
     private final com.SWP391.horserace.notifications.service.NotificationService notificationService;
 
     // -------------------------------------------------------------------------
@@ -100,6 +110,18 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
             assignment.setInvitedAt(OffsetDateTime.now());
             assignment.setRespondedAt(null);
             assignment.setAssignedBy(assignedByUser);
+            // MUST overwrite: this row may carry terms agreed with a DIFFERENT jockey from the
+            // cancelled invitation it is reusing. Leaving them would pay the new rider the old
+            // rider's percentage.
+            assignment.setAgreedPrizePercent(resolveAgreedPercent(request, jockeyProfile));
+            assignment.setAgreedBaseFee(resolveAgreedFee(request, jockeyProfile));
+            // Same reason the agreed terms are overwritten: this row's escrow stamps belong to the
+            // PREVIOUS hire, which was released when it was cancelled. Leaving fee_held_at set would
+            // make claimFeeHold refuse the new hold, and the new rider would ride for free.
+            assignment.setFeeHeldAmount(null);
+            assignment.setFeeHeldAt(null);
+            assignment.setFeeReleasedAt(null);
+            assignment.setFeePaidAt(null);
         } else {
             assignment = JockeyAssignment.builder()
                     .entry(entry)
@@ -107,10 +129,17 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
                     .status(JockeyAssignmentStatus.INVITED)
                     .invitedAt(OffsetDateTime.now())
                     .assignedBy(assignedByUser)
+                    .agreedPrizePercent(resolveAgreedPercent(request, jockeyProfile))
+                    .agreedBaseFee(resolveAgreedFee(request, jockeyProfile))
                     .build();
         }
 
         assignment = assignmentRepository.save(assignment);
+
+        // Lock the agreed fee out of the owner's spendable balance. Throws INSUFFICIENT_BALANCE if
+        // they cannot cover it, which rolls the invitation back with it — an owner who cannot pay
+        // must not be able to promise a ride.
+        jockeyFeeGate.holdFeeOnce(assignment, entry.getRegistration().getOwner());
 
         return mapToResponse(assignment);
     }
@@ -234,6 +263,8 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         assignment.setStatus(JockeyAssignmentStatus.DECLINED);
         assignment.setRespondedAt(OffsetDateTime.now());
         assignment = assignmentRepository.save(assignment);
+        // Nobody is riding, so the owner gets their money back to spend.
+        jockeyFeeGate.releaseFeeOnce(assignment);
 
         return mapToResponse(assignment);
     }
@@ -264,6 +295,7 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         assignment.setStatus(JockeyAssignmentStatus.CANCELLED);
         assignment.setRespondedAt(OffsetDateTime.now());
         assignmentRepository.save(assignment);
+        jockeyFeeGate.releaseFeeOnce(assignment);
     }
 
     // -------------------------------------------------------------------------
@@ -300,6 +332,7 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         assignment.setStatus(JockeyAssignmentStatus.CANCELLED);
         assignment.setRespondedAt(OffsetDateTime.now());
         assignment = assignmentRepository.save(assignment);
+        jockeyFeeGate.releaseFeeOnce(assignment);
 
         return mapToResponse(assignment);
     }
@@ -328,10 +361,61 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
                 : raceResultRepository.findByEntry_EntryIdIn(entryIds).stream()
                     .collect(Collectors.toMap(rr -> rr.getEntry().getEntryId(), Function.identity(), (a, b) -> a));
 
+        // The rider's own cut per ride, batched into one query rather than one per row.
+        Map<UUID, BigDecimal> jockeyCutByEntry = loadJockeyCuts(rides);
+
         return rides.stream()
                 .filter(ja -> isPastRide(ja.getEntry().getRace(), now) == past)
-                .map(ja -> mapToRide(ja, resultByEntry.get(ja.getEntry().getEntryId())))
+                .map(ja -> mapToRide(ja, resultByEntry.get(ja.getEntry().getEntryId()),
+                        jockeyCutByEntry.get(ja.getEntry().getEntryId())))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * The share for this invitation: what the owner offered, else the jockey's advertised rate,
+     * else the house default. Range is enforced here too, not only by Bean Validation, so a direct
+     * service call cannot store a percentage that would drive the owner's cut negative.
+     */
+    private BigDecimal resolveAgreedPercent(SendInvitationRequest request, JockeyProfile profile) {
+        BigDecimal pct = request.getAgreedPrizePercent() != null
+                ? request.getAgreedPrizePercent()
+                : profile.getPrizePercent();
+        if (pct == null) {
+            return DEFAULT_JOCKEY_PRIZE_PCT;
+        }
+        if (pct.signum() < 0 || pct.compareTo(ONE_HUNDRED) > 0) {
+            throw new AppException(ErrorCode.JOCKEY_SHARE_INVALID);
+        }
+        return pct;
+    }
+
+    private BigDecimal resolveAgreedFee(SendInvitationRequest request, JockeyProfile profile) {
+        return request.getAgreedBaseFee() != null ? request.getAgreedBaseFee() : profile.getBaseFee();
+    }
+
+    /**
+     * Map entryId -> the JOCKEY-beneficiary prize actually credited for that entry.
+     *
+     * Keyed off the {@code PRZ-J-<entryId>} prize code that {@code creditPrizes} writes. Reporting
+     * {@code entry.prizeEarned} here instead labelled the horse's entire prize as the rider's
+     * earnings, on every ride.
+     */
+    private Map<UUID, BigDecimal> loadJockeyCuts(List<JockeyAssignment> rides) {
+        Map<String, UUID> entryIdByCode = rides.stream()
+                .map(ja -> ja.getEntry().getEntryId())
+                .distinct()
+                .collect(Collectors.toMap(id -> "PRZ-J-" + id, Function.identity()));
+        if (entryIdByCode.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, BigDecimal> byEntry = new HashMap<>();
+        for (Prize p : prizeRepository.findByPrizeCodeIn(entryIdByCode.keySet())) {
+            UUID entryId = entryIdByCode.get(p.getPrizeCode());
+            if (entryId != null) {
+                byEntry.put(entryId, p.getPrizeAmount());
+            }
+        }
+        return byEntry;
     }
 
     /**
@@ -347,7 +431,8 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
         return start != null && start.isBefore(now);
     }
 
-    private JockeyRideResponse mapToRide(JockeyAssignment assignment, RaceResult result) {
+    private JockeyRideResponse mapToRide(JockeyAssignment assignment, RaceResult result,
+                                         BigDecimal jockeyCut) {
         RaceEntry entry = assignment.getEntry();
         Race race = entry.getRace();
         Horse horse = entry.getRegistration().getHorse();
@@ -358,7 +443,10 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
                 .date(race.getScheduledStartAt())
                 .horseName(horse.getName())
                 .finishPosition(result != null ? result.getFinishPosition() : null)
-                .earnings(entry.getPrizeEarned())
+                // Nothing credited yet (race not certified) reads as zero, not as the horse's purse.
+                .earnings(jockeyCut != null ? jockeyCut : BigDecimal.ZERO)
+                .horsePrize(entry.getPrizeEarned())
+                .agreedPrizePercent(assignment.getAgreedPrizePercent())
                 .build();
     }
 
@@ -405,15 +493,29 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
 
         // -- prize / share (FE-v2 jockey contract #5) --
         BigDecimal racePurse = race.getTotalPurse();
-        BigDecimal sharePercent = jockeyProfileRepository.findById(jockey.getUserId())
-                .map(JockeyProfile::getPrizePercent)
-                .orElse(null);
+        // The terms agreed on THIS invitation take precedence; the profile rate is only the asking
+        // price used to prefill them, and it can change after the fact.
+        BigDecimal sharePercent = assignment.getAgreedPrizePercent();
+        if (sharePercent == null) {
+            sharePercent = jockeyProfileRepository.findById(jockey.getUserId())
+                    .map(JockeyProfile::getPrizePercent)
+                    .orElse(null);
+        }
         if (sharePercent == null) {
             sharePercent = BigDecimal.ZERO;
         }
-        BigDecimal estimatedShare = (racePurse == null)
+        // Estimated against the WINNER's tier, not the whole purse: the rider gets a cut of what
+        // their horse wins, and only the first-place tier if it wins. Quoting a share of the entire
+        // purse advertised a number no single ride could ever pay.
+        BigDecimal winnerTier = race.getPrizeDistribution() == null ? null
+                : race.getPrizeDistribution().stream()
+                        .filter(i -> "1".equals(i.getPlace().replaceAll("\\D", "")))
+                        .map(com.SWP391.horserace.races.entity.PrizeDistributionItem::getAmount)
+                        .findFirst().orElse(null);
+        BigDecimal shareBasis = winnerTier != null ? winnerTier : racePurse;
+        BigDecimal estimatedShare = (shareBasis == null)
                 ? BigDecimal.ZERO
-                : racePurse.multiply(sharePercent).divide(BigDecimal.valueOf(100));
+                : shareBasis.multiply(sharePercent).divide(BigDecimal.valueOf(100));
 
         return InvitationResponse.builder()
                 // assignment

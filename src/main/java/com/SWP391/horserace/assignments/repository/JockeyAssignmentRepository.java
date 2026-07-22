@@ -6,6 +6,7 @@ import com.SWP391.horserace.races.entity.RaceEntry;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -306,4 +307,49 @@ public interface JockeyAssignmentRepository extends JpaRepository<JockeyAssignme
            AND ja.entry.race.scheduledStartAt = :startAt
         """)
     List<UUID> findJockeyIdsAcceptedAtTime(@Param("raceId") UUID raceId, @Param("startAt") OffsetDateTime startAt);
+
+    // ----- Jockey hire fee escrow: atomic exactly-once claims -----
+    // Each returns the number of rows it won. 0 means another path got there first, so the caller
+    // must return WITHOUT touching the wallet — the same shape as the entry-fee claims that made
+    // double-charging impossible on registrations.
+
+    /** Claim the right to lock the owner's money for this hire. 0 when a hold already exists. */
+    @Modifying(clearAutomatically = false, flushAutomatically = true)
+    @Query("""
+        UPDATE JockeyAssignment ja
+           SET ja.feeHeldAmount = :fee, ja.feeHeldAt = :now
+         WHERE ja.assignmentId = :assignmentId
+           AND ja.feeHeldAt IS NULL
+        """)
+    int claimFeeHold(@Param("assignmentId") UUID assignmentId,
+                     @Param("fee") java.math.BigDecimal fee,
+                     @Param("now") OffsetDateTime now);
+
+    /** Claim the right to give the hold back. 0 when nothing was held, or it already settled. */
+    @Modifying(clearAutomatically = false, flushAutomatically = true)
+    @Query("""
+        UPDATE JockeyAssignment ja
+           SET ja.feeReleasedAt = :now
+         WHERE ja.assignmentId = :assignmentId
+           AND ja.feeHeldAt IS NOT NULL
+           AND ja.feeReleasedAt IS NULL
+           AND ja.feePaidAt IS NULL
+        """)
+    int claimFeeRelease(@Param("assignmentId") UUID assignmentId, @Param("now") OffsetDateTime now);
+
+    /** Claim the right to pay the jockey. 0 when nothing was held, or it already settled. */
+    @Modifying(clearAutomatically = false, flushAutomatically = true)
+    @Query("""
+        UPDATE JockeyAssignment ja
+           SET ja.feePaidAt = :now
+         WHERE ja.assignmentId = :assignmentId
+           AND ja.feeHeldAt IS NOT NULL
+           AND ja.feeReleasedAt IS NULL
+           AND ja.feePaidAt IS NULL
+        """)
+    int claimFeePayout(@Param("assignmentId") UUID assignmentId, @Param("now") OffsetDateTime now);
+
+    /** Every hire on a race, so cancelling the race can unlock all of them. */
+    @Query("SELECT ja FROM JockeyAssignment ja WHERE ja.entry.race.raceId = :raceId")
+    List<JockeyAssignment> findByRaceId(@Param("raceId") UUID raceId);
 }

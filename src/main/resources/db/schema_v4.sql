@@ -146,8 +146,10 @@ CREATE TABLE jockey_profile (
     riding_style   VARCHAR(50),                                                          -- e.g. Stalker / Closer
     win_rate       NUMERIC(5,2) CHECK (win_rate IS NULL OR (win_rate BETWEEN 0 AND 100)),-- win % e.g. 62.50
     recent_form    VARCHAR(50),                                                          -- comma-joined form, e.g. "W,L,W,W,L"
-    base_fee       NUMERIC(18,2),                                                        -- hire fee
-    prize_percent  NUMERIC(5,2),                                                         -- % of prize taken
+    -- Giá CHÀO của nài (prefill lúc mời). Điều khoản thật nằm ở jockey_assignment.
+    -- Không có CHECK thì prize_percent = 150 sẽ khiến phần chủ ngựa ÂM và bị nuốt im lặng.
+    base_fee       NUMERIC(18,2) CHECK (base_fee IS NULL OR base_fee >= 0),               -- hire fee
+    prize_percent  NUMERIC(5,2) CHECK (prize_percent IS NULL OR prize_percent BETWEEN 0 AND 100),
     last_trophy    VARCHAR(255),                                                         -- most recent trophy
     -- Self-registration (Jockey Registration form) fields — thu lúc đăng ký, referee duyệt
     age                      INT CHECK (age IS NULL OR age >= 16),
@@ -408,7 +410,7 @@ CREATE TABLE race (
 CREATE TABLE race_prize_distribution (
     race_id  UUID NOT NULL REFERENCES race(race_id),
     place    VARCHAR(20) NOT NULL,
-    amount   NUMERIC(18,2) NOT NULL
+    amount   NUMERIC(18,2) NOT NULL CHECK (amount > 0)
 );
 
 -- Split (fraction) times per race — FE-v2 Results (mục 5). @ElementCollection child of race.
@@ -438,6 +440,13 @@ CREATE TABLE tournament_registration (
     rejection_reason    TEXT,
     legal_basis_ref     VARCHAR(255),
     category            VARCHAR(50),                            -- FE-v2 Registration Management (mục 8): category filter
+    -- Phí tham gia: trạng thái ba bậc chưa trả -> đã trả -> đã hoàn.
+    -- entry_fee_amount ĐÓNG BĂNG số tiền đã thu: nếu hoàn theo race.entry_fee hiện tại thì admin sửa
+    -- phí giữa chừng sẽ làm sổ cái lệch vĩnh viễn. Hai mốc thời gian là cơ chế chốt chống trừ/hoàn
+    -- hai lần (UPDATE ... WHERE ... IS NULL), cùng kiểu với mark_settled_if_not_settled.
+    entry_fee_amount      NUMERIC(18,2) CHECK (entry_fee_amount IS NULL OR entry_fee_amount >= 0),
+    entry_fee_paid_at     TIMESTAMPTZ,
+    entry_fee_refunded_at TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tournament_id, horse_id)   -- 1 ngựa đăng ký 1 giải chỉ 1 lần
@@ -515,6 +524,22 @@ CREATE TABLE jockey_assignment (
                         CHECK (status IN ('INVITED', 'ACCEPTED', 'DECLINED', 'CANCELLED')),
     invited_at          TIMESTAMPTZ,
     responded_at        TIMESTAMPTZ,
+    -- Điều khoản THOẢ THUẬN cho chính lời mời này, chốt lúc mời và bất biến sau khi nài đồng ý.
+    -- Không dùng jockey_profile.prize_percent lúc chia thưởng: đó là GIÁ CHÀO, nài sửa được bất cứ
+    -- lúc nào, kể cả sau khi đua xong — chia theo nó là trả sai so với thứ hai bên đã đồng ý.
+    agreed_prize_percent NUMERIC(5,2)
+                        CHECK (agreed_prize_percent IS NULL OR agreed_prize_percent BETWEEN 0 AND 100),
+    agreed_base_fee     NUMERIC(18,2) CHECK (agreed_base_fee IS NULL OR agreed_base_fee >= 0),
+    -- KÝ QUỸ tiền thuê nài. Chủ ngựa phải đủ số dư mới mời được; số tiền bị KHOÁ ngay lúc mời
+    -- (wallet.balance -> wallet.locked_balance) nên không rút ra được nữa, và chỉ thực sự sang ví
+    -- nài khi cuộc đua chạy xong (lúc chốt kết quả). Nài từ chối / chủ huỷ / nài rút / huỷ đua thì
+    -- mở khoá trả lại. Ba mốc thời gian là CLAIM nguyên tử (UPDATE ... WHERE ... IS NULL), cùng
+    -- kiểu entry_fee_paid_at, để một lần giữ không thể bị trả hai lần hoặc vừa trả vừa hoàn.
+    fee_held_amount     NUMERIC(18,2) CHECK (fee_held_amount IS NULL OR fee_held_amount >= 0),
+    fee_held_at         TIMESTAMPTZ,
+    fee_released_at     TIMESTAMPTZ,
+    fee_paid_at         TIMESTAMPTZ,
+    CHECK (fee_released_at IS NULL OR fee_paid_at IS NULL),   -- không thể vừa hoàn vừa trả
     assigned_by_user_id UUID REFERENCES app_user(user_id),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -570,7 +595,7 @@ CREATE TABLE race_result (
     score               NUMERIC(10,2),
     current_version_no  INT NOT NULL DEFAULT 1 CHECK (current_version_no > 0),
     officiality_status  VARCHAR(50) NOT NULL DEFAULT 'PROVISIONAL'
-                        CHECK (officiality_status IN ('PROVISIONAL', 'UNDER_REVIEW', 'OFFICIAL', 'AMENDED')),
+                        CHECK (officiality_status IN ('PROVISIONAL', 'OFFICIAL', 'AMENDED')),
     approved_by_user_id UUID REFERENCES app_user(user_id),
     published_at        TIMESTAMPTZ,
     referee_submitted_at TIMESTAMPTZ,  -- CN3: set once when the referee publishes the report (one-time lock)
@@ -727,7 +752,8 @@ CREATE TABLE wallet_transaction (
     entry_type          VARCHAR(20) NOT NULL CHECK (entry_type IN ('DEBIT', 'CREDIT')),
     txn_category        VARCHAR(50)
                         CHECK (txn_category IN ('DEPOSIT', 'WITHDRAWAL', 'BET_STAKE',
-                                                'BET_PAYOUT', 'PRIZE', 'REFUND', 'ADJUSTMENT', 'REWARD', 'ENTRY_FEE')),
+                                                'BET_PAYOUT', 'PRIZE', 'REFUND', 'ADJUSTMENT', 'REWARD', 'ENTRY_FEE', 'SPONSOR',
+                                                'JOCKEY_FEE')),
     amount              NUMERIC(18,2) NOT NULL CHECK (amount >= 0),
     balance_after       NUMERIC(18,2) NOT NULL CHECK (balance_after >= 0),
     related_entity_type VARCHAR(50),
@@ -806,6 +832,10 @@ CREATE TABLE prize (
     prize_code        VARCHAR(50) UNIQUE NOT NULL,
     beneficiary_type  VARCHAR(50)
                       CHECK (beneficiary_type IN ('OWNER', 'JOCKEY', 'HORSE', 'TEAM')),
+    -- AI được trả. Trước đây prize chỉ ghi *loại* người thụ hưởng, nên số tiền một nài thực nhận
+    -- không truy ngược được và mọi màn hình đành hiển thị tiền của CON NGỰA thay cho phần của nài.
+    beneficiary_user_id UUID REFERENCES app_user(user_id),
+    paid_at           TIMESTAMPTZ,
     rank_position     INT CHECK (rank_position IS NULL OR rank_position > 0),
     prize_amount      NUMERIC(18,2) NOT NULL CHECK (prize_amount >= 0),
     currency_code     VARCHAR(10) NOT NULL DEFAULT 'VND',
@@ -816,6 +846,7 @@ CREATE TABLE prize (
     -- prize phải gắn với giải HOẶC cuộc đua (không treo lơ lửng)
     CHECK (tournament_id IS NOT NULL OR race_id IS NOT NULL)
 );
+CREATE INDEX idx_prize_beneficiary ON prize(beneficiary_user_id, beneficiary_type);
 
 -- =========================================================
 -- ATTACHMENT  (tài liệu: hồ sơ ngựa, ảnh, biên bản...)

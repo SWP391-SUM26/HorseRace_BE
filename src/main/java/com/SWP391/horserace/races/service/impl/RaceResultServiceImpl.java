@@ -1,6 +1,7 @@
 package com.SWP391.horserace.races.service.impl;
 
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
+import com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.jockeys.entity.JockeyProfile;
@@ -46,8 +47,10 @@ import com.SWP391.horserace.violations.dto.ViolationDetailResponse;
 import com.SWP391.horserace.wallets.entity.EntryType;
 import com.SWP391.horserace.wallets.entity.TxnCategory;
 import com.SWP391.horserace.wallets.service.WalletLedgerService;
+import com.SWP391.horserace.wallets.service.HouseWalletService;
 import com.SWP391.horserace.wallets.service.WalletService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -65,6 +68,7 @@ import java.util.Set;
 import java.util.UUID;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class RaceResultServiceImpl implements RaceResultService {
 
@@ -84,6 +88,8 @@ public class RaceResultServiceImpl implements RaceResultService {
     private final com.SWP391.horserace.staffing.repository.RefereeAssignmentRepository refereeAssignmentRepository;
     private final WalletLedgerService walletLedgerService;
     private final WalletService walletService;
+    private final HouseWalletService houseWalletService;
+    private final com.SWP391.horserace.assignments.service.JockeyFeeGate jockeyFeeGate;
 
     private static final String ADMIN_ROLE_CODE = "ADMIN";
     /** Default jockey cut of a horse's prize when the jockey profile has no prizePercent set. */
@@ -235,48 +241,6 @@ public class RaceResultServiceImpl implements RaceResultService {
                 .build();
     }
 
-    @Override
-    @Transactional
-    public void flagUnderReview(UUID currentUserId, UUID raceId, UUID resultId) {
-        if (currentUserId == null) {
-            throw new AppException(ErrorCode.UNAUTHENTICATED);
-        }
-
-        Race race = raceRepository.findByRaceIdAndDeletedFalse(raceId)
-                .orElseThrow(() -> new AppException(ErrorCode.RACE_NOT_FOUND));
-
-        RaceResult result = raceResultRepository.findById(resultId)
-                .orElseThrow(() -> new AppException(ErrorCode.RESULT_NOT_FOUND));
-
-        if (result.getRace() == null || !race.getRaceId().equals(result.getRace().getRaceId())) {
-            throw new AppException(ErrorCode.RESULT_ENTRY_RACE_MISMATCH);
-        }
-
-        // A certified (OFFICIAL) result is immutable — it cannot be re-opened for review (RT-MEDIUM-1).
-        if (result.getOfficialityStatus() == OfficialityStatus.OFFICIAL) {
-            throw new AppException(ErrorCode.RESULT_ALREADY_OFFICIAL);
-        }
-
-        User reviewer = userRepository.findByUserIdAndDeletedFalse(currentUserId)
-                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
-
-        // Audit who raised the inquiry (FR-21) — snapshot the prior state before flipping.
-        RaceResultVersion version = RaceResultVersion.builder()
-                .result(result)
-                .versionNo(result.getCurrentVersionNo())
-                .finishPosition(result.getFinishPosition())
-                .finishTimeMs(result.getFinishTimeMs())
-                .score(result.getScore())
-                .officialityStatus(result.getOfficialityStatus() != null ? result.getOfficialityStatus().name() : null)
-                .changedBy(reviewer)
-                .changeReason("Flagged under review")
-                .build();
-        raceResultVersionRepository.save(version);
-
-        result.setOfficialityStatus(OfficialityStatus.UNDER_REVIEW);
-        raceResultRepository.save(result);
-    }
-
     /** Upsert the finish order (one race_result per entry, status PROVISIONAL). */
     private List<RaceResult> upsertResults(Race race, List<RecordResultsRequest.ResultRow> rows) {
         UUID raceId = race.getRaceId();
@@ -315,10 +279,9 @@ public class RaceResultServiceImpl implements RaceResultService {
             result.setFinishTimeMs(row.finishTimeMs());
             result.setLengthsBehind(row.lengthsBehind());
             result.setScore(row.score());
-            // Never silently downgrade an in-progress inquiry (UNDER_REVIEW) or a certified (OFFICIAL)
-            // result back to PROVISIONAL — those must be resolved/amended through their own paths.
-            OfficialityStatus current = result.getOfficialityStatus();
-            if (current != OfficialityStatus.UNDER_REVIEW && current != OfficialityStatus.OFFICIAL) {
+            // Never silently downgrade a certified (OFFICIAL) result back to PROVISIONAL — it is
+            // immutable once the referee has certified it.
+            if (result.getOfficialityStatus() != OfficialityStatus.OFFICIAL) {
                 result.setOfficialityStatus(OfficialityStatus.PROVISIONAL);
             }
 
@@ -587,9 +550,6 @@ public class RaceResultServiceImpl implements RaceResultService {
         List<RaceResult> results = raceResultRepository.findByRaceIdWithEntry(raceId);
 
         // FR-19: a result still under review must be resolved before the race can be certified.
-        if (results.stream().anyMatch(r -> r.getOfficialityStatus() == OfficialityStatus.UNDER_REVIEW)) {
-            throw new AppException(ErrorCode.RESULT_UNDER_REVIEW_BLOCKS_CERTIFY);
-        }
 
         // Apply stewards' rulings (time penalties / disqualifications) to the order of finish BEFORE
         // it is frozen OFFICIAL — so both prizes and bet settlement use the corrected placings.
@@ -608,8 +568,18 @@ public class RaceResultServiceImpl implements RaceResultService {
         race.setStewardsReport(request.stewardsReport());
         raceRepository.save(race);
 
-        // Pay the purse: credit each finishing horse's owner + jockey (mint) per the prize distribution.
+        // Pay the purse: credit each finishing horse's owner + jockey per the prize distribution,
+        // debited from the sponsor-funded house wallet.
         creditPrizes(race, results);
+
+        // Settle the riders' wages. The owner's money has been locked since they sent the invitation;
+        // the race has now been run, so it crosses to the jockey. Prize share and hire fee are
+        // separate earnings — a jockey takes both.
+        for (JockeyAssignment ride : jockeyAssignmentRepository.findByRaceId(race.getRaceId())) {
+            if (ride.getStatus() == JockeyAssignmentStatus.ACCEPTED) {
+                jockeyFeeGate.payJockeyOnce(ride);
+            }
+        }
 
         // Notify each owner whose horse ran that the official result is published.
         for (RaceResult result : results) {
@@ -761,10 +731,15 @@ public class RaceResultServiceImpl implements RaceResultService {
                 .map(r -> r.getEntry() != null ? r.getEntry().getEntryId() : null)
                 .filter(Objects::nonNull)
                 .toList();
-        Map<UUID, User> jockeyByEntry = new HashMap<>();
+        // Resolved once: every prize debit hits the same house wallet, and locking it per-iteration
+        // would only add contention.
+        UUID houseUserId = houseWalletService.houseUserId();
+
+        // Keep the whole assignment, not just the rider: the agreed share lives on it.
+        Map<UUID, JockeyAssignment> rideByEntry = new HashMap<>();
         for (JockeyAssignment ja : jockeyAssignmentRepository.findAcceptedByEntryIds(entryIds)) {
             if (ja.getEntry() != null && ja.getJockey() != null) {
-                jockeyByEntry.put(ja.getEntry().getEntryId(), ja.getJockey());
+                rideByEntry.put(ja.getEntry().getEntryId(), ja);
             }
         }
 
@@ -787,30 +762,34 @@ public class RaceResultServiceImpl implements RaceResultService {
                 continue;
             }
 
-            User jockey = jockeyByEntry.get(entry.getEntryId());
+            JockeyAssignment ride = rideByEntry.get(entry.getEntryId());
+            User jockey = ride != null ? ride.getJockey() : null;
             BigDecimal jockeyCut = BigDecimal.ZERO;
             if (jockey != null) {
-                BigDecimal pct = jockeyProfileRepository.findById(jockey.getUserId())
-                        .map(JockeyProfile::getPrizePercent)
-                        .orElse(null);
-                if (pct == null) {
-                    pct = DEFAULT_JOCKEY_PRIZE_PCT;
-                }
-                jockeyCut = amount.multiply(pct).divide(ONE_HUNDRED, 2, RoundingMode.HALF_UP);
+                jockeyCut = amount.multiply(resolveJockeyPercent(ride))
+                        .divide(ONE_HUNDRED, 2, RoundingMode.HALF_UP);
             }
+            // Owner takes the remainder, so the two shares always re-add to exactly `amount` with
+            // no rounding drift. resolveJockeyPercent clamps to <= 100, so this cannot go negative.
             BigDecimal ownerCut = amount.subtract(jockeyCut);
 
             if (ownerCut.signum() > 0) {
                 walletService.getOrCreateWallet(owner.getUserId());
+                // House first, then the beneficiary — same lock order every two-sided move uses, so
+                // concurrent settlements cannot deadlock against each other.
+                walletLedgerService.applyEntry(houseUserId, EntryType.DEBIT, TxnCategory.PRIZE,
+                        ownerCut, "RACE_ENTRY", entry.getEntryId());
                 walletLedgerService.applyEntry(owner.getUserId(), EntryType.CREDIT, TxnCategory.PRIZE,
                         ownerCut, "RACE_ENTRY", entry.getEntryId());
-                savePrize(race, entry, BeneficiaryType.OWNER, pos, ownerCut);
+                savePrize(race, entry, BeneficiaryType.OWNER, pos, ownerCut, owner);
             }
             if (jockey != null && jockeyCut.signum() > 0) {
                 walletService.getOrCreateWallet(jockey.getUserId());
+                walletLedgerService.applyEntry(houseUserId, EntryType.DEBIT, TxnCategory.PRIZE,
+                        jockeyCut, "RACE_ENTRY", entry.getEntryId());
                 walletLedgerService.applyEntry(jockey.getUserId(), EntryType.CREDIT, TxnCategory.PRIZE,
                         jockeyCut, "RACE_ENTRY", entry.getEntryId());
-                savePrize(race, entry, BeneficiaryType.JOCKEY, pos, jockeyCut);
+                savePrize(race, entry, BeneficiaryType.JOCKEY, pos, jockeyCut, jockey);
             }
 
             entry.setPrizeEarned(amount);
@@ -818,14 +797,44 @@ public class RaceResultServiceImpl implements RaceResultService {
         }
     }
 
-    private void savePrize(Race race, RaceEntry entry, BeneficiaryType type, int position, BigDecimal amount) {
+    /**
+     * The share to pay the rider: the terms agreed on this invitation, falling back to the jockey's
+     * advertised rate and then to the house default for rows created before terms were captured.
+     * Clamped to [0,100] — an out-of-range percentage used to make the owner's cut negative, which
+     * the {@code signum() > 0} test then swallowed, paying the owner nothing without any error.
+     */
+    private BigDecimal resolveJockeyPercent(JockeyAssignment ride) {
+        BigDecimal pct = ride.getAgreedPrizePercent();
+        if (pct == null && ride.getJockey() != null) {
+            pct = jockeyProfileRepository.findById(ride.getJockey().getUserId())
+                    .map(JockeyProfile::getPrizePercent)
+                    .orElse(null);
+        }
+        if (pct == null) {
+            pct = DEFAULT_JOCKEY_PRIZE_PCT;
+        }
+        if (pct.signum() < 0) {
+            return BigDecimal.ZERO;
+        }
+        return pct.compareTo(ONE_HUNDRED) > 0 ? ONE_HUNDRED : pct;
+    }
+
+    private void savePrize(Race race, RaceEntry entry, BeneficiaryType type, int position,
+                           BigDecimal amount, User beneficiary) {
+        // Unique per (entry, beneficiary): "PRZ-O-<entryId>" / "PRZ-J-<entryId>" (≤ 50 chars).
+        String prizeCode = "PRZ-" + type.name().charAt(0) + "-" + entry.getEntryId();
+        // Without this the UNIQUE on prize_code would escape as a raw 500 rather than a handled error.
+        if (prizeRepository.existsByPrizeCode(prizeCode)) {
+            log.warn("Prize {} already recorded — skipping duplicate award", prizeCode);
+            return;
+        }
         prizeRepository.save(Prize.builder()
                 .race(race)
                 .beneficiaryType(type)
+                .beneficiaryUser(beneficiary)
                 .rankPosition(position)
                 .prizeAmount(amount)
-                // Unique per (entry, beneficiary): "PRZ-O-<entryId>" / "PRZ-J-<entryId>" (≤ 50 chars).
-                .prizeCode("PRZ-" + type.name().charAt(0) + "-" + entry.getEntryId())
+                .prizeCode(prizeCode)
                 .status(PrizeStatus.AWARDED)
                 .build());
     }
@@ -855,7 +864,7 @@ public class RaceResultServiceImpl implements RaceResultService {
 
     /**
      * Race-level officiality: OFFICIAL only when every result is OFFICIAL; otherwise the most
-     * advanced amendment state wins (AMENDED > UNDER_REVIEW > PROVISIONAL). Empty -> PROVISIONAL.
+     * advanced amendment state wins (AMENDED > PROVISIONAL). Empty -> PROVISIONAL.
      */
     private OfficialityStatus representativeStatus(List<RaceResult> results) {
         if (results.isEmpty()) {
@@ -868,9 +877,6 @@ public class RaceResultServiceImpl implements RaceResultService {
         }
         if (results.stream().anyMatch(r -> r.getOfficialityStatus() == OfficialityStatus.AMENDED)) {
             return OfficialityStatus.AMENDED;
-        }
-        if (results.stream().anyMatch(r -> r.getOfficialityStatus() == OfficialityStatus.UNDER_REVIEW)) {
-            return OfficialityStatus.UNDER_REVIEW;
         }
         return OfficialityStatus.PROVISIONAL;
     }

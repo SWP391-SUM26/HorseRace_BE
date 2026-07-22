@@ -243,13 +243,30 @@ public class OwnerServiceImpl implements OwnerService {
 
     // ---------- Financial overview ----------
 
-    /** Ledger categories that put money INTO an owner's pocket. */
+    /**
+     * Ledger categories that are genuinely owner EARNINGS.
+     *
+     * DEPOSIT is deliberately absent: topping your own wallet up moves your money from a bank into
+     * this app, it does not earn you anything. Counting it inflated "Total Earnings" by the exact
+     * amount of every top-up, so a 10,000,000₫ deposit read as 10,000,000₫ of winnings.
+     */
     private static final java.util.Set<com.SWP391.horserace.wallets.entity.TxnCategory> INCOME_CATEGORIES =
             java.util.EnumSet.of(com.SWP391.horserace.wallets.entity.TxnCategory.PRIZE,
                     com.SWP391.horserace.wallets.entity.TxnCategory.BET_PAYOUT,
                     com.SWP391.horserace.wallets.entity.TxnCategory.REFUND,
-                    com.SWP391.horserace.wallets.entity.TxnCategory.REWARD,
-                    com.SWP391.horserace.wallets.entity.TxnCategory.DEPOSIT);
+                    com.SWP391.horserace.wallets.entity.TxnCategory.REWARD);
+
+    /**
+     * Ledger categories that are genuinely owner COSTS.
+     *
+     * WITHDRAWAL is absent for the mirror-image reason DEPOSIT is: cashing out is not a business
+     * expense, it is the same money leaving the app. JOCKEY_FEE is the owner's one real outgoing
+     * now that entering a race is free; ENTRY_FEE stays so historical rows still read correctly.
+     */
+    private static final java.util.Set<com.SWP391.horserace.wallets.entity.TxnCategory> EXPENSE_CATEGORIES =
+            java.util.EnumSet.of(com.SWP391.horserace.wallets.entity.TxnCategory.JOCKEY_FEE,
+                    com.SWP391.horserace.wallets.entity.TxnCategory.ENTRY_FEE,
+                    com.SWP391.horserace.wallets.entity.TxnCategory.BET_STAKE);
 
     @Override
     @Transactional(readOnly = true)
@@ -264,13 +281,22 @@ public class OwnerServiceImpl implements OwnerService {
                         org.springframework.data.domain.PageRequest.of(0, 500));
         var ledger = pageAll.getContent();
 
-        // Direction is what the ledger says (CREDIT/DEBIT); the category only labels it for display.
+        // Direction alone is not enough: a top-up is a CREDIT and a cash-out is a DEBIT, but neither
+        // is trading performance. This loop used to sum every CREDIT as income and every DEBIT as
+        // expense, ignoring the category sets below it, so moving money in and out of your own
+        // wallet moved the headline KPIs. Both filters now apply.
         BigDecimal income = BigDecimal.ZERO;
         BigDecimal expense = BigDecimal.ZERO;
         for (var t : ledger) {
+            var category = t.getTxnCategory();
+            if (category == null) {
+                continue;
+            }
             if (t.getEntryType() == com.SWP391.horserace.wallets.entity.EntryType.CREDIT) {
-                income = income.add(nz(t.getAmount()));
-            } else {
+                if (INCOME_CATEGORIES.contains(category)) {
+                    income = income.add(nz(t.getAmount()));
+                }
+            } else if (EXPENSE_CATEGORIES.contains(category)) {
                 expense = expense.add(nz(t.getAmount()));
             }
         }
@@ -353,6 +379,8 @@ public class OwnerServiceImpl implements OwnerService {
             case WITHDRAWAL -> "Rút ví";
             case REWARD -> "Phần thưởng";
             case ADJUSTMENT -> "Điều chỉnh";
+            case SPONSOR -> "Tài trợ giải thưởng";
+            case JOCKEY_FEE -> "Tiền thuê nài";
         };
     }
 
