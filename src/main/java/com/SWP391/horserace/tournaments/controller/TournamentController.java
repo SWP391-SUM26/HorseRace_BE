@@ -59,9 +59,17 @@ public class TournamentController {
 
     @GetMapping
     public ApiResponse<Page<TournamentResponse>> getTournaments(
-            @ModelAttribute TournamentFilterRequest filter) {
+            @ModelAttribute TournamentFilterRequest filter,
+            Authentication authentication) {
 
-        Page<TournamentResponse> page = tournamentService.getTournaments(filter);
+        // No @PreAuthorize: every role lists tournaments. What differs is WHICH ones they see, and
+        // that is derived from the authenticated principal — never from a request parameter, or any
+        // client could send ?isAdmin=true and read the whole catalogue including drafts.
+        UUID viewerUserId = resolveUserId(authentication, null);
+        boolean isAdmin = authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+
+        Page<TournamentResponse> page = tournamentService.getTournaments(filter, viewerUserId, isAdmin);
 
         return ApiResponse.<Page<TournamentResponse>>builder()
                 .success(true)

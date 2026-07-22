@@ -137,15 +137,6 @@ public class RefereeApplicationServiceImpl implements RefereeApplicationService 
         return toDetail(applicationRepository.save(app));
     }
 
-    @Override
-    public List<ApplicationSummary> history(UUID applicationId) {
-        MembershipApplication app = findOrThrow(applicationId);
-        return applicationRepository.findByEmailOrderBySubmittedAtDesc(app.getEmail()).stream()
-                .filter(a -> !a.getApplicationId().equals(applicationId))
-                .map(this::toSummary)
-                .toList();
-    }
-
     // ---- helpers ----
 
     private MembershipApplication findOrThrow(UUID applicationId) {

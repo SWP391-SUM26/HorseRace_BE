@@ -28,6 +28,24 @@ public interface RaceRepository extends JpaRepository<Race, UUID>, JpaSpecificat
     /** Count of non-deleted races — staffing dashboard total. */
     long countByDeletedFalse();
 
+    /** Distinct non-blank race types actually stored — reference data for the race form dropdown. */
+    @Query("SELECT DISTINCT r.raceType FROM Race r " +
+            "WHERE r.deleted = false AND r.raceType IS NOT NULL AND r.raceType <> '' " +
+            "ORDER BY r.raceType")
+    List<String> findDistinctRaceTypes();
+
+    /** Distinct non-blank track conditions actually stored — reference data for the race form dropdown. */
+    @Query("SELECT DISTINCT r.trackCondition FROM Race r " +
+            "WHERE r.deleted = false AND r.trackCondition IS NOT NULL AND r.trackCondition <> '' " +
+            "ORDER BY r.trackCondition")
+    List<String> findDistinctTrackConditions();
+
+    /** Distinct non-blank weather conditions actually stored — reference data for the race form dropdown. */
+    @Query("SELECT DISTINCT r.weatherCondition FROM Race r " +
+            "WHERE r.deleted = false AND r.weatherCondition IS NOT NULL AND r.weatherCondition <> '' " +
+            "ORDER BY r.weatherCondition")
+    List<String> findDistinctWeatherConditions();
+
     @Query("SELECT r FROM Race r LEFT JOIN FETCH r.tournament WHERE r.raceId = :id")
     Optional<Race> findByIdWithTournament(@Param("id") UUID id);
 
@@ -151,4 +169,43 @@ public interface RaceRepository extends JpaRepository<Race, UUID>, JpaSpecificat
            AND r.status = com.SWP391.horserace.races.entity.RaceStatus.OPEN
         """)
     int markClosed(@Param("id") java.util.UUID id);
+
+    /**
+     * Purse already committed to a tournament's races, optionally excluding one race (so an update
+     * compares against its siblings rather than against itself).
+     *
+     * <p>Cancelled and soft-deleted races release their budget automatically by falling out of this
+     * sum, which is what lets an admin re-spend it without any manual bookkeeping.
+     */
+    @Query("""
+        SELECT COALESCE(SUM(r.totalPurse), 0) FROM Race r
+         WHERE r.tournament.tournamentId = :tournamentId
+           AND r.deleted = false
+           AND r.status <> com.SWP391.horserace.races.entity.RaceStatus.CANCELLED
+           AND (:excludeRaceId IS NULL OR r.raceId <> :excludeRaceId)
+        """)
+    java.math.BigDecimal sumAllocatedPurse(@Param("tournamentId") java.util.UUID tournamentId,
+                                           @Param("excludeRaceId") java.util.UUID excludeRaceId);
+
+    /**
+     * Races that have neither been run to a certified result nor cancelled. A tournament cannot
+     * close its books while any of these remain — the gate on completion.
+     */
+    @Query("""
+        SELECT COUNT(r) FROM Race r
+         WHERE r.tournament.tournamentId = :tournamentId
+           AND r.deleted = false
+           AND r.status <> com.SWP391.horserace.races.entity.RaceStatus.OFFICIAL
+           AND r.status <> com.SWP391.horserace.races.entity.RaceStatus.CANCELLED
+        """)
+    long countNonTerminalByTournament(@Param("tournamentId") java.util.UUID tournamentId);
+
+    /** Active race count for a tournament — denominator of the equal-split default. */
+    @Query("""
+        SELECT COUNT(r) FROM Race r
+         WHERE r.tournament.tournamentId = :tournamentId
+           AND r.deleted = false
+           AND r.status <> com.SWP391.horserace.races.entity.RaceStatus.CANCELLED
+        """)
+    long countActiveByTournament(@Param("tournamentId") java.util.UUID tournamentId);
 }

@@ -3,6 +3,7 @@ package com.SWP391.horserace.races.service;
 import com.SWP391.horserace.races.dto.AssignParticipantRequest;
 import com.SWP391.horserace.races.dto.MyEntryResponse;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
+import com.SWP391.horserace.races.dto.RaceFieldOptionsResponse;
 import com.SWP391.horserace.races.dto.RaceFilterRequest;
 import com.SWP391.horserace.races.dto.RaceRequest;
 import com.SWP391.horserace.races.dto.RaceResponse;
@@ -19,6 +20,9 @@ public interface RaceService {
 
     /** §D3 — count-by-status KPIs, optionally scoped to one tournament. */
     RaceStatsResponse getRaceStats(UUID tournamentId);
+
+    /** Distinct DB values for race type / track condition / weather — dropdown options for the race form. */
+    RaceFieldOptionsResponse getFieldOptions();
 
     RaceResponse getRaceById(UUID id);
 

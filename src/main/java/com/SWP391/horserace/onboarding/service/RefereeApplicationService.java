@@ -27,6 +27,4 @@ public interface RefereeApplicationService {
 
     ApplicationDetail requestInfo(UUID applicationId, String note, UUID reviewerUserId);
 
-    /** Previous applications by the same applicant email (excludes the current one). */
-    List<ApplicationSummary> history(UUID applicationId);
 }

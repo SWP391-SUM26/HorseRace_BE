@@ -15,6 +15,7 @@ import com.SWP391.horserace.races.dto.AssignParticipantRequest;
 import com.SWP391.horserace.races.dto.MyEntryResponse;
 import com.SWP391.horserace.races.dto.PrizeDistributionDto;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
+import com.SWP391.horserace.races.dto.RaceFieldOptionsResponse;
 import com.SWP391.horserace.races.dto.RaceFilterRequest;
 import com.SWP391.horserace.prizes.repository.PrizeRepository;
 import com.SWP391.horserace.races.dto.RaceRequest;
@@ -214,6 +215,16 @@ public class RaceServiceImpl implements RaceService {
                 .scheduled(scheduled)
                 .active(active)
                 .cancelled(cancelled)
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public RaceFieldOptionsResponse getFieldOptions() {
+        return RaceFieldOptionsResponse.builder()
+                .raceTypes(raceRepository.findDistinctRaceTypes())
+                .trackConditions(raceRepository.findDistinctTrackConditions())
+                .weatherConditions(raceRepository.findDistinctWeatherConditions())
                 .build();
     }
 

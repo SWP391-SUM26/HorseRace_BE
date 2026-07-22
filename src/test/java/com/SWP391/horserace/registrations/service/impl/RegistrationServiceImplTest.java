@@ -29,12 +29,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -134,8 +136,10 @@ class RegistrationServiceImplTest {
     void submit_duplicate_rejected() {
         when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
         when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
-        when(registrationRepository.existsByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
-                .thenReturn(true);
+        // A LIVE registration blocks. (A terminated one must not — see submit_afterRejected_isAllowed.)
+        when(registrationRepository.findFirstByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(Optional.of(TournamentRegistration.builder()
+                        .registrationId(UUID.randomUUID()).status(RegistrationStatus.SUBMITTED).build()));
 
         assertThatThrownBy(() -> service.submitRegistration(ownerId, req()))
                 .isInstanceOf(AppException.class)
@@ -146,8 +150,8 @@ class RegistrationServiceImplTest {
     void submit_happyPath_setsSubmittedStatusCodeAndSubmittedAt() {
         when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
         when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
-        when(registrationRepository.existsByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
-                .thenReturn(false);
+        when(registrationRepository.findFirstByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(Optional.empty());
         when(userRepository.findByUserIdAndDeletedFalse(ownerId)).thenReturn(Optional.of(owner));
         when(registrationRepository.count()).thenReturn(4L);
         when(registrationRepository.existsByRegistrationCode(any())).thenReturn(false);
@@ -171,8 +175,8 @@ class RegistrationServiceImplTest {
                 .role(Role.builder().roleCode("ADMIN").build()).build();
         when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
         when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
-        when(registrationRepository.existsByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
-                .thenReturn(false);
+        when(registrationRepository.findFirstByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(Optional.empty());
         when(userRepository.findByUserIdAndDeletedFalse(adminId)).thenReturn(Optional.of(admin));
         when(registrationRepository.count()).thenReturn(0L);
         when(registrationRepository.existsByRegistrationCode(any())).thenReturn(false);
@@ -192,8 +196,8 @@ class RegistrationServiceImplTest {
                 .tournament(tournament).status(RaceStatus.SCHEDULED).build();
         when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
         when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
-        when(registrationRepository.existsByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
-                .thenReturn(false);
+        when(registrationRepository.findFirstByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(Optional.empty());
         when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
         when(userRepository.findByUserIdAndDeletedFalse(ownerId)).thenReturn(Optional.of(owner));
         when(registrationRepository.count()).thenReturn(0L);
@@ -212,8 +216,8 @@ class RegistrationServiceImplTest {
         UUID raceId = UUID.randomUUID();
         when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
         when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
-        when(registrationRepository.existsByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
-                .thenReturn(false);
+        when(registrationRepository.findFirstByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(Optional.empty());
         when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.submitRegistration(ownerId, reqWithRace(raceId)))
@@ -229,8 +233,8 @@ class RegistrationServiceImplTest {
                 .tournament(otherTournament).status(RaceStatus.SCHEDULED).build();
         when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
         when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
-        when(registrationRepository.existsByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
-                .thenReturn(false);
+        when(registrationRepository.findFirstByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(Optional.empty());
         when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
 
         assertThatThrownBy(() -> service.submitRegistration(ownerId, reqWithRace(raceId)))
@@ -546,5 +550,120 @@ class RegistrationServiceImplTest {
         assertThatThrownBy(() -> service.deleteRegistration(null, UUID.randomUUID()))
                 .isInstanceOf(AppException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNAUTHENTICATED);
+    }
+
+    // ── entry fee: charged at submit, returned on every exit ──
+
+    private void stubCleanSubmit() {
+        when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(registrationRepository.findFirstByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(Optional.empty());
+        when(userRepository.findByUserIdAndDeletedFalse(ownerId)).thenReturn(Optional.of(owner));
+        when(registrationRepository.count()).thenReturn(0L);
+        when(registrationRepository.existsByRegistrationCode(any())).thenReturn(false);
+        when(registrationRepository.save(any(TournamentRegistration.class))).thenAnswer(i -> i.getArgument(0));
+    }
+
+    /**
+     * The whole point of the change: the fee lands on the owner at the moment THEY act. It used to
+     * be taken inside the referee's approve transaction, so a thin wallet failed the referee with an
+     * error about someone else's money and silently discarded their approval.
+     */
+    @Test
+    void submit_withRace_chargesTheEntryFee() {
+        UUID raceId = UUID.randomUUID();
+        Race race = Race.builder().raceId(raceId).tournament(tournament).build();
+        stubCleanSubmit();
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+
+        service.submitRegistration(ownerId, reqWithRace(raceId));
+
+        verify(raceEntryGate).chargeEntryFeeOnce(any(TournamentRegistration.class), eq(race));
+    }
+
+    /** No race chosen means no fee is knowable — it lives on the race. */
+    @Test
+    void submit_withoutRace_chargesNothing() {
+        stubCleanSubmit();
+
+        service.submitRegistration(ownerId, req());
+
+        verify(raceEntryGate, never()).chargeEntryFeeOnce(any(), any());
+    }
+
+    @Test
+    void rejectRegistration_returnsTheFee() {
+        UUID id = UUID.randomUUID();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(id).owner(owner).tournament(tournament).horse(horse)
+                .status(RegistrationStatus.SUBMITTED).build();
+        when(registrationRepository.findById(id)).thenReturn(Optional.of(reg));
+        when(registrationRepository.save(any(TournamentRegistration.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.rejectRegistration(ownerId, id, new RejectRegistrationRequest("Hồ sơ thiếu"));
+
+        verify(raceEntryGate).refundEntryFeeOnce(reg);
+    }
+
+    @Test
+    void withdrawRegistration_returnsTheFee() {
+        UUID id = UUID.randomUUID();
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(id).owner(owner).tournament(tournament).horse(horse)
+                .status(RegistrationStatus.SUBMITTED).build();
+        when(registrationRepository.findById(id)).thenReturn(Optional.of(reg));
+        when(registrationRepository.save(any(TournamentRegistration.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.withdrawRegistration(ownerId, id);
+
+        verify(raceEntryGate).refundEntryFeeOnce(reg);
+    }
+
+    /**
+     * A rejected registration must not lock the horse out of the tournament forever. The owner paid,
+     * was refunded, and would otherwise have no way back in — the DB UNIQUE(tournament_id, horse_id)
+     * permits exactly one row, so the dead one is reused.
+     */
+    @Test
+    void submit_afterRejected_reusesTheRowAndChargesAgain() {
+        UUID oldId = UUID.randomUUID();
+        TournamentRegistration rejected = TournamentRegistration.builder()
+                .registrationId(oldId).owner(owner).tournament(tournament).horse(horse)
+                .registrationCode("REG00009")
+                .status(RegistrationStatus.REJECTED)
+                .rejectionReason("Hồ sơ thiếu")
+                .entryFeeAmount(new java.math.BigDecimal("1500000"))
+                .entryFeePaidAt(OffsetDateTime.now().minusDays(1))
+                .entryFeeRefundedAt(OffsetDateTime.now().minusHours(1))
+                .build();
+        when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(registrationRepository.findFirstByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(Optional.of(rejected));
+        when(userRepository.findByUserIdAndDeletedFalse(ownerId)).thenReturn(Optional.of(owner));
+        when(registrationRepository.save(any(TournamentRegistration.class))).thenAnswer(i -> i.getArgument(0));
+
+        RegistrationResponse res = service.submitRegistration(ownerId, req());
+
+        assertThat(res.getStatus()).isEqualTo(RegistrationStatus.SUBMITTED);
+        assertThat(res.getRegistrationCode()).isEqualTo("REG00009");   // same row, code kept
+        // Both stamps cleared, so the new attempt is charged rather than seen as already paid.
+        assertThat(rejected.getEntryFeePaidAt()).isNull();
+        assertThat(rejected.getEntryFeeRefundedAt()).isNull();
+        assertThat(rejected.getRejectionReason()).isNull();
+    }
+
+    @Test
+    void submit_whileAnotherIsStillLive_isRejected() {
+        when(horseRepository.findByHorseIdAndDeletedFalse(horseId)).thenReturn(Optional.of(horse));
+        when(tournamentRepository.findById(tournamentId)).thenReturn(Optional.of(tournament));
+        when(registrationRepository.findFirstByTournament_TournamentIdAndHorse_HorseId(tournamentId, horseId))
+                .thenReturn(Optional.of(TournamentRegistration.builder()
+                        .registrationId(UUID.randomUUID()).status(RegistrationStatus.APPROVED).build()));
+
+        assertThatThrownBy(() -> service.submitRegistration(ownerId, req()))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.REGISTRATION_ALREADY_EXISTS);
     }
 }

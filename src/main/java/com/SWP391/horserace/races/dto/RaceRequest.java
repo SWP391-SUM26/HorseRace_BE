@@ -1,5 +1,6 @@
 package com.SWP391.horserace.races.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
@@ -35,7 +36,12 @@ public record RaceRequest(
         @PositiveOrZero BigDecimal totalPurse,
         /** Fee the owner pays (into the house wallet) when a horse enters this race. */
         @PositiveOrZero BigDecimal entryFee,
-        /** Per-finish-position prize amounts, e.g. [{place:"1st", amount:60000000}, …]. */
+        /**
+         * Per-finish-position prize amounts, e.g. [{place:"1st", amount:60000000}, …].
+         * {@code @Valid} is load-bearing: without it the constraints on {@link PrizeDistributionDto}
+         * are never evaluated and a negative or blank tier passes straight through.
+         */
+        @Valid @Size(max = 50, message = "Quá nhiều thứ hạng trong một cuộc đua")
         List<PrizeDistributionDto> prizeDistribution) {
 
     /** Convenience constructor for callers that don't set purse/fee (those fields default to null). */

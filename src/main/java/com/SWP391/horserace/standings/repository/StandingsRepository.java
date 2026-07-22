@@ -18,8 +18,14 @@ import java.util.UUID;
  * code path — they only ever hold whatever the seed put there. Ranking on them silently produces a
  * wrong league table (the seed's top "winner" by win_count has no actual wins). Everything here is
  * therefore derived from rows the application really maintains: {@code race_result.finish_position}
- * for placings and {@code race_entry.prize_earned} for money, restricted to OFFICIAL results so a
- * provisional or under-review race never moves the table.
+ * for placings and, for money, the {@code prize} rows actually credited — restricted to OFFICIAL
+ * results so a provisional or under-review race never moves the table.
+ *
+ * <p><b>Whose money is whose:</b> the horse table uses {@code race_entry.prize_earned} (the horse's
+ * whole prize, which is correct for horse and owner), while the jockey table sums the JOCKEY-
+ * beneficiary prize rows. Using {@code prize_earned} for jockeys reported the same money three
+ * times — once to the horse, once to the owner, once to the rider — and overstated every rider's
+ * income by the owner's share.
  */
 public interface StandingsRepository extends Repository<RaceResult, UUID> {
 
@@ -54,15 +60,19 @@ public interface StandingsRepository extends Repository<RaceResult, UUID> {
                ja.jockey.fullName     AS name,
                SUM(CASE WHEN rr.finishPosition = 1 THEN 1L ELSE 0L END) AS wins,
                COUNT(rr)              AS starts,
-               COALESCE(SUM(e.prizeEarned), 0) AS earnings
+               COALESCE(SUM(pz.prizeAmount), 0) AS earnings
           FROM JockeyAssignment ja
           JOIN ja.entry e
           JOIN RaceResult rr ON rr.entry = e
+          LEFT JOIN Prize pz
+                 ON pz.race = rr.race
+                AND pz.beneficiaryUser = ja.jockey
+                AND pz.beneficiaryType = com.SWP391.horserace.prizes.entity.BeneficiaryType.JOCKEY
          WHERE ja.status = com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus.ACCEPTED
            AND rr.officialityStatus = com.SWP391.horserace.races.entity.OfficialityStatus.OFFICIAL
          GROUP BY ja.jockey.userId, ja.jockey.fullName
          ORDER BY SUM(CASE WHEN rr.finishPosition = 1 THEN 1L ELSE 0L END) DESC,
-                  COALESCE(SUM(e.prizeEarned), 0) DESC
+                  COALESCE(SUM(pz.prizeAmount), 0) DESC
         """)
     List<JockeyStanding> rankJockeys(Pageable pageable);
 

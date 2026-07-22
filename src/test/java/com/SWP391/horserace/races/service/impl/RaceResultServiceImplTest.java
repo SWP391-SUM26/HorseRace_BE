@@ -15,6 +15,7 @@ import com.SWP391.horserace.races.entity.PrizeDistributionItem;
 import com.SWP391.horserace.wallets.entity.EntryType;
 import com.SWP391.horserace.wallets.entity.TxnCategory;
 import com.SWP391.horserace.wallets.service.WalletLedgerService;
+import com.SWP391.horserace.wallets.service.HouseWalletService;
 import com.SWP391.horserace.wallets.service.WalletService;
 import com.SWP391.horserace.races.dto.CertifyResultsRequest;
 import com.SWP391.horserace.races.dto.CertifyResultsResponse;
@@ -91,6 +92,7 @@ class RaceResultServiceImplTest {
     @Mock JockeyProfileRepository jockeyProfileRepository;
     @Mock WalletLedgerService walletLedgerService;
     @Mock WalletService walletService;
+    @Mock HouseWalletService houseWalletService;
 
     private RaceResultServiceImpl service;
 
@@ -114,7 +116,7 @@ class RaceResultServiceImplTest {
                 raceResultVersionRepository, jockeyAssignmentRepository, userRepository,
                 notificationService, refereeSubmissionCodeService, violationService,
                 registrationRepository, penaltyRepository, prizeRepository, jockeyProfileRepository,
-                refereeAssignmentRepository, walletLedgerService, walletService);
+                refereeAssignmentRepository, walletLedgerService, walletService, houseWalletService);
         // #8: most getResults tests build a tournament-less race → repo is not queried; keep this
         // lenient so the stub is harmless where the NOT-ENTERED path is never reached.
         lenient().when(registrationRepository.findApprovedNotEnteredInRace(any(), any()))
@@ -569,8 +571,8 @@ class RaceResultServiceImplTest {
 
         when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
         when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(referee));
-        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
-                raceId, userId, com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED))
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                raceId, userId, com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.OFFICIATING))
                 .thenReturn(true);
         when(raceResultRepository.findByRaceIdWithEntry(raceId)).thenReturn(List.of(r1));
         when(raceResultRepository.save(any(RaceResult.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -590,8 +592,8 @@ class RaceResultServiceImplTest {
 
         when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
         when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(referee));
-        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
-                raceId, userId, com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED))
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                raceId, userId, com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.OFFICIATING))
                 .thenReturn(false);
 
         assertThatThrownBy(() -> service.certify(userId, raceId,
@@ -637,12 +639,20 @@ class RaceResultServiceImplTest {
                 .thenReturn(List.of(JockeyAssignment.builder().entry(winEntry).jockey(jockeyUser).build()));
         when(jockeyProfileRepository.findById(jockeyId))
                 .thenReturn(Optional.of(JockeyProfile.builder().prizePercent(new BigDecimal("20")).build()));
+        UUID houseId = UUID.randomUUID();
+        when(houseWalletService.houseUserId()).thenReturn(houseId);
 
         service.certify(userId, prizeRaceId, new CertifyResultsRequest("4821", true, "report"));
 
         // Jockey 20% = 20,000; owner remainder = 80,000; entry marked as having earned the full amount.
         verify(walletService).getOrCreateWallet(ownerId);
         verify(walletService).getOrCreateWallet(jockeyId);
+
+        // Every prize credit has a matching house debit — PRIZE is no longer minted from nothing.
+        verify(walletLedgerService).applyEntry(eq(houseId), eq(EntryType.DEBIT), eq(TxnCategory.PRIZE),
+                argThat(a -> a.compareTo(new BigDecimal("80000")) == 0), eq("RACE_ENTRY"), eq(winEntryId));
+        verify(walletLedgerService).applyEntry(eq(houseId), eq(EntryType.DEBIT), eq(TxnCategory.PRIZE),
+                argThat(a -> a.compareTo(new BigDecimal("20000")) == 0), eq("RACE_ENTRY"), eq(winEntryId));
         verify(walletLedgerService).applyEntry(eq(ownerId), eq(EntryType.CREDIT), eq(TxnCategory.PRIZE),
                 argThat(a -> a.compareTo(new BigDecimal("80000")) == 0), eq("RACE_ENTRY"), eq(winEntryId));
         verify(walletLedgerService).applyEntry(eq(jockeyId), eq(EntryType.CREDIT), eq(TxnCategory.PRIZE),
@@ -753,24 +763,6 @@ class RaceResultServiceImplTest {
                 .isEqualTo(ErrorCode.UNAUTHENTICATED);
     }
 
-    @Test
-    void certify_resultUnderReview_throwsBlocksCertify() {
-        RaceResult r1 = RaceResult.builder()
-                .resultId(UUID.randomUUID()).race(race).entry(entry)
-                .officialityStatus(OfficialityStatus.UNDER_REVIEW).build();
-
-        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
-        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(certifier));
-        when(raceResultRepository.findByRaceIdWithEntry(raceId)).thenReturn(List.of(r1));
-
-        assertThatThrownBy(() -> service.certify(userId, raceId,
-                new CertifyResultsRequest("4821", true, "report")))
-                .isInstanceOf(AppException.class)
-                .extracting(e -> ((AppException) e).getErrorCode())
-                .isEqualTo(ErrorCode.RESULT_UNDER_REVIEW_BLOCKS_CERTIFY);
-
-        verify(raceRepository, never()).save(any());
-    }
 
     // ── CN3: submitReport (OTP-gated combined publish) ──
 
@@ -927,42 +919,6 @@ class RaceResultServiceImplTest {
         assertThat(resp.getSubmittedAt()).isNotNull();
     }
 
-    // ── FR-19: flagUnderReview ──
-
-    @Test
-    void flagUnderReview_setsStatus_andAudits() {
-        RaceResult result = RaceResult.builder()
-                .resultId(resultId).race(race).entry(entry)
-                .currentVersionNo(1)
-                .officialityStatus(OfficialityStatus.PROVISIONAL).build();
-
-        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
-        when(raceResultRepository.findById(resultId)).thenReturn(Optional.of(result));
-        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(certifier));
-        when(raceResultRepository.save(any(RaceResult.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        service.flagUnderReview(userId, raceId, resultId);
-
-        assertThat(result.getOfficialityStatus()).isEqualTo(OfficialityStatus.UNDER_REVIEW);
-        verify(raceResultVersionRepository).save(any(RaceResultVersion.class));
-    }
-
-    @Test
-    void flagUnderReview_alreadyOfficial_throws() {
-        RaceResult result = RaceResult.builder()
-                .resultId(resultId).race(race).entry(entry)
-                .officialityStatus(OfficialityStatus.OFFICIAL).build();
-
-        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
-        when(raceResultRepository.findById(resultId)).thenReturn(Optional.of(result));
-
-        assertThatThrownBy(() -> service.flagUnderReview(userId, raceId, resultId))
-                .isInstanceOf(AppException.class)
-                .extracting(e -> ((AppException) e).getErrorCode())
-                .isEqualTo(ErrorCode.RESULT_ALREADY_OFFICIAL);
-
-        verify(raceResultRepository, never()).save(any());
-    }
 
     // ── #8: registered-but-not-entered on the result sheet ──
 

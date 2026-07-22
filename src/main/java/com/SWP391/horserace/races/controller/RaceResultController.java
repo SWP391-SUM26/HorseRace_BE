@@ -98,22 +98,6 @@ public class RaceResultController {
                 .build();
     }
 
-    /**
-     * PATCH /{resultId}/inquiry — flag one result as UNDER_REVIEW (FR-19). Blocks certification until
-     * resolved. Rejected once the result is OFFICIAL.
-     */
-    @PatchMapping("/{resultId}/inquiry")
-    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
-    public ApiResponse<Void> flagUnderReview(
-            @AuthenticationPrincipal UUID userId,
-            @PathVariable UUID raceId,
-            @PathVariable UUID resultId) {
-        raceResultService.flagUnderReview(userId, raceId, resultId);
-        return ApiResponse.<Void>builder()
-                .success(true)
-                .message("Result flagged under review")
-                .build();
-    }
 
     /**
      * PATCH /{resultId} — inline-edit one result row; writes a version audit (AMENDED). ADMIN-only:

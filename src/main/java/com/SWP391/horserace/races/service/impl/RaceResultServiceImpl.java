@@ -536,12 +536,13 @@ public class RaceResultServiceImpl implements RaceResultService {
         User certifier = userRepository.findByUserIdAndDeletedFalse(currentUserId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
 
-        // A referee may certify only a race they are CONFIRMED to officiate (IDOR guard, same rule
-        // as document review and OTP issuance). ADMIN bypasses — they consolidate across races.
+        // A referee may certify only a race they are assigned to officiate (IDOR guard, same rule as
+        // document review and OTP issuance). Being assigned is enough — accepting (CONFIRMED) is not
+        // required — but DECLINED/REVOKED do not qualify. ADMIN bypasses (consolidates across races).
         boolean isAdmin = certifier.getRole() != null && "ADMIN".equals(certifier.getRole().getRoleCode());
-        if (!isAdmin && !refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
+        if (!isAdmin && !refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
                 raceId, currentUserId,
-                com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED)) {
+                com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.OFFICIATING)) {
             throw new AppException(ErrorCode.REFEREE_NOT_ASSIGNED);
         }
 

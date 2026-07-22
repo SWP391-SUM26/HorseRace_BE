@@ -9,7 +9,7 @@ import java.util.UUID;
 
 public interface TournamentService {
     TournamentResponse createTournament(TournamentRequest request, UUID userId);
-    Page<TournamentResponse> getTournaments(TournamentFilterRequest filter);
+    Page<TournamentResponse> getTournaments(TournamentFilterRequest filter, java.util.UUID viewerUserId, boolean isAdmin);
     TournamentResponse getTournamentById(UUID id);
     TournamentResponse updateTournament(UUID id, TournamentRequest request);
     void deleteTournament(UUID id);

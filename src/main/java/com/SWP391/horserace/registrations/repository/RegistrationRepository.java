@@ -18,6 +18,10 @@ public interface RegistrationRepository
 
     boolean existsByTournament_TournamentIdAndHorse_HorseId(UUID tournamentId, UUID horseId);
 
+    /** The single row the UNIQUE(tournament_id, horse_id) constraint permits, live or terminated. */
+    java.util.Optional<TournamentRegistration> findFirstByTournament_TournamentIdAndHorse_HorseId(
+            UUID tournamentId, UUID horseId);
+
     boolean existsByRegistrationCode(String registrationCode);
 
     /** Resolve a horse's registration for a given tournament in a particular status (e.g. APPROVED). */
@@ -74,4 +78,49 @@ public interface RegistrationRepository
         RegistrationStatus getStatus();
         long getCnt();
     }
+
+    /**
+     * Claim the right to charge this registration's entry fee. Returns 1 for the caller that won,
+     * 0 for everyone else — a single atomic statement, so two concurrent charges cannot both
+     * proceed. Same idiom as {@code markSettledIfNotSettled} / {@code markCancelProposed}.
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = false, flushAutomatically = true)
+    @Query("""
+        UPDATE TournamentRegistration r
+           SET r.entryFeePaidAt = :now, r.entryFeeAmount = :fee
+         WHERE r.registrationId = :registrationId
+           AND r.entryFeePaidAt IS NULL
+        """)
+    int claimEntryFeeCharge(@Param("registrationId") UUID registrationId,
+                            @Param("fee") java.math.BigDecimal fee,
+                            @Param("now") java.time.OffsetDateTime now);
+
+    /** Claim the right to refund. Returns 0 when nothing was paid, or when already refunded. */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = false, flushAutomatically = true)
+    @Query("""
+        UPDATE TournamentRegistration r
+           SET r.entryFeeRefundedAt = :now
+         WHERE r.registrationId = :registrationId
+           AND r.entryFeePaidAt IS NOT NULL
+           AND r.entryFeeRefundedAt IS NULL
+        """)
+    int claimEntryFeeRefund(@Param("registrationId") UUID registrationId,
+                            @Param("now") java.time.OffsetDateTime now);
+
+    /**
+     * Registrations on a race that paid and have not been refunded — what a race cancellation must
+     * pay back.
+     *
+     * <p>Driven off registrations, NOT race_entry: a registration can pay at submit and never be
+     * approved, so it has no race_entry row at all. Iterating entries would strand that money.
+     * Returns a List so an unstubbed mock yields empty rather than null.
+     */
+    @Query("""
+        SELECT r FROM TournamentRegistration r
+          JOIN FETCH r.owner
+         WHERE r.race.raceId = :raceId
+           AND r.entryFeePaidAt IS NOT NULL
+           AND r.entryFeeRefundedAt IS NULL
+        """)
+    List<TournamentRegistration> findUnrefundedPaidByRace(@Param("raceId") UUID raceId);
 }

@@ -395,7 +395,8 @@ public class HorseServiceImpl implements HorseService {
                 .orElseThrow(() -> new AppException(ErrorCode.HORSE_NO_APPROVED_REGISTRATION));
 
         // Eligibility (health + age) + entry-fee debit before the entry is created.
-        raceEntryGate.admit(registration, race);
+        raceEntryGate.checkEligibility(registration.getHorse(), race.getTournament());
+        raceEntryGate.chargeEntryFeeOnce(registration, race);
 
         RaceEntry entry = RaceEntry.builder()
                 .registration(registration)

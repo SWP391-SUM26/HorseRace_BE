@@ -6,7 +6,6 @@ package com.SWP391.horserace.races.entity;
  */
 public enum OfficialityStatus {
     PROVISIONAL,
-    UNDER_REVIEW,
     OFFICIAL,
     AMENDED
 }

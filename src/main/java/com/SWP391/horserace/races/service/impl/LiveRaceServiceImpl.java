@@ -61,8 +61,9 @@ public class LiveRaceServiceImpl implements LiveRaceService {
         if (isAdmin) {
             return;
         }
-        if (!refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
-                raceId, callerId, RefereeAssignmentStatus.CONFIRMED)) {
+        // Being assigned is enough (ASSIGNED or CONFIRMED); DECLINED/REVOKED do not qualify.
+        if (!refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                raceId, callerId, RefereeAssignmentStatus.OFFICIATING)) {
             throw new AppException(ErrorCode.REFEREE_NOT_ASSIGNED);
         }
     }
