@@ -138,6 +138,29 @@ public interface JockeyAssignmentRepository extends JpaRepository<JockeyAssignme
         """)
     Page<JockeyAssignment> findByOwnerUserId(@Param("ownerUserId") UUID ownerUserId, Pageable pageable);
 
+    /**
+     * Every rider ever invited for one horse ("danh sách nài của ngựa"). The filter previously only
+     * supported status/jockey/owner, so an owner could not see a single horse's riding roster.
+     */
+    @Query("""
+        SELECT ja FROM JockeyAssignment ja
+          JOIN ja.entry e
+          JOIN e.registration r
+         WHERE r.horse.horseId = :horseId
+        """)
+    Page<JockeyAssignment> findByHorseId(@Param("horseId") UUID horseId, Pageable pageable);
+
+    @Query("""
+        SELECT ja FROM JockeyAssignment ja
+          JOIN ja.entry e
+          JOIN e.registration r
+         WHERE r.horse.horseId = :horseId
+           AND ja.status = :status
+        """)
+    Page<JockeyAssignment> findByHorseIdAndStatus(@Param("horseId") UUID horseId,
+                                                  @Param("status") JockeyAssignmentStatus status,
+                                                  Pageable pageable);
+
     /** List all assignments sent by a specific owner filtered by status, paginated. */
     @Query(value = """
         SELECT ja FROM JockeyAssignment ja

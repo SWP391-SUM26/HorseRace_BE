@@ -689,7 +689,7 @@ class RaceServiceImplTest {
                 .status(JockeyAssignmentStatus.ACCEPTED).build();
 
         when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(openRace(raceId)));
-        when(raceEntryRepository.findByRaceIdAndOwnerUserId(raceId, ownerId)).thenReturn(Optional.of(entry));
+        when(raceEntryRepository.findAllByRaceIdAndOwnerUserId(raceId, ownerId)).thenReturn(List.of(entry));
         when(jockeyAssignmentRepository.findAcceptedByEntryId(entryId)).thenReturn(Optional.of(ja));
 
         MyEntryResponse res = service.getMyEntry(raceId, ownerId);
@@ -716,7 +716,7 @@ class RaceServiceImplTest {
         UUID raceId = UUID.randomUUID();
         UUID ownerId = UUID.randomUUID();
         when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(openRace(raceId)));
-        when(raceEntryRepository.findByRaceIdAndOwnerUserId(raceId, ownerId)).thenReturn(Optional.empty());
+        when(raceEntryRepository.findAllByRaceIdAndOwnerUserId(raceId, ownerId)).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.getMyEntry(raceId, ownerId))
                 .isInstanceOf(AppException.class)

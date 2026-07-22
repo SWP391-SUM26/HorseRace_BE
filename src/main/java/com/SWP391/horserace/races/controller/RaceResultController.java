@@ -67,9 +67,15 @@ public class RaceResultController {
                 .build();
     }
 
-    /** PATCH /certify — flip all results + the race to OFFICIAL (FE-v2 §5). */
+    /**
+     * PATCH /certify — flip all results + the race to OFFICIAL (FE-v2 §5).
+     *
+     * <p>"Xác nhận kết quả cuộc đua" is a referee duty, so RACE_REFEREE is allowed here; the
+     * service then requires that referee to be CONFIRMED on this very race. ADMIN keeps the
+     * unrestricted override used to consolidate reports across a meeting.
+     */
     @PatchMapping("/certify")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<CertifyResultsResponse> certify(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID raceId,

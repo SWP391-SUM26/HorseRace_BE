@@ -118,6 +118,10 @@ public enum ErrorCode {
     REGISTRATION_INVALID_STATUS(7003, "Invalid status transition for this registration", HttpStatus.BAD_REQUEST),
     NOT_REGISTRATION_OWNER(7004, "You are not the owner of this registration", HttpStatus.FORBIDDEN),
     TOURNAMENT_NOT_ACCEPTING_REGISTRATION(7005, "Tournament is not open for registration", HttpStatus.BAD_REQUEST),
+    REGISTRATION_WINDOW_NOT_OPEN(7006, "The tournament's registration window has not opened yet", HttpStatus.BAD_REQUEST),
+    REGISTRATION_WINDOW_CLOSED(7007, "The tournament's registration window has closed", HttpStatus.BAD_REQUEST),
+    ENTRY_INVALID_STATUS(7008, "This entry can no longer be confirmed", HttpStatus.BAD_REQUEST),
+    PERMISSION_NOT_EXISTED(1029, "One or more permission codes do not exist", HttpStatus.BAD_REQUEST),
 
     // ---- race management ----
     RACE_CODE_EXISTED(8001, "Race code already exists", HttpStatus.CONFLICT),

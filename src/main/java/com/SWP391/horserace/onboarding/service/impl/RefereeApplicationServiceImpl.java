@@ -164,8 +164,6 @@ public class RefereeApplicationServiceImpl implements RefereeApplicationService 
         return switch (requestedRole) {
             case OWNER -> "HORSE_OWNER";
             case JOCKEY -> "JOCKEY";
-            case TRAINER -> "TRAINER";
-            case VET -> "VET";
         };
     }
 

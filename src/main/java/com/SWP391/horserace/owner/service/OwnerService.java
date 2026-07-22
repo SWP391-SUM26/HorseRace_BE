@@ -21,4 +21,7 @@ public interface OwnerService {
 
     /** Per-race report rows: every race the owner registered for + whether each horse participated. */
     List<OwnerRaceReportRow> getRaceReport(UUID ownerUserId);
+
+    /** Financial overview built from the owner's wallet ledger + per-horse prize money. */
+    com.SWP391.horserace.owner.dto.OwnerFinanceResponse getFinances(UUID ownerUserId, int txnLimit);
 }

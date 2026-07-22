@@ -100,6 +100,8 @@ class RaceResultServiceImplTest {
     private final UUID userId = UUID.randomUUID();
     private final UUID resultId = UUID.randomUUID();
 
+    @Mock com.SWP391.horserace.staffing.repository.RefereeAssignmentRepository refereeAssignmentRepository;
+
     private Race race;
     private RaceEntry entry;
     private RaceEntry entry2;
@@ -112,7 +114,7 @@ class RaceResultServiceImplTest {
                 raceResultVersionRepository, jockeyAssignmentRepository, userRepository,
                 notificationService, refereeSubmissionCodeService, violationService,
                 registrationRepository, penaltyRepository, prizeRepository, jockeyProfileRepository,
-                walletLedgerService, walletService);
+                refereeAssignmentRepository, walletLedgerService, walletService);
         // #8: most getResults tests build a tournament-less race → repo is not queried; keep this
         // lenient so the stub is harmless where the NOT-ENTERED path is never reached.
         lenient().when(registrationRepository.findApprovedNotEnteredInRace(any(), any()))
@@ -141,7 +143,9 @@ class RaceResultServiceImplTest {
                 .odds("4/1")
                 .build();
 
-        certifier = User.builder().userId(userId).fullName("Chief Steward J. Lim").build();
+        certifier = User.builder().userId(userId).fullName("Chief Steward J. Lim")
+                .role(com.SWP391.horserace.roles.entity.Role.builder().roleCode("ADMIN").build())
+                .build();
     }
 
     private RecordResultsRequest recordReq() {
@@ -550,6 +554,53 @@ class RaceResultServiceImplTest {
         assertThat(resp.getCertifiedByName()).isEqualTo("Chief Steward J. Lim");
         assertThat(resp.getPublishedAt()).isNotNull();
         assertThat(resp.getOpenInquiries()).isZero();
+    }
+
+    // ---------- Req 18: a referee may certify, but only their own race ----------
+
+    @Test
+    void certify_refereeConfirmedOnThisRace_isAllowed() {
+        User referee = User.builder().userId(userId).fullName("Phan Công Lý")
+                .role(com.SWP391.horserace.roles.entity.Role.builder().roleCode("RACE_REFEREE").build())
+                .build();
+        RaceResult r1 = RaceResult.builder()
+                .resultId(UUID.randomUUID()).race(race).entry(entry)
+                .officialityStatus(OfficialityStatus.PROVISIONAL).build();
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(referee));
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
+                raceId, userId, com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED))
+                .thenReturn(true);
+        when(raceResultRepository.findByRaceIdWithEntry(raceId)).thenReturn(List.of(r1));
+        when(raceResultRepository.save(any(RaceResult.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(raceRepository.save(any(Race.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.certify(userId, raceId, new CertifyResultsRequest("4821", true, "OK."));
+
+        assertThat(race.getStatus()).isEqualTo(RaceStatus.OFFICIAL);
+        assertThat(r1.getOfficialityStatus()).isEqualTo(OfficialityStatus.OFFICIAL);
+    }
+
+    @Test
+    void certify_refereeNotAssignedToThisRace_isRejected() {
+        User referee = User.builder().userId(userId).fullName("Tạ Nghiêm Minh")
+                .role(com.SWP391.horserace.roles.entity.Role.builder().roleCode("RACE_REFEREE").build())
+                .build();
+
+        when(raceRepository.findByRaceIdAndDeletedFalse(raceId)).thenReturn(Optional.of(race));
+        when(userRepository.findByUserIdAndDeletedFalse(userId)).thenReturn(Optional.of(referee));
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
+                raceId, userId, com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> service.certify(userId, raceId,
+                new CertifyResultsRequest("4821", true, "OK.")))
+                .isInstanceOf(AppException.class)
+                .hasMessageContaining(ErrorCode.REFEREE_NOT_ASSIGNED.getMessage());
+
+        // the race must be untouched — a rejected certify cannot half-publish
+        assertThat(race.getStatus()).isEqualTo(RaceStatus.FINISHED);
     }
 
     @Test

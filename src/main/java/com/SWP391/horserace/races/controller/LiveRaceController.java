@@ -6,6 +6,8 @@ import com.SWP391.horserace.shared.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import com.SWP391.horserace.races.dto.UpdateLivePositionRequest;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -38,12 +40,20 @@ public class LiveRaceController {
                 .build();
     }
 
-    /** PATCH — update live positions and telemetry data for a race. */
+    /**
+     * PATCH — update live positions and telemetry data for a race.
+     *
+     * <p>Unlike the GETs above this is a WRITE, so the open-to-all-authenticated contract does not
+     * apply: the running order feeds the leaderboard spectators bet against. Role is gated here,
+     * per-race assignment is gated in the service.
+     */
     @PatchMapping
+    @PreAuthorize("hasAnyRole('RACE_REFEREE','ADMIN')")
     public ApiResponse<Void> updateLivePositions(
+            @AuthenticationPrincipal UUID userId,
             @PathVariable UUID raceId,
             @Valid @RequestBody UpdateLivePositionRequest request) {
-        liveRaceService.updateLivePositions(raceId, request);
+        liveRaceService.updateLivePositions(userId, raceId, request);
         return ApiResponse.<Void>builder()
                 .success(true)
                 .message("Live positions updated successfully")

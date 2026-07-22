@@ -18,6 +18,7 @@ import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.entity.UserStatus;
 import com.SWP391.horserace.users.repository.UserRepository;
 import com.SWP391.horserace.users.repository.UserSpecification;
+import com.SWP391.horserace.users.service.UserCodeGenerator;
 import com.SWP391.horserace.users.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -62,6 +63,7 @@ public class UserServiceImpl implements UserService {
     private static final java.security.SecureRandom PW_RANDOM = new java.security.SecureRandom();
 
     private final UserRepository userRepository;
+    private final UserCodeGenerator userCodeGenerator;
     private final ImageUploadService imageUploadService;
     private final PermissionRepository permissionRepository;
     private final RoleRepository roleRepository;
@@ -390,9 +392,9 @@ public class UserServiceImpl implements UserService {
         }
     }
 
-    /** Generates a short, human-readable user code: {@code USR-XXXXXXXX} (matches the auth module). */
+    /** Sequential user code (USR0009, USR0010...) — see {@link UserCodeGenerator}. */
     private String generateUserCode() {
-        return "USR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        return userCodeGenerator.generate();
     }
 
     private UserResponse mapToResponse(User user) {

@@ -13,6 +13,7 @@ import com.SWP391.horserace.staffing.service.StaffService;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.entity.UserStatus;
 import com.SWP391.horserace.users.repository.UserRepository;
+import com.SWP391.horserace.users.service.UserCodeGenerator;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,7 @@ public class StaffServiceImpl implements StaffService {
     private static final String REFEREE_ROLE_CODE = "RACE_REFEREE";
 
     private final UserRepository userRepository;
+    private final UserCodeGenerator userCodeGenerator;
     private final RoleRepository roleRepository;
     private final RefereeAssignmentRepository refereeAssignmentRepository;
     private final PasswordEncoder passwordEncoder;
@@ -216,12 +218,8 @@ public class StaffServiceImpl implements StaffService {
                 .build();
     }
 
-    /**
-     * Auto-generates a sequential user code like USR0009, USR0010...
-     * Uses the current max user_code number + 1.
-     */
+    /** Sequential user code (USR0009, USR0010...) — see {@link UserCodeGenerator}. */
     private String generateUserCode() {
-        long count = userRepository.count();
-        return String.format("USR%04d", count + 1);
+        return userCodeGenerator.generate();
     }
 }

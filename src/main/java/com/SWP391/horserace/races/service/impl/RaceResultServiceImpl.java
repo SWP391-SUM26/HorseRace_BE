@@ -81,6 +81,7 @@ public class RaceResultServiceImpl implements RaceResultService {
     private final PenaltyRepository penaltyRepository;
     private final PrizeRepository prizeRepository;
     private final JockeyProfileRepository jockeyProfileRepository;
+    private final com.SWP391.horserace.staffing.repository.RefereeAssignmentRepository refereeAssignmentRepository;
     private final WalletLedgerService walletLedgerService;
     private final WalletService walletService;
 
@@ -571,6 +572,15 @@ public class RaceResultServiceImpl implements RaceResultService {
 
         User certifier = userRepository.findByUserIdAndDeletedFalse(currentUserId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+
+        // A referee may certify only a race they are CONFIRMED to officiate (IDOR guard, same rule
+        // as document review and OTP issuance). ADMIN bypasses — they consolidate across races.
+        boolean isAdmin = certifier.getRole() != null && "ADMIN".equals(certifier.getRole().getRoleCode());
+        if (!isAdmin && !refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
+                raceId, currentUserId,
+                com.SWP391.horserace.assignments.entity.RefereeAssignmentStatus.CONFIRMED)) {
+            throw new AppException(ErrorCode.REFEREE_NOT_ASSIGNED);
+        }
 
         OffsetDateTime now = OffsetDateTime.now();
 

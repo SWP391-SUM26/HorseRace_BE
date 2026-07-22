@@ -548,13 +548,24 @@ public class RaceServiceImpl implements RaceService {
         }
         loadRace(raceId);
 
-        RaceEntry entry = raceEntryRepository.findByRaceIdAndOwnerUserId(raceId, ownerUserId)
+        // An owner may run several horses in one race, so this lookup returns a list. It used to be
+        // an Optional, which threw NonUniqueResultException as soon as that happened. The card shows
+        // the lowest lane; listEntries() is the endpoint for the full picture.
+        RaceEntry entry = raceEntryRepository.findAllByRaceIdAndOwnerUserId(raceId, ownerUserId)
+                .stream()
+                .min(java.util.Comparator.comparing(RaceEntry::getLaneNo,
+                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
                 .orElseThrow(() -> new AppException(ErrorCode.ENTRY_NOT_FOUND));
 
+        return toMyEntryResponse(entry);
+    }
+
+    /** Shared by getMyEntry and confirmParticipation so both report the same shape. */
+    private MyEntryResponse toMyEntryResponse(RaceEntry entry) {
         Horse horse = entry.getRegistration() != null ? entry.getRegistration().getHorse() : null;
         String jockeyName = jockeyAssignmentRepository.findAcceptedByEntryId(entry.getEntryId())
                 .map(JockeyAssignment::getJockey)
-                .map(u -> u.getFullName())
+                .map(User::getFullName)
                 .orElse(null);
 
         return MyEntryResponse.builder()
@@ -564,6 +575,42 @@ public class RaceServiceImpl implements RaceService {
                 .weightCarriedLbs(entry.getWeightCarriedLbs())
                 .entryStatus(entry.getStatus())
                 .build();
+    }
+
+    @Override
+    @Transactional
+    public MyEntryResponse confirmParticipation(UUID raceId, UUID entryId, UUID ownerUserId) {
+        if (ownerUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        Race race = loadRace(raceId);
+
+        // Keyed on a specific entry because an owner can run several horses in the same race —
+        // "confirm my entry" would be ambiguous. The owner id in the query is the IDOR guard: an
+        // entry belonging to someone else simply does not resolve.
+        RaceEntry entry = raceEntryRepository
+                .findByEntryIdAndRaceIdAndOwnerUserId(entryId, raceId, ownerUserId)
+                .orElseThrow(() -> new AppException(ErrorCode.ENTRY_NOT_FOUND));
+
+        // Confirming is only meaningful while the lineup can still change. Once the race is running
+        // or over, the entry status is a record of what happened and must not be rewritten.
+        if (race.getStatus() != RaceStatus.OPEN && race.getStatus() != RaceStatus.CLOSED
+                && race.getStatus() != RaceStatus.SCHEDULED) {
+            throw new AppException(ErrorCode.RACE_INVALID_STATUS);
+        }
+        if (entry.getStatus() == RaceEntryStatus.SCRATCHED
+                || entry.getStatus() == RaceEntryStatus.DISQUALIFIED) {
+            throw new AppException(ErrorCode.ENTRY_INVALID_STATUS);
+        }
+
+        // Idempotent: already confirmed → return the current state rather than erroring.
+        if (entry.getStatus() != RaceEntryStatus.CHECKED_IN) {
+            entry.setStatus(RaceEntryStatus.CHECKED_IN);
+            entry.setCheckedInAt(OffsetDateTime.now());
+            raceEntryRepository.save(entry);
+        }
+
+        return toMyEntryResponse(entry);
     }
 
     // ── helpers ──

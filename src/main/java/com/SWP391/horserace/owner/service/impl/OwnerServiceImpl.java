@@ -37,6 +37,7 @@ public class OwnerServiceImpl implements OwnerService {
     private final RaceEntryRepository raceEntryRepository;
     private final RaceResultRepository raceResultRepository;
     private final RegistrationRepository registrationRepository;
+    private final com.SWP391.horserace.wallets.repository.WalletTransactionRepository walletTransactionRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -239,4 +240,125 @@ public class OwnerServiceImpl implements OwnerService {
                 .updatedAt(h.getUpdatedAt())
                 .build();
     }
+
+    // ---------- Financial overview ----------
+
+    /** Ledger categories that put money INTO an owner's pocket. */
+    private static final java.util.Set<com.SWP391.horserace.wallets.entity.TxnCategory> INCOME_CATEGORIES =
+            java.util.EnumSet.of(com.SWP391.horserace.wallets.entity.TxnCategory.PRIZE,
+                    com.SWP391.horserace.wallets.entity.TxnCategory.BET_PAYOUT,
+                    com.SWP391.horserace.wallets.entity.TxnCategory.REFUND,
+                    com.SWP391.horserace.wallets.entity.TxnCategory.REWARD,
+                    com.SWP391.horserace.wallets.entity.TxnCategory.DEPOSIT);
+
+    @Override
+    @Transactional(readOnly = true)
+    public com.SWP391.horserace.owner.dto.OwnerFinanceResponse getFinances(UUID ownerUserId, int txnLimit) {
+        if (ownerUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        int limit = txnLimit <= 0 ? 20 : Math.min(txnLimit, 200);
+
+        var pageAll = walletTransactionRepository
+                .findByWallet_User_UserIdOrderByCreatedAtDesc(ownerUserId,
+                        org.springframework.data.domain.PageRequest.of(0, 500));
+        var ledger = pageAll.getContent();
+
+        // Direction is what the ledger says (CREDIT/DEBIT); the category only labels it for display.
+        BigDecimal income = BigDecimal.ZERO;
+        BigDecimal expense = BigDecimal.ZERO;
+        for (var t : ledger) {
+            if (t.getEntryType() == com.SWP391.horserace.wallets.entity.EntryType.CREDIT) {
+                income = income.add(nz(t.getAmount()));
+            } else {
+                expense = expense.add(nz(t.getAmount()));
+            }
+        }
+        BigDecimal net = income.subtract(expense);
+        BigDecimal margin = income.signum() == 0 ? BigDecimal.ZERO
+                : net.multiply(ONE_HUNDRED).divide(income, 1, java.math.RoundingMode.HALF_UP);
+
+        // Prize money per horse — race_entry.prize_earned is the column certify() actually writes.
+        List<RaceEntry> entries = raceEntryRepository.findByOwnerUserId(ownerUserId);
+        Map<String, BigDecimal> byHorse = new java.util.LinkedHashMap<>();
+        Map<String, String> horseIdByName = new java.util.HashMap<>();
+        for (RaceEntry e : entries) {
+            TournamentRegistration reg = e.getRegistration();
+            Horse h = reg != null ? reg.getHorse() : null;
+            if (h == null) {
+                continue;
+            }
+            byHorse.merge(h.getName(), nz(e.getPrizeEarned()), BigDecimal::add);
+            horseIdByName.putIfAbsent(h.getName(), h.getHorseId().toString());
+        }
+        BigDecimal top = byHorse.values().stream().max(BigDecimal::compareTo).orElse(BigDecimal.ZERO);
+        List<com.SWP391.horserace.owner.dto.OwnerFinanceResponse.HorseProfitability> horses = byHorse.entrySet().stream()
+                .sorted(Map.Entry.<String, BigDecimal>comparingByValue().reversed())
+                .limit(6)
+                .map(en -> com.SWP391.horserace.owner.dto.OwnerFinanceResponse.HorseProfitability.builder()
+                        .id(horseIdByName.get(en.getKey()))
+                        .name(en.getKey())
+                        .earnings(en.getValue())
+                        // percent is a presentation value the FE renders as a bar width, so it has
+                        // to be computed here rather than left to the page.
+                        .percent(top.signum() == 0 ? BigDecimal.ZERO
+                                : en.getValue().multiply(ONE_HUNDRED).divide(top, 0, java.math.RoundingMode.HALF_UP))
+                        .build())
+                .toList();
+
+        List<com.SWP391.horserace.owner.dto.OwnerFinanceResponse.FinanceTransaction> txns = ledger.stream()
+                .limit(limit)
+                .map(t -> com.SWP391.horserace.owner.dto.OwnerFinanceResponse.FinanceTransaction.builder()
+                        .id(t.getWalletTxnId().toString())
+                        .date(t.getCreatedAt() != null ? t.getCreatedAt().toString() : null)
+                        .description(describe(t))
+                        .horse("—")
+                        .category(INCOME_CATEGORIES.contains(t.getTxnCategory())
+                                && t.getEntryType() == com.SWP391.horserace.wallets.entity.EntryType.CREDIT
+                                ? "INCOME" : "EXPENSE")
+                        .amount(nz(t.getAmount()))
+                        .build())
+                .toList();
+
+        int year = java.time.Year.now().getValue();
+        return com.SWP391.horserace.owner.dto.OwnerFinanceResponse.builder()
+                .kpis(com.SWP391.horserace.owner.dto.OwnerFinanceResponse.Kpis.builder()
+                        .totalEarnings(income)
+                        .season(year + "-" + (year + 1))
+                        // No historical snapshots exist to diff against, so trends are reported as 0
+                        // rather than invented. Wire these up when period aggregates land.
+                        .earningsTrend(BigDecimal.ZERO)
+                        .pendingPayouts(BigDecimal.ZERO)
+                        .pendingCount(0)
+                        .pendingEtaDays(0)
+                        .totalExpenses(expense)
+                        .expensesTrend(BigDecimal.ZERO)
+                        .netProfit(net)
+                        .margin(margin)
+                        .build())
+                .horses(horses)
+                .transactions(txns)
+                .totalTransactions(pageAll.getTotalElements())
+                .build();
+    }
+
+    private static String describe(com.SWP391.horserace.wallets.entity.WalletTransaction t) {
+        return switch (t.getTxnCategory()) {
+            case PRIZE -> "Tiền thưởng giải";
+            case ENTRY_FEE -> "Phí tham dự cuộc đua";
+            case BET_STAKE -> "Đặt cược";
+            case BET_PAYOUT -> "Thắng cược";
+            case REFUND -> "Hoàn tiền";
+            case DEPOSIT -> "Nạp ví";
+            case WITHDRAWAL -> "Rút ví";
+            case REWARD -> "Phần thưởng";
+            case ADJUSTMENT -> "Điều chỉnh";
+        };
+    }
+
+    private static BigDecimal nz(BigDecimal v) {
+        return v != null ? v : BigDecimal.ZERO;
+    }
+
+    private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
 }

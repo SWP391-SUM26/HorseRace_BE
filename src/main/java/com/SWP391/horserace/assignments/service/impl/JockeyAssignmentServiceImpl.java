@@ -129,6 +129,7 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
 
         Page<JockeyAssignment> page;
 
+        boolean hasHorse = filter.getHorseId() != null;
         boolean hasJockey = filter.getJockeyUserId() != null;
         boolean hasOwner = filter.getOwnerUserId() != null;
         boolean hasStatus = filter.getStatus() != null && !filter.getStatus().isBlank();
@@ -141,7 +142,12 @@ public class JockeyAssignmentServiceImpl implements JockeyAssignmentService {
             return Page.empty(pageable);
         }
 
-        if (hasJockey && hasStatus) {
+        // horse is the most specific filter, so it wins when combined with others
+        if (hasHorse && hasStatus) {
+            page = assignmentRepository.findByHorseIdAndStatus(filter.getHorseId(), statusFilter, pageable);
+        } else if (hasHorse) {
+            page = assignmentRepository.findByHorseId(filter.getHorseId(), pageable);
+        } else if (hasJockey && hasStatus) {
             page = assignmentRepository.findByJockeyUserIdAndStatus(
                     filter.getJockeyUserId(), statusFilter, pageable);
         } else if (hasJockey) {

@@ -47,6 +47,13 @@ public interface RaceService {
 
     MyEntryResponse getMyEntry(UUID raceId, UUID ownerUserId);
 
+    /**
+     * Owner confirms their horse will take part ("xác nhận cho ngựa tham gia cuộc đua"):
+     * ENTERED → CHECKED_IN. Idempotent — re-confirming an already CHECKED_IN entry is a no-op so a
+     * page refresh or double click cannot fail.
+     */
+    MyEntryResponse confirmParticipation(UUID raceId, UUID entryId, UUID ownerUserId);
+
     /** Ids of OPEN races past their cutoff with no cancel proposal yet — driven by the auto-cancel sweeper. */
     List<UUID> findRacesToProposeCancel();
 

@@ -224,4 +224,23 @@ public class RaceController {
                 .data(raceService.getMyEntry(raceId, userId))
                 .build();
     }
+
+    /**
+     * PATCH /api/v1/races/{raceId}/entries/{entryId}/confirm — owner confirms this horse will run.
+     *
+     * <p>Keyed on the entry because an owner may run several horses in one race. The service scopes
+     * the lookup by owner, so another owner's entryId simply does not resolve.
+     */
+    @PatchMapping("/{raceId}/entries/{entryId}/confirm")
+    @PreAuthorize("hasRole('HORSE_OWNER')")
+    public ApiResponse<MyEntryResponse> confirmParticipation(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID raceId,
+            @PathVariable UUID entryId) {
+        return ApiResponse.<MyEntryResponse>builder()
+                .success(true)
+                .message("Participation confirmed")
+                .data(raceService.confirmParticipation(raceId, entryId, userId))
+                .build();
+    }
 }

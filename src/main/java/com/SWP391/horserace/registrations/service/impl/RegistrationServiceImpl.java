@@ -77,6 +77,16 @@ public class RegistrationServiceImpl implements RegistrationService {
                 && tournament.getStatus() != TournamentStatus.REGISTRATION_OPEN) {
             throw new AppException(ErrorCode.TOURNAMENT_NOT_ACCEPTING_REGISTRATION);
         }
+        // The status alone used to be the whole gate, so a PUBLISHED tournament whose window opens
+        // next month still accepted entries. Both bounds are optional: a null bound means "unbounded
+        // on that side", which keeps tournaments that never set a window behaving as before.
+        OffsetDateTime now = OffsetDateTime.now();
+        if (tournament.getRegistrationOpenAt() != null && now.isBefore(tournament.getRegistrationOpenAt())) {
+            throw new AppException(ErrorCode.REGISTRATION_WINDOW_NOT_OPEN);
+        }
+        if (tournament.getRegistrationCloseAt() != null && now.isAfter(tournament.getRegistrationCloseAt())) {
+            throw new AppException(ErrorCode.REGISTRATION_WINDOW_CLOSED);
+        }
 
         // No duplicate (tournament, horse) pair.
         if (registrationRepository.existsByTournament_TournamentIdAndHorse_HorseId(

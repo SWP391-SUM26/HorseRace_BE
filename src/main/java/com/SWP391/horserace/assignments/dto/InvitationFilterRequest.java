@@ -26,6 +26,9 @@ public class InvitationFilterRequest {
     /** Filter by the owner who sent the invitation. */
     private UUID ownerUserId;
 
+    /** Filter by horse — the riding roster for one horse. */
+    private UUID horseId;
+
     // -- pagination --
     @Builder.Default
     private Integer page = 0;

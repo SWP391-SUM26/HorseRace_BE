@@ -28,6 +28,7 @@ import com.SWP391.horserace.users.entity.KycStatus;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.users.entity.UserStatus;
 import com.SWP391.horserace.users.repository.UserRepository;
+import com.SWP391.horserace.users.service.UserCodeGenerator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -47,6 +48,7 @@ public class AuthServiceImpl implements AuthService {
     private static final String DEFAULT_GOOGLE_ROLE = "SPECTATOR";
 
     private final UserRepository userRepository;
+    private final UserCodeGenerator userCodeGenerator;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
@@ -368,9 +370,9 @@ public class AuthServiceImpl implements AuthService {
                 .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
     }
 
-    /** Generates a short, human-readable user code: {@code USR-XXXXXXXX}. */
+    /** Sequential user code (USR0009, USR0010...) — see {@link UserCodeGenerator}. */
     private String generateUserCode() {
-        return "USR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        return userCodeGenerator.generate();
     }
 
     /** Generates a short, human-readable application code: {@code APP-XXXXXXXX}. */
