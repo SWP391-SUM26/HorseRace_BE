@@ -576,24 +576,40 @@ public class RaceResultServiceImpl implements RaceResultService {
         // Settle the riders' wages. The owner's money has been locked since they sent the invitation;
         // the race has now been run, so it crosses to the jockey. Prize share and hire fee are
         // separate earnings — a jockey takes both.
-        for (JockeyAssignment ride : jockeyAssignmentRepository.findByRaceId(race.getRaceId())) {
+        List<JockeyAssignment> rides = jockeyAssignmentRepository.findByRaceId(race.getRaceId());
+        for (JockeyAssignment ride : rides) {
             if (ride.getStatus() == JockeyAssignmentStatus.ACCEPTED) {
                 jockeyFeeGate.payJockeyOnce(ride);
             }
         }
+        Map<UUID, User> jockeyByEntryId = new HashMap<>();
+        for (JockeyAssignment ride : rides) {
+            if (ride.getEntry() != null && ride.getJockey() != null) {
+                jockeyByEntryId.put(ride.getEntry().getEntryId(), ride.getJockey());
+            }
+        }
 
-        // Notify each owner whose horse ran that the official result is published.
+        // Notify each owner whose horse ran, and the jockey who rode it, that the official result
+        // is published.
         for (RaceResult result : results) {
             RaceEntry entry = result.getEntry();
             if (entry == null || entry.getRegistration() == null) continue;
             User owner = entry.getRegistration().getOwner();
-            if (owner == null) continue;
             String horse = entry.getRegistration().getHorse() != null
                     ? entry.getRegistration().getHorse().getName() : "Your horse";
             String pos = result.getFinishPosition() != null ? ordinal(result.getFinishPosition()) : "—";
-            notificationService.notifyUser(owner.getUserId(),
-                    "Official results published",
-                    (race.getName() != null ? race.getName() : "Your race") + ": " + horse + " finished " + pos + ".");
+            String raceName = race.getName() != null ? race.getName() : "Your race";
+            if (owner != null) {
+                notificationService.notifyUser(owner.getUserId(),
+                        "Official results published",
+                        raceName + ": " + horse + " finished " + pos + ".");
+            }
+            User jockey = jockeyByEntryId.get(entry.getEntryId());
+            if (jockey != null) {
+                notificationService.notifyUser(jockey.getUserId(),
+                        "Official results published",
+                        raceName + ": you finished " + pos + " on " + horse + ".");
+            }
         }
 
         return CertifyResultsResponse.builder()

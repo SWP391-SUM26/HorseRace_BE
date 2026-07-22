@@ -275,6 +275,12 @@ public class SettlementServiceImpl implements SettlementService {
         }
         p.setStatus(PredictionStatus.WON);
         p.setSettledAt(now);
+        // The payout amount was already computed above — persist it (and the effective per-unit
+        // odds it implies) so GET /predictions/me shows the real payout instead of null.
+        p.setPotentialPayout(payout);
+        if (p.getStakeAmount() != null && p.getStakeAmount().signum() > 0) {
+            p.setLockedOdds(payout.divide(p.getStakeAmount(), 2, RoundingMode.HALF_UP));
+        }
         predictionRepository.save(p);
 
         // Skip zero payouts — the ledger rejects non-positive amounts (no house move either).

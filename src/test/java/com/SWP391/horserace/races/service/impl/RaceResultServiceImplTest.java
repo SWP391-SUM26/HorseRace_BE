@@ -2,6 +2,7 @@ package com.SWP391.horserace.races.service.impl;
 
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
+import com.SWP391.horserace.assignments.service.JockeyFeeGate;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.jockeys.entity.JockeyProfile;
 import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
@@ -93,6 +94,7 @@ class RaceResultServiceImplTest {
     @Mock WalletLedgerService walletLedgerService;
     @Mock WalletService walletService;
     @Mock HouseWalletService houseWalletService;
+    @Mock JockeyFeeGate jockeyFeeGate;
 
     private RaceResultServiceImpl service;
 
@@ -116,7 +118,8 @@ class RaceResultServiceImplTest {
                 raceResultVersionRepository, jockeyAssignmentRepository, userRepository,
                 notificationService, refereeSubmissionCodeService, violationService,
                 registrationRepository, penaltyRepository, prizeRepository, jockeyProfileRepository,
-                refereeAssignmentRepository, walletLedgerService, walletService, houseWalletService);
+                refereeAssignmentRepository, walletLedgerService, walletService, houseWalletService,
+                jockeyFeeGate);
         // #8: most getResults tests build a tournament-less race → repo is not queried; keep this
         // lenient so the stub is harmless where the NOT-ENTERED path is never reached.
         lenient().when(registrationRepository.findApprovedNotEnteredInRace(any(), any()))

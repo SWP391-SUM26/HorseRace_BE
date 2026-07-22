@@ -6,6 +6,7 @@ import com.SWP391.horserace.assignments.dto.SendInvitationRequest;
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
 import com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
+import com.SWP391.horserace.assignments.service.JockeyFeeGate;
 import com.SWP391.horserace.prizes.entity.BeneficiaryType;
 import com.SWP391.horserace.prizes.entity.Prize;
 import com.SWP391.horserace.prizes.repository.PrizeRepository;
@@ -53,6 +54,7 @@ class JockeyAssignmentServiceImplTest {
     @Mock UserRepository userRepository;
     @Mock RaceResultRepository raceResultRepository;
     @Mock PrizeRepository prizeRepository;
+    @Mock JockeyFeeGate jockeyFeeGate;
     @Mock NotificationService notificationService;
 
     private JockeyAssignmentServiceImpl service;
@@ -63,7 +65,7 @@ class JockeyAssignmentServiceImplTest {
     void setUp() {
         service = new JockeyAssignmentServiceImpl(
                 assignmentRepository, raceEntryRepository, jockeyProfileRepository,
-                userRepository, raceResultRepository, prizeRepository, notificationService);
+                userRepository, raceResultRepository, prizeRepository, jockeyFeeGate, notificationService);
     }
 
     // -- builders for a full assignment graph --

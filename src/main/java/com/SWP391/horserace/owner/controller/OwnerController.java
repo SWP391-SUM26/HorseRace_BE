@@ -84,4 +84,21 @@ public class OwnerController {
                 .data(ownerService.getFinances(userId, txnLimit))
                 .build();
     }
+
+    /**
+     * GET /api/v1/owner/finances/races — per-race prize-won vs. jockey-fee-paid breakdown for the
+     * caller, scoped to races that have reached OFFICIAL (prize + jockey fee are settled together
+     * at certify time). Most recently settled race first.
+     */
+    @GetMapping("/finances/races")
+    @PreAuthorize("hasRole('HORSE_OWNER')")
+    public ApiResponse<List<com.SWP391.horserace.owner.dto.OwnerRaceEarningsRow>> getRaceEarnings(
+            @AuthenticationPrincipal UUID userId,
+            @RequestParam(value = "limit", defaultValue = "20") int limit) {
+        return ApiResponse.<List<com.SWP391.horserace.owner.dto.OwnerRaceEarningsRow>>builder()
+                .success(true)
+                .message("Fetched owner race earnings")
+                .data(ownerService.getRaceEarnings(userId, limit))
+                .build();
+    }
 }

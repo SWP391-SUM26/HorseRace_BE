@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -352,4 +353,21 @@ public interface JockeyAssignmentRepository extends JpaRepository<JockeyAssignme
     /** Every hire on a race, so cancelling the race can unlock all of them. */
     @Query("SELECT ja FROM JockeyAssignment ja WHERE ja.entry.race.raceId = :raceId")
     List<JockeyAssignment> findByRaceId(@Param("raceId") UUID raceId);
+
+    /** Per-race total: what this owner has actually paid out in jockey hire fees, for each race. */
+    @Query("""
+        SELECT ja.entry.race.raceId AS raceId, COALESCE(SUM(ja.feeHeldAmount), 0) AS total
+          FROM JockeyAssignment ja
+         WHERE ja.entry.race.raceId IN :raceIds
+           AND ja.entry.registration.owner.userId = :ownerUserId
+           AND ja.feePaidAt IS NOT NULL
+         GROUP BY ja.entry.race.raceId
+        """)
+    List<RaceFeeTotal> sumJockeyFeePaidByRaceIds(@Param("raceIds") Collection<UUID> raceIds,
+                                                  @Param("ownerUserId") UUID ownerUserId);
+
+    interface RaceFeeTotal {
+        UUID getRaceId();
+        BigDecimal getTotal();
+    }
 }

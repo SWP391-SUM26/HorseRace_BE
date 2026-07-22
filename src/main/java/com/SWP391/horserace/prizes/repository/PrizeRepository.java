@@ -34,6 +34,20 @@ public interface PrizeRepository extends JpaRepository<Prize, UUID> {
             + "WHERE p.beneficiaryUser.userId = :userId AND p.beneficiaryType = :type")
     BigDecimal sumByBeneficiary(@Param("userId") UUID userId, @Param("type") BeneficiaryType type);
 
+    /** Per-race total: what this owner was actually awarded as prize, for each of the given races. */
+    @Query("SELECT p.race.raceId AS raceId, COALESCE(SUM(p.prizeAmount), 0) AS total FROM Prize p "
+            + "WHERE p.race.raceId IN :raceIds "
+            + "AND p.beneficiaryType = com.SWP391.horserace.prizes.entity.BeneficiaryType.OWNER "
+            + "AND p.beneficiaryUser.userId = :ownerUserId "
+            + "GROUP BY p.race.raceId")
+    List<RacePrizeTotal> sumOwnerPrizeByRaceIds(@Param("raceIds") Collection<UUID> raceIds,
+                                                 @Param("ownerUserId") UUID ownerUserId);
+
+    interface RacePrizeTotal {
+        UUID getRaceId();
+        BigDecimal getTotal();
+    }
+
     /** Batch lookup for per-ride earnings — avoids a query per row when listing a jockey's rides. */
     List<Prize> findByPrizeCodeIn(Collection<String> prizeCodes);
 

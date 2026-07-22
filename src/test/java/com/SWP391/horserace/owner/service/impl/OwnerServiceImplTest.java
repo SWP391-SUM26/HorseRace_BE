@@ -1,16 +1,21 @@
 package com.SWP391.horserace.owner.service.impl;
 
+import com.SWP391.horserace.assignments.entity.JockeyAssignment;
+import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
 import com.SWP391.horserace.horses.dto.HorseResponse;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.horses.entity.HorseStatus;
 import com.SWP391.horserace.horses.repository.HorseRepository;
 import com.SWP391.horserace.owner.dto.OwnerOverviewResponse;
+import com.SWP391.horserace.owner.dto.OwnerRaceEarningsRow;
 import com.SWP391.horserace.owner.dto.OwnerRaceReportRow;
+import com.SWP391.horserace.prizes.repository.PrizeRepository;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
 import com.SWP391.horserace.races.entity.RaceEntryStatus;
 import com.SWP391.horserace.races.entity.RaceResult;
 import com.SWP391.horserace.races.repository.RaceEntryRepository;
+import com.SWP391.horserace.tournaments.entity.Tournament;
 import com.SWP391.horserace.races.repository.RaceResultRepository;
 import com.SWP391.horserace.registrations.entity.RegistrationStatus;
 import com.SWP391.horserace.registrations.entity.TournamentRegistration;
@@ -42,6 +47,8 @@ class OwnerServiceImplTest {
     @Mock RaceResultRepository raceResultRepository;
     @Mock RegistrationRepository registrationRepository;
     @Mock com.SWP391.horserace.wallets.repository.WalletTransactionRepository walletTransactionRepository;
+    @Mock PrizeRepository prizeRepository;
+    @Mock JockeyAssignmentRepository jockeyAssignmentRepository;
 
     private OwnerServiceImpl service;
 
@@ -52,7 +59,8 @@ class OwnerServiceImplTest {
     void setUp() {
         owner = User.builder().userId(ownerId).fullName("Owen Owner").build();
         service = new OwnerServiceImpl(
-                horseRepository, raceEntryRepository, raceResultRepository, registrationRepository, walletTransactionRepository);
+                horseRepository, raceEntryRepository, raceResultRepository, registrationRepository,
+                walletTransactionRepository, prizeRepository, jockeyAssignmentRepository);
     }
 
     private Horse horse(String code, String name, HorseStatus status, BigDecimal earnings) {
@@ -310,5 +318,127 @@ class OwnerServiceImplTest {
         assertThat(row.isEntered()).isTrue();
         assertThat(row.isParticipated()).isFalse();
         assertThat(row.getEntryStatus()).isEqualTo("SCRATCHED");
+    }
+
+    // ── getRaceEarnings ──
+
+    private static PrizeRepository.RacePrizeTotal prizeTotal(UUID raceId, BigDecimal total) {
+        PrizeRepository.RacePrizeTotal row = org.mockito.Mockito.mock(PrizeRepository.RacePrizeTotal.class);
+        when(row.getRaceId()).thenReturn(raceId);
+        when(row.getTotal()).thenReturn(total);
+        return row;
+    }
+
+    private static JockeyAssignmentRepository.RaceFeeTotal feeTotal(UUID raceId, BigDecimal total) {
+        JockeyAssignmentRepository.RaceFeeTotal row =
+                org.mockito.Mockito.mock(JockeyAssignmentRepository.RaceFeeTotal.class);
+        when(row.getRaceId()).thenReturn(raceId);
+        when(row.getTotal()).thenReturn(total);
+        return row;
+    }
+
+    private RaceEntry officialEntry(Race race, Horse h) {
+        TournamentRegistration reg = TournamentRegistration.builder()
+                .registrationId(UUID.randomUUID())
+                .owner(owner)
+                .horse(h)
+                .build();
+        return RaceEntry.builder()
+                .entryId(UUID.randomUUID())
+                .entryCode("ENT" + UUID.randomUUID())
+                .registration(reg)
+                .race(race)
+                .status(RaceEntryStatus.FINISHED)
+                .build();
+    }
+
+    @Test
+    void getRaceEarnings_nullPrincipal_unauthenticated() {
+        assertThatThrownBy(() -> service.getRaceEarnings(null, 20))
+                .isInstanceOf(AppException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNAUTHENTICATED);
+    }
+
+    @Test
+    void getRaceEarnings_noOfficialRaces_returnsEmpty() {
+        when(raceEntryRepository.findOfficialByOwnerUserId(ownerId)).thenReturn(List.of());
+
+        assertThat(service.getRaceEarnings(ownerId, 20)).isEmpty();
+    }
+
+    @Test
+    void getRaceEarnings_singleRaceHappyPath() {
+        Tournament tournament = Tournament.builder().tournamentId(UUID.randomUUID()).name("Cúp Mùa Xuân").build();
+        Race race = Race.builder()
+                .raceId(UUID.randomUUID())
+                .raceCode("RACE0001")
+                .name("Chung kết")
+                .tournament(tournament)
+                .scheduledStartAt(OffsetDateTime.parse("2026-04-27T00:00:00Z"))
+                .build();
+        Horse h = horse("HRS0001", "Midnight", HorseStatus.ACTIVE, BigDecimal.ZERO);
+        RaceEntry entry = officialEntry(race, h);
+
+        User jockey = User.builder().userId(UUID.randomUUID()).fullName("Lý Tuấn Kiệt").build();
+        JockeyAssignment ride = JockeyAssignment.builder().entry(entry).jockey(jockey).build();
+
+        var prize500k = prizeTotal(race.getRaceId(), new BigDecimal("500000"));
+        var fee100k = feeTotal(race.getRaceId(), new BigDecimal("100000"));
+        when(raceEntryRepository.findOfficialByOwnerUserId(ownerId)).thenReturn(List.of(entry));
+        when(prizeRepository.sumOwnerPrizeByRaceIds(anyCollection(), org.mockito.ArgumentMatchers.eq(ownerId)))
+                .thenReturn(List.of(prize500k));
+        when(jockeyAssignmentRepository.sumJockeyFeePaidByRaceIds(anyCollection(), org.mockito.ArgumentMatchers.eq(ownerId)))
+                .thenReturn(List.of(fee100k));
+        when(jockeyAssignmentRepository.findAcceptedByEntryIds(anyCollection())).thenReturn(List.of(ride));
+
+        List<OwnerRaceEarningsRow> rows = service.getRaceEarnings(ownerId, 20);
+
+        assertThat(rows).hasSize(1);
+        OwnerRaceEarningsRow row = rows.get(0);
+        assertThat(row.getRaceId()).isEqualTo(race.getRaceId());
+        assertThat(row.getRaceName()).isEqualTo("Chung kết");
+        assertThat(row.getTournamentName()).isEqualTo("Cúp Mùa Xuân");
+        assertThat(row.getHorseName()).isEqualTo("Midnight");
+        assertThat(row.getJockeyName()).isEqualTo("Lý Tuấn Kiệt");
+        assertThat(row.getPrizeWon()).isEqualByComparingTo("500000");
+        assertThat(row.getJockeyPaid()).isEqualByComparingTo("100000");
+        assertThat(row.getNet()).isEqualByComparingTo("400000");
+    }
+
+    @Test
+    void getRaceEarnings_multipleEntriesSameRace_sumsAndJoinsNames() {
+        Race race = Race.builder()
+                .raceId(UUID.randomUUID())
+                .raceCode("RACE0002")
+                .name("Vòng loại")
+                .scheduledStartAt(OffsetDateTime.parse("2026-05-01T00:00:00Z"))
+                .build();
+        Horse h1 = horse("HRS0001", "Midnight", HorseStatus.ACTIVE, BigDecimal.ZERO);
+        Horse h2 = horse("HRS0002", "Storm", HorseStatus.ACTIVE, BigDecimal.ZERO);
+        RaceEntry entry1 = officialEntry(race, h1);
+        RaceEntry entry2 = officialEntry(race, h2);
+
+        User jockey1 = User.builder().userId(UUID.randomUUID()).fullName("Lý Tuấn Kiệt").build();
+        User jockey2 = User.builder().userId(UUID.randomUUID()).fullName("Trịnh Gia Huy").build();
+        JockeyAssignment ride1 = JockeyAssignment.builder().entry(entry1).jockey(jockey1).build();
+        JockeyAssignment ride2 = JockeyAssignment.builder().entry(entry2).jockey(jockey2).build();
+
+        var prize700k = prizeTotal(race.getRaceId(), new BigDecimal("700000"));
+        var fee250k = feeTotal(race.getRaceId(), new BigDecimal("250000"));
+        when(raceEntryRepository.findOfficialByOwnerUserId(ownerId)).thenReturn(List.of(entry1, entry2));
+        when(prizeRepository.sumOwnerPrizeByRaceIds(anyCollection(), org.mockito.ArgumentMatchers.eq(ownerId)))
+                .thenReturn(List.of(prize700k));
+        when(jockeyAssignmentRepository.sumJockeyFeePaidByRaceIds(anyCollection(), org.mockito.ArgumentMatchers.eq(ownerId)))
+                .thenReturn(List.of(fee250k));
+        when(jockeyAssignmentRepository.findAcceptedByEntryIds(anyCollection())).thenReturn(List.of(ride1, ride2));
+
+        List<OwnerRaceEarningsRow> rows = service.getRaceEarnings(ownerId, 20);
+
+        assertThat(rows).hasSize(1);
+        OwnerRaceEarningsRow row = rows.get(0);
+        assertThat(row.getHorseName()).isEqualTo("Midnight, Storm");
+        assertThat(row.getJockeyName()).isEqualTo("Lý Tuấn Kiệt, Trịnh Gia Huy");
+        assertThat(row.getPrizeWon()).isEqualByComparingTo("700000");
+        assertThat(row.getJockeyPaid()).isEqualByComparingTo("250000");
     }
 }

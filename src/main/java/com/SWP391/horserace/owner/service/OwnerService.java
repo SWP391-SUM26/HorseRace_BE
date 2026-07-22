@@ -2,6 +2,7 @@ package com.SWP391.horserace.owner.service;
 
 import com.SWP391.horserace.horses.dto.HorseResponse;
 import com.SWP391.horserace.owner.dto.OwnerOverviewResponse;
+import com.SWP391.horserace.owner.dto.OwnerRaceEarningsRow;
 import com.SWP391.horserace.owner.dto.OwnerRaceReportRow;
 
 import java.util.List;
@@ -24,4 +25,7 @@ public interface OwnerService {
 
     /** Financial overview built from the owner's wallet ledger + per-horse prize money. */
     com.SWP391.horserace.owner.dto.OwnerFinanceResponse getFinances(UUID ownerUserId, int txnLimit);
+
+    /** Per-race prize-won vs. jockey-fee-paid breakdown, most recently settled race first. */
+    List<OwnerRaceEarningsRow> getRaceEarnings(UUID ownerUserId, int limit);
 }
