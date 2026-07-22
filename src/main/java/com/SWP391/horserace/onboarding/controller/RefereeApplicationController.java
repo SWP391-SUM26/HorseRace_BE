@@ -115,16 +115,6 @@ public class RefereeApplicationController {
                 .build();
     }
 
-    /** GET — previous applications by the same applicant. */
-    @GetMapping("/{id}/history")
-    @PreAuthorize("hasRole('RACE_REFEREE')")
-    public ApiResponse<List<ApplicationSummary>> history(@PathVariable("id") UUID id) {
-        return ApiResponse.<List<ApplicationSummary>>builder()
-                .success(true)
-                .message("Fetched application history")
-                .data(applicationService.history(id))
-                .build();
-    }
 
     /** GET — full dossier export (STUB). */
     @GetMapping("/{id}/dossier")

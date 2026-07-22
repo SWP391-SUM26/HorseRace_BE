@@ -6,6 +6,9 @@ import com.SWP391.horserace.assignments.dto.SendInvitationRequest;
 import com.SWP391.horserace.assignments.entity.JockeyAssignment;
 import com.SWP391.horserace.assignments.entity.JockeyAssignmentStatus;
 import com.SWP391.horserace.assignments.repository.JockeyAssignmentRepository;
+import com.SWP391.horserace.prizes.entity.BeneficiaryType;
+import com.SWP391.horserace.prizes.entity.Prize;
+import com.SWP391.horserace.prizes.repository.PrizeRepository;
 import com.SWP391.horserace.horses.entity.Horse;
 import com.SWP391.horserace.jockeys.entity.JockeyProfile;
 import com.SWP391.horserace.jockeys.repository.JockeyProfileRepository;
@@ -49,6 +52,7 @@ class JockeyAssignmentServiceImplTest {
     @Mock JockeyProfileRepository jockeyProfileRepository;
     @Mock UserRepository userRepository;
     @Mock RaceResultRepository raceResultRepository;
+    @Mock PrizeRepository prizeRepository;
     @Mock NotificationService notificationService;
 
     private JockeyAssignmentServiceImpl service;
@@ -59,7 +63,7 @@ class JockeyAssignmentServiceImplTest {
     void setUp() {
         service = new JockeyAssignmentServiceImpl(
                 assignmentRepository, raceEntryRepository, jockeyProfileRepository,
-                userRepository, raceResultRepository, notificationService);
+                userRepository, raceResultRepository, prizeRepository, notificationService);
     }
 
     // -- builders for a full assignment graph --
@@ -219,12 +223,22 @@ class JockeyAssignmentServiceImplTest {
         // results: the past ride finished 1st
         RaceResult res = RaceResult.builder().entry(past.getEntry()).finishPosition(1).build();
         when(raceResultRepository.findByEntry_EntryIdIn(anyCollection())).thenReturn(List.of(res));
+        // The prize row actually credited to the rider: a 10% cut of the horse's 100.
+        when(prizeRepository.findByPrizeCodeIn(anyCollection())).thenReturn(List.of(
+                Prize.builder()
+                        .prizeCode("PRZ-J-" + past.getEntry().getEntryId())
+                        .beneficiaryType(BeneficiaryType.JOCKEY)
+                        .prizeAmount(new BigDecimal("10"))
+                        .build()));
 
         List<JockeyRideResponse> pastRides = service.getMyRides(jockeyId, "PAST");
         assertThat(pastRides).hasSize(1);
         assertThat(pastRides.get(0).getFinishPosition()).isEqualTo(1);
         assertThat(pastRides.get(0).getVenue()).isEqualTo("V");
-        assertThat(pastRides.get(0).getEarnings()).isEqualByComparingTo("100");
+        // `earnings` is the RIDER's cut (the JOCKEY prize row), not the horse's 100 — the two were
+        // conflated, so every ride advertised the owner's money as the jockey's.
+        assertThat(pastRides.get(0).getEarnings()).isEqualByComparingTo("10");
+        assertThat(pastRides.get(0).getHorsePrize()).isEqualByComparingTo("100");
 
         List<JockeyRideResponse> upcomingRides = service.getMyRides(jockeyId, "UPCOMING");
         assertThat(upcomingRides).hasSize(1);

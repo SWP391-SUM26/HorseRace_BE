@@ -40,6 +40,8 @@ class LiveRaceServiceImplTest {
     @Mock RaceResultRepository raceResultRepository;
     @Mock RaceEntryRepository raceEntryRepository;
     @Mock JockeyAssignmentRepository jockeyAssignmentRepository;
+    @Mock com.SWP391.horserace.staffing.repository.RefereeAssignmentRepository refereeAssignmentRepository;
+    @Mock com.SWP391.horserace.users.repository.UserRepository userRepository;
 
     private LiveRaceServiceImpl service;
 
@@ -54,7 +56,8 @@ class LiveRaceServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new LiveRaceServiceImpl(
-                raceRepository, raceResultRepository, raceEntryRepository, jockeyAssignmentRepository);
+                raceRepository, raceResultRepository, raceEntryRepository, jockeyAssignmentRepository,
+                refereeAssignmentRepository, userRepository);
 
         race = Race.builder()
                 .raceId(raceId)

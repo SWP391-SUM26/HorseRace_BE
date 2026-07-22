@@ -77,10 +77,27 @@ public class RegistrationServiceImpl implements RegistrationService {
                 && tournament.getStatus() != TournamentStatus.REGISTRATION_OPEN) {
             throw new AppException(ErrorCode.TOURNAMENT_NOT_ACCEPTING_REGISTRATION);
         }
+        // The status alone used to be the whole gate, so a PUBLISHED tournament whose window opens
+        // next month still accepted entries. Both bounds are optional: a null bound means "unbounded
+        // on that side", which keeps tournaments that never set a window behaving as before.
+        OffsetDateTime now = OffsetDateTime.now();
+        if (tournament.getRegistrationOpenAt() != null && now.isBefore(tournament.getRegistrationOpenAt())) {
+            throw new AppException(ErrorCode.REGISTRATION_WINDOW_NOT_OPEN);
+        }
+        if (tournament.getRegistrationCloseAt() != null && now.isAfter(tournament.getRegistrationCloseAt())) {
+            throw new AppException(ErrorCode.REGISTRATION_WINDOW_CLOSED);
+        }
 
-        // No duplicate (tournament, horse) pair.
-        if (registrationRepository.existsByTournament_TournamentIdAndHorse_HorseId(
-                tournament.getTournamentId(), horse.getHorseId())) {
+        // One live registration per (tournament, horse). A registration that ended — rejected,
+        // withdrawn or removed — must NOT block a fresh attempt: the owner has already paid the fee
+        // and been refunded, and blocking them here would leave them permanently unable to enter a
+        // tournament they just paid for. The DB UNIQUE(tournament_id, horse_id) still holds, so the
+        // dead row is REUSED rather than a second one inserted.
+        TournamentRegistration existing = registrationRepository
+                .findFirstByTournament_TournamentIdAndHorse_HorseId(
+                        tournament.getTournamentId(), horse.getHorseId())
+                .orElse(null);
+        if (existing != null && !isTerminal(existing.getStatus())) {
             throw new AppException(ErrorCode.REGISTRATION_ALREADY_EXISTS);
         }
 
@@ -100,17 +117,47 @@ public class RegistrationServiceImpl implements RegistrationService {
         User owner = userRepository.findByUserIdAndDeletedFalse(currentUserId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
 
-        TournamentRegistration registration = TournamentRegistration.builder()
-                .owner(owner)
-                .tournament(tournament)
-                .horse(horse)
-                .race(chosenRace)
-                .registrationCode(generateRegistrationCode())
-                .status(RegistrationStatus.SUBMITTED)
-                .submittedAt(OffsetDateTime.now())
-                .build();
+        TournamentRegistration registration;
+        if (existing != null) {
+            // Reuse the terminated row (see the duplicate check above). Both fee stamps are cleared
+            // so the new attempt is charged again — the previous cycle was already refunded.
+            registration = existing;
+            registration.setOwner(owner);
+            registration.setRace(chosenRace);
+            registration.setStatus(RegistrationStatus.SUBMITTED);
+            registration.setSubmittedAt(OffsetDateTime.now());
+            registration.setReviewedAt(null);
+            registration.setApprovedBy(null);
+            registration.setRejectionReason(null);
+            registration.setEntryFeeAmount(null);
+            registration.setEntryFeePaidAt(null);
+            registration.setEntryFeeRefundedAt(null);
+        } else {
+            registration = TournamentRegistration.builder()
+                    .owner(owner)
+                    .tournament(tournament)
+                    .horse(horse)
+                    .race(chosenRace)
+                    .registrationCode(generateRegistrationCode())
+                    .status(RegistrationStatus.SUBMITTED)
+                    .submittedAt(OffsetDateTime.now())
+                    .build();
+        }
 
-        return mapToResponse(registrationRepository.save(registration));
+        TournamentRegistration saved = registrationRepository.save(registration);
+
+        // Charge HERE, not at approval. Inside the same transaction and after every validation, so
+        // an insufficient balance rolls the whole submission back and the error reaches the person
+        // whose wallet it is. It used to fire inside the REFEREE's approve transaction, telling them
+        // about someone else's money and silently discarding their approval.
+        //
+        // No race chosen means no fee is knowable (the fee lives on the race); the charge then
+        // happens wherever the race is first picked.
+        if (chosenRace != null) {
+            raceEntryGate.chargeEntryFeeOnce(saved, chosenRace);
+        }
+
+        return mapToResponse(saved);
     }
 
     @Override
@@ -209,6 +256,8 @@ public class RegistrationServiceImpl implements RegistrationService {
         registration.setStatus(RegistrationStatus.REJECTED);
         registration.setRejectionReason(request.reason());
         registration.setReviewedAt(OffsetDateTime.now());
+        // The owner paid at submit; a rejection must give it back. No-op if they never paid.
+        raceEntryGate.refundEntryFeeOnce(registration);
 
         return mapToResponse(registrationRepository.save(registration));
     }
@@ -228,6 +277,7 @@ public class RegistrationServiceImpl implements RegistrationService {
                 RegistrationStatus.DRAFT, RegistrationStatus.SUBMITTED, RegistrationStatus.UNDER_REVIEW);
 
         registration.setStatus(RegistrationStatus.WITHDRAWN);
+        raceEntryGate.refundEntryFeeOnce(registration);
 
         return mapToResponse(registrationRepository.save(registration));
     }
@@ -254,16 +304,27 @@ public class RegistrationServiceImpl implements RegistrationService {
                 // race_result, inspections) are RESTRICT and would throw a DataIntegrityViolation.
                 entry.setStatus(RaceEntryStatus.SCRATCHED);
                 raceEntryRepository.save(entry);
-                // Return the entry fee to the owner (no-op when the race had no fee).
-                raceEntryGate.refundEntryFee(registration, race);
+                // (refund happens below, outside this branch — an unapproved registration can
+                //  also hold a paid fee)
             });
         }
+
+        // Outside the APPROVED branch on purpose: under charge-at-submit a registration that was
+        // never approved can still hold a paid fee, and leaving the refund inside would strand it.
+        raceEntryGate.refundEntryFeeOnce(registration);
 
         registration.setStatus(RegistrationStatus.REMOVED);
         registrationRepository.save(registration);
     }
 
     // ── helpers ──
+
+    /** A registration in one of these states is finished with — it no longer holds its slot. */
+    private static boolean isTerminal(RegistrationStatus status) {
+        return status == RegistrationStatus.REJECTED
+                || status == RegistrationStatus.WITHDRAWN
+                || status == RegistrationStatus.REMOVED;
+    }
 
     private TournamentRegistration loadRegistration(UUID id) {
         return registrationRepository.findById(id)
@@ -288,8 +349,11 @@ public class RegistrationServiceImpl implements RegistrationService {
             throw new AppException(ErrorCode.RACE_FULL);
         }
 
-        // Eligibility (health + age) + entry-fee debit before the entry is created.
-        raceEntryGate.admit(registration, race);
+        // Eligibility must re-run at approval — a horse can be injured between submit and approve.
+        // The charge is a safety net only: a registration carrying a race already paid at submit,
+        // so the claim returns 0 and nothing moves. It exists for rows created before this change.
+        raceEntryGate.checkEligibility(registration.getHorse(), race.getTournament());
+        raceEntryGate.chargeEntryFeeOnce(registration, race);
 
         RaceEntry entry = RaceEntry.builder()
                 .registration(registration)

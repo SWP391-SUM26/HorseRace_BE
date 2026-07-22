@@ -38,3 +38,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Ảnh seed dựng ra được từ scripts/seed/sources/ — không commit
+scripts/seed/build/

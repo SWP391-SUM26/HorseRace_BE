@@ -9,9 +9,14 @@
 --   4. payment_transaction: + idempotency_key, gateway_provider, raw_payload(JSONB), wallet_id
 --      -> phục vụ cổng thanh toán GIẢ LẬP (mock gateway), nạp/rút idempotent, reconcilable
 --   5. notification: + is_read (tách read-state khỏi delivery_status); delivery_status bỏ 'READ'
+--   6. GỠ 3 bảng chưa từng được code dùng (không repository, không service/controller):
+--      tournament_round (kèm cột race.round_id), standing, audit_log.
+--      -> 46 bảng còn 43. Entity tương ứng cũng đã xoá để ddl-auto=validate không fail.
+--   7. GỠ 2 role thừa TRAINER/VET (0 user, 0 role_permission)
+--      -> membership_application.requested_role chỉ còn ('OWNER','JOCKEY').
 --
 -- Kế thừa nguyên vẹn V3:
---   - tournament_round, jockey_profile, penalty, standing
+--   - jockey_profile, penalty
 --   - NOT NULL cho FK nghiệp vụ; cho phép đồng hạng (dead-heat); CHECK prize; index.
 --   - schema-only: KHÔNG trigger/function. updated_at do app quản qua @UpdateTimestamp.
 --
@@ -30,7 +35,6 @@ DROP TABLE IF EXISTS email_verification_token CASCADE;
 DROP TABLE IF EXISTS password_reset_token     CASCADE;
 DROP TABLE IF EXISTS refresh_token            CASCADE;
 DROP TABLE IF EXISTS notification             CASCADE;
-DROP TABLE IF EXISTS audit_log                CASCADE;
 DROP TABLE IF EXISTS attachment               CASCADE;
 DROP TABLE IF EXISTS prize                    CASCADE;
 DROP TABLE IF EXISTS payout                   CASCADE;
@@ -38,12 +42,12 @@ DROP TABLE IF EXISTS prediction               CASCADE;
 DROP TABLE IF EXISTS wallet_transaction       CASCADE;
 DROP TABLE IF EXISTS payment_transaction      CASCADE;
 DROP TABLE IF EXISTS wallet                   CASCADE;
-DROP TABLE IF EXISTS standing                 CASCADE;
 DROP TABLE IF EXISTS race_violation           CASCADE;
 DROP TABLE IF EXISTS penalty                  CASCADE;
 DROP TABLE IF EXISTS referee_report           CASCADE;
 DROP TABLE IF EXISTS race_result_version      CASCADE;
 DROP TABLE IF EXISTS race_result              CASCADE;
+DROP TABLE IF EXISTS tournament_referee_assignment CASCADE;
 DROP TABLE IF EXISTS referee_assignment       CASCADE;
 DROP TABLE IF EXISTS jockey_assignment        CASCADE;
 DROP TABLE IF EXISTS entry_document_review    CASCADE;
@@ -54,13 +58,13 @@ DROP TABLE IF EXISTS race_prize_distribution   CASCADE;
 DROP TABLE IF EXISTS race_fraction            CASCADE;
 DROP TABLE IF EXISTS tournament_venue         CASCADE;  -- child of tournament + venue
 DROP TABLE IF EXISTS race                     CASCADE;  -- FKs venue -> drop before venue
-DROP TABLE IF EXISTS tournament_round         CASCADE;
 DROP TABLE IF EXISTS tournament               CASCADE;
 DROP TABLE IF EXISTS venue                    CASCADE;  -- after race + tournament_venue
 DROP TABLE IF EXISTS horse_medical_record     CASCADE;
 DROP TABLE IF EXISTS horse_characteristic     CASCADE;
 DROP TABLE IF EXISTS horse                    CASCADE;
 DROP TABLE IF EXISTS jockey_profile           CASCADE;
+DROP TABLE IF EXISTS owner_profile            CASCADE;
 DROP TABLE IF EXISTS membership_application    CASCADE;  -- FKs app_user: drop child before app_user
 DROP TABLE IF EXISTS app_user                 CASCADE;
 DROP TABLE IF EXISTS role                     CASCADE;
@@ -142,8 +146,10 @@ CREATE TABLE jockey_profile (
     riding_style   VARCHAR(50),                                                          -- e.g. Stalker / Closer
     win_rate       NUMERIC(5,2) CHECK (win_rate IS NULL OR (win_rate BETWEEN 0 AND 100)),-- win % e.g. 62.50
     recent_form    VARCHAR(50),                                                          -- comma-joined form, e.g. "W,L,W,W,L"
-    base_fee       NUMERIC(18,2),                                                        -- hire fee
-    prize_percent  NUMERIC(5,2),                                                         -- % of prize taken
+    -- Giá CHÀO của nài (prefill lúc mời). Điều khoản thật nằm ở jockey_assignment.
+    -- Không có CHECK thì prize_percent = 150 sẽ khiến phần chủ ngựa ÂM và bị nuốt im lặng.
+    base_fee       NUMERIC(18,2) CHECK (base_fee IS NULL OR base_fee >= 0),               -- hire fee
+    prize_percent  NUMERIC(5,2) CHECK (prize_percent IS NULL OR prize_percent BETWEEN 0 AND 100),
     last_trophy    VARCHAR(255),                                                         -- most recent trophy
     -- Self-registration (Jockey Registration form) fields — thu lúc đăng ký, referee duyệt
     age                      INT CHECK (age IS NULL OR age >= 16),
@@ -356,30 +362,11 @@ CREATE TABLE tournament_venue (
 );
 
 -- =========================================================
--- TOURNAMENT ROUND  (NEW) -- "vòng đua": vòng loại / bán kết / chung kết...
--- =========================================================
-CREATE TABLE tournament_round (
-    round_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tournament_id UUID NOT NULL REFERENCES tournament(tournament_id),
-    round_no      INT  NOT NULL CHECK (round_no > 0),
-    name          VARCHAR(100),                 -- "Vòng loại 1", "Chung kết"
-    stage         VARCHAR(30)
-                  CHECK (stage IN ('QUALIFIER', 'HEAT', 'SEMI', 'FINAL')),
-    scheduled_at  TIMESTAMPTZ,
-    status        VARCHAR(30) NOT NULL DEFAULT 'PLANNED'
-                  CHECK (status IN ('PLANNED', 'ONGOING', 'COMPLETED', 'CANCELLED')),
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tournament_id, round_no)
-);
-
--- =========================================================
--- RACE  (cuộc đua, có thể thuộc 1 vòng đua)
+-- RACE  (cuộc đua)
 -- =========================================================
 CREATE TABLE race (
     race_id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tournament_id        UUID NOT NULL REFERENCES tournament(tournament_id),
-    round_id             UUID REFERENCES tournament_round(round_id),  -- nullable: giải có thể không chia vòng
     race_code            VARCHAR(50) UNIQUE NOT NULL,
     name                 VARCHAR(255),
     race_type            VARCHAR(50),
@@ -423,7 +410,7 @@ CREATE TABLE race (
 CREATE TABLE race_prize_distribution (
     race_id  UUID NOT NULL REFERENCES race(race_id),
     place    VARCHAR(20) NOT NULL,
-    amount   NUMERIC(18,2) NOT NULL
+    amount   NUMERIC(18,2) NOT NULL CHECK (amount > 0)
 );
 
 -- Split (fraction) times per race — FE-v2 Results (mục 5). @ElementCollection child of race.
@@ -453,6 +440,13 @@ CREATE TABLE tournament_registration (
     rejection_reason    TEXT,
     legal_basis_ref     VARCHAR(255),
     category            VARCHAR(50),                            -- FE-v2 Registration Management (mục 8): category filter
+    -- Phí tham gia: trạng thái ba bậc chưa trả -> đã trả -> đã hoàn.
+    -- entry_fee_amount ĐÓNG BĂNG số tiền đã thu: nếu hoàn theo race.entry_fee hiện tại thì admin sửa
+    -- phí giữa chừng sẽ làm sổ cái lệch vĩnh viễn. Hai mốc thời gian là cơ chế chốt chống trừ/hoàn
+    -- hai lần (UPDATE ... WHERE ... IS NULL), cùng kiểu với mark_settled_if_not_settled.
+    entry_fee_amount      NUMERIC(18,2) CHECK (entry_fee_amount IS NULL OR entry_fee_amount >= 0),
+    entry_fee_paid_at     TIMESTAMPTZ,
+    entry_fee_refunded_at TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (tournament_id, horse_id)   -- 1 ngựa đăng ký 1 giải chỉ 1 lần
@@ -530,6 +524,22 @@ CREATE TABLE jockey_assignment (
                         CHECK (status IN ('INVITED', 'ACCEPTED', 'DECLINED', 'CANCELLED')),
     invited_at          TIMESTAMPTZ,
     responded_at        TIMESTAMPTZ,
+    -- Điều khoản THOẢ THUẬN cho chính lời mời này, chốt lúc mời và bất biến sau khi nài đồng ý.
+    -- Không dùng jockey_profile.prize_percent lúc chia thưởng: đó là GIÁ CHÀO, nài sửa được bất cứ
+    -- lúc nào, kể cả sau khi đua xong — chia theo nó là trả sai so với thứ hai bên đã đồng ý.
+    agreed_prize_percent NUMERIC(5,2)
+                        CHECK (agreed_prize_percent IS NULL OR agreed_prize_percent BETWEEN 0 AND 100),
+    agreed_base_fee     NUMERIC(18,2) CHECK (agreed_base_fee IS NULL OR agreed_base_fee >= 0),
+    -- KÝ QUỸ tiền thuê nài. Chủ ngựa phải đủ số dư mới mời được; số tiền bị KHOÁ ngay lúc mời
+    -- (wallet.balance -> wallet.locked_balance) nên không rút ra được nữa, và chỉ thực sự sang ví
+    -- nài khi cuộc đua chạy xong (lúc chốt kết quả). Nài từ chối / chủ huỷ / nài rút / huỷ đua thì
+    -- mở khoá trả lại. Ba mốc thời gian là CLAIM nguyên tử (UPDATE ... WHERE ... IS NULL), cùng
+    -- kiểu entry_fee_paid_at, để một lần giữ không thể bị trả hai lần hoặc vừa trả vừa hoàn.
+    fee_held_amount     NUMERIC(18,2) CHECK (fee_held_amount IS NULL OR fee_held_amount >= 0),
+    fee_held_at         TIMESTAMPTZ,
+    fee_released_at     TIMESTAMPTZ,
+    fee_paid_at         TIMESTAMPTZ,
+    CHECK (fee_released_at IS NULL OR fee_paid_at IS NULL),   -- không thể vừa hoàn vừa trả
     assigned_by_user_id UUID REFERENCES app_user(user_id),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -585,7 +595,7 @@ CREATE TABLE race_result (
     score               NUMERIC(10,2),
     current_version_no  INT NOT NULL DEFAULT 1 CHECK (current_version_no > 0),
     officiality_status  VARCHAR(50) NOT NULL DEFAULT 'PROVISIONAL'
-                        CHECK (officiality_status IN ('PROVISIONAL', 'UNDER_REVIEW', 'OFFICIAL', 'AMENDED')),
+                        CHECK (officiality_status IN ('PROVISIONAL', 'OFFICIAL', 'AMENDED')),
     approved_by_user_id UUID REFERENCES app_user(user_id),
     published_at        TIMESTAMPTZ,
     referee_submitted_at TIMESTAMPTZ,  -- CN3: set once when the referee publishes the report (one-time lock)
@@ -695,23 +705,6 @@ CREATE TABLE race_violation (
 );
 
 -- =========================================================
--- STANDING  (NEW, tùy chọn) -- bảng xếp hạng tích điểm theo giải
--- Có thể xếp hạng theo ngựa hoặc theo jockey -> dùng subject_type/id.
--- =========================================================
-CREATE TABLE standing (
-    standing_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tournament_id UUID NOT NULL REFERENCES tournament(tournament_id),
-    subject_type  VARCHAR(20) NOT NULL CHECK (subject_type IN ('HORSE', 'JOCKEY')),
-    subject_id    UUID NOT NULL,            -- horse_id hoặc app_user(user_id) tùy subject_type
-    total_points  NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (total_points >= 0),
-    races_count   INT NOT NULL DEFAULT 0 CHECK (races_count >= 0),
-    wins_count    INT NOT NULL DEFAULT 0 CHECK (wins_count >= 0),
-    rank_position INT CHECK (rank_position IS NULL OR rank_position > 0),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tournament_id, subject_type, subject_id)
-);
-
--- =========================================================
 -- WALLET
 -- =========================================================
 CREATE TABLE wallet (
@@ -759,7 +752,8 @@ CREATE TABLE wallet_transaction (
     entry_type          VARCHAR(20) NOT NULL CHECK (entry_type IN ('DEBIT', 'CREDIT')),
     txn_category        VARCHAR(50)
                         CHECK (txn_category IN ('DEPOSIT', 'WITHDRAWAL', 'BET_STAKE',
-                                                'BET_PAYOUT', 'PRIZE', 'REFUND', 'ADJUSTMENT', 'REWARD', 'ENTRY_FEE')),
+                                                'BET_PAYOUT', 'PRIZE', 'REFUND', 'ADJUSTMENT', 'REWARD', 'ENTRY_FEE', 'SPONSOR',
+                                                'JOCKEY_FEE')),
     amount              NUMERIC(18,2) NOT NULL CHECK (amount >= 0),
     balance_after       NUMERIC(18,2) NOT NULL CHECK (balance_after >= 0),
     related_entity_type VARCHAR(50),
@@ -802,7 +796,10 @@ CREATE TABLE betting_pool (
     prediction_type  VARCHAR(50) NOT NULL
                      CHECK (prediction_type IN ('WIN', 'PLACE', 'SHOW', 'EXACTA', 'QUINELLA')),
     total_stake      NUMERIC(18,2) NOT NULL DEFAULT 0 CHECK (total_stake >= 0),
-    rake_percent     NUMERIC(5,2)  NOT NULL DEFAULT 0 CHECK (rake_percent >= 0 AND rake_percent <= 100),
+    -- FRACTION, not a percentage: 0.15 means 15%. SettlementServiceImpl computes
+    -- net = stake * (1 - rake_percent) and throws on anything >= 1, so a value of "15"
+    -- meaning 15% would strand the pool unsettled. The CHECK enforces the code's contract.
+    rake_percent     NUMERIC(5,2)  NOT NULL DEFAULT 0 CHECK (rake_percent >= 0 AND rake_percent < 1),
     status           VARCHAR(30)   NOT NULL DEFAULT 'OPEN'
                      CHECK (status IN ('OPEN', 'CLOSED', 'SETTLED')),
     created_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -835,6 +832,10 @@ CREATE TABLE prize (
     prize_code        VARCHAR(50) UNIQUE NOT NULL,
     beneficiary_type  VARCHAR(50)
                       CHECK (beneficiary_type IN ('OWNER', 'JOCKEY', 'HORSE', 'TEAM')),
+    -- AI được trả. Trước đây prize chỉ ghi *loại* người thụ hưởng, nên số tiền một nài thực nhận
+    -- không truy ngược được và mọi màn hình đành hiển thị tiền của CON NGỰA thay cho phần của nài.
+    beneficiary_user_id UUID REFERENCES app_user(user_id),
+    paid_at           TIMESTAMPTZ,
     rank_position     INT CHECK (rank_position IS NULL OR rank_position > 0),
     prize_amount      NUMERIC(18,2) NOT NULL CHECK (prize_amount >= 0),
     currency_code     VARCHAR(10) NOT NULL DEFAULT 'VND',
@@ -845,6 +846,7 @@ CREATE TABLE prize (
     -- prize phải gắn với giải HOẶC cuộc đua (không treo lơ lửng)
     CHECK (tournament_id IS NOT NULL OR race_id IS NOT NULL)
 );
+CREATE INDEX idx_prize_beneficiary ON prize(beneficiary_user_id, beneficiary_type);
 
 -- =========================================================
 -- ATTACHMENT  (tài liệu: hồ sơ ngựa, ảnh, biên bản...)
@@ -861,23 +863,6 @@ CREATE TABLE attachment (
                         CHECK (sensitivity_level IN ('PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED')),
     uploaded_by_user_id UUID REFERENCES app_user(user_id),
     uploaded_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- =========================================================
--- AUDIT LOG
--- =========================================================
-CREATE TABLE audit_log (
-    audit_log_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    actor_user_id  UUID REFERENCES app_user(user_id),
-    race_id        UUID REFERENCES race(race_id),
-    entity_type    VARCHAR(50),
-    entity_id      UUID,             -- polymorphic: không FK theo thiết kế
-    action_type    VARCHAR(100),
-    old_value_json JSONB,
-    new_value_json JSONB,
-    ip_address     VARCHAR(100),
-    device_info    TEXT,
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
@@ -903,9 +888,7 @@ CREATE TABLE notification (
 -- =========================================================
 CREATE INDEX idx_app_user_role_id             ON app_user(role_id);
 CREATE INDEX idx_horse_owner_user_id          ON horse(owner_user_id);
-CREATE INDEX idx_round_tournament_id          ON tournament_round(tournament_id);
 CREATE INDEX idx_race_tournament_id           ON race(tournament_id);
-CREATE INDEX idx_race_round_id                ON race(round_id);
 CREATE INDEX idx_race_status                  ON race(status);
 CREATE INDEX idx_race_schedule                ON race(scheduled_start_at);
 CREATE INDEX idx_registration_tournament_id   ON tournament_registration(tournament_id);
@@ -922,7 +905,6 @@ CREATE INDEX idx_result_version_result_id     ON race_result_version(result_id);
 CREATE INDEX idx_referee_report_race_id       ON referee_report(race_id);
 CREATE INDEX idx_penalty_race_id              ON penalty(race_id);
 CREATE INDEX idx_penalty_entry_id             ON penalty(entry_id);
-CREATE INDEX idx_standing_tournament_id       ON standing(tournament_id);
 CREATE INDEX idx_prediction_race_id           ON prediction(race_id);
 CREATE INDEX idx_prediction_user_id           ON prediction(spectator_user_id);
 CREATE INDEX idx_payout_prediction_id         ON payout(prediction_id);
@@ -930,8 +912,6 @@ CREATE INDEX idx_prize_tournament_id          ON prize(tournament_id);
 CREATE INDEX idx_prize_race_id                ON prize(race_id);
 CREATE INDEX idx_wallet_transaction_wallet_id ON wallet_transaction(wallet_id);
 CREATE INDEX idx_payment_transaction_status   ON payment_transaction(payment_status);
-CREATE INDEX idx_audit_log_race_id            ON audit_log(race_id);
-CREATE INDEX idx_audit_log_entity             ON audit_log(entity_type, entity_id);
 CREATE INDEX idx_notification_recipient       ON notification(recipient_user_id);
 CREATE INDEX idx_refresh_token_user_id        ON refresh_token(user_id);
 CREATE INDEX idx_password_reset_token_user_id ON password_reset_token(user_id);
@@ -959,7 +939,7 @@ CREATE TABLE reward (
     reward_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id       UUID NOT NULL REFERENCES app_user(user_id),
     reward_type   VARCHAR(50) NOT NULL
-                  CHECK (reward_type IN ('DAILY_LOGIN', 'MILESTONE', 'PROMOTION', 'REFERRAL', 'COMPENSATION')),
+                  CHECK (reward_type IN ('DAILY_LOGIN', 'MILESTONE', 'PROMOTION', 'REFERRAL', 'COMPENSATION', 'BET_WIN')),
     amount        NUMERIC(18,2) NOT NULL CHECK (amount >= 0),
     title         VARCHAR(255) NOT NULL,
     description   TEXT,
@@ -983,7 +963,7 @@ CREATE TABLE membership_application (
     application_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     application_code        VARCHAR(50) UNIQUE NOT NULL,           -- display id e.g. APP-8832
     requested_role          VARCHAR(30) NOT NULL
-                            CHECK (requested_role IN ('OWNER','TRAINER','VET','JOCKEY')),
+                            CHECK (requested_role IN ('OWNER','JOCKEY')),
     status                  VARCHAR(30) NOT NULL DEFAULT 'PENDING'
                             CHECK (status IN ('PENDING','UNDER_REVIEW','INFO_REQUESTED','APPROVED','REJECTED')),
     priority                VARCHAR(30)

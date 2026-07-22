@@ -50,17 +50,6 @@ public class PredictionController {
                 .build();
     }
 
-    @GetMapping("/me/{id}")
-    public ApiResponse<PredictionResponse> getMyPredictionDetail(
-            @AuthenticationPrincipal UUID userId,
-            @PathVariable UUID id) {
-
-        return ApiResponse.<PredictionResponse>builder()
-                .success(true)
-                .message("Fetched prediction detail")
-                .data(predictionService.getPredictionDetail(userId, id))
-                .build();
-    }
 
     @PostMapping("/me/{id}/cancel")
     public ApiResponse<Void> cancelPrediction(

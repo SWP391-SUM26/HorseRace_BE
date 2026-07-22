@@ -3,6 +3,7 @@ package com.SWP391.horserace.races.controller;
 import com.SWP391.horserace.races.dto.AssignParticipantRequest;
 import com.SWP391.horserace.races.dto.MyEntryResponse;
 import com.SWP391.horserace.races.dto.RaceEntryResponse;
+import com.SWP391.horserace.races.dto.RaceFieldOptionsResponse;
 import com.SWP391.horserace.races.dto.RaceFilterRequest;
 import com.SWP391.horserace.races.dto.RaceRequest;
 import com.SWP391.horserace.races.dto.RaceResponse;
@@ -60,6 +61,16 @@ public class RaceController {
                 .success(true)
                 .message("Fetched race stats")
                 .data(raceService.getRaceStats(tournamentId))
+                .build();
+    }
+
+    /** GET /api/v1/races/field-options — distinct race type / track / weather values for the form. */
+    @GetMapping("/field-options")
+    public ApiResponse<RaceFieldOptionsResponse> getFieldOptions() {
+        return ApiResponse.<RaceFieldOptionsResponse>builder()
+                .success(true)
+                .message("Fetched race field options")
+                .data(raceService.getFieldOptions())
                 .build();
     }
 
@@ -189,8 +200,16 @@ public class RaceController {
                 .build();
     }
 
-    /** POST /api/v1/races/{id}/entries — assign an approved registration to the race. */
+    /**
+     * POST /api/v1/races/{id}/entries — assign an approved registration to the race.
+     *
+     * <p>This was the only mutating endpoint in this controller with no authorization at all, while
+     * it debits the registration owner's wallet. The role check here is the coarse half; the real
+     * guard is the ownership check in {@code assignParticipant}, since one owner must not be able to
+     * spend another owner's money.
+     */
     @PostMapping("/{id}/entries")
+    @PreAuthorize("hasAnyRole('HORSE_OWNER','RACE_REFEREE','ADMIN')")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<RaceEntryResponse> assignParticipant(
             @AuthenticationPrincipal UUID userId,
@@ -222,6 +241,25 @@ public class RaceController {
                 .success(true)
                 .message("Fetched your race entry")
                 .data(raceService.getMyEntry(raceId, userId))
+                .build();
+    }
+
+    /**
+     * PATCH /api/v1/races/{raceId}/entries/{entryId}/confirm — owner confirms this horse will run.
+     *
+     * <p>Keyed on the entry because an owner may run several horses in one race. The service scopes
+     * the lookup by owner, so another owner's entryId simply does not resolve.
+     */
+    @PatchMapping("/{raceId}/entries/{entryId}/confirm")
+    @PreAuthorize("hasRole('HORSE_OWNER')")
+    public ApiResponse<MyEntryResponse> confirmParticipation(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID raceId,
+            @PathVariable UUID entryId) {
+        return ApiResponse.<MyEntryResponse>builder()
+                .success(true)
+                .message("Participation confirmed")
+                .data(raceService.confirmParticipation(raceId, entryId, userId))
                 .build();
     }
 }

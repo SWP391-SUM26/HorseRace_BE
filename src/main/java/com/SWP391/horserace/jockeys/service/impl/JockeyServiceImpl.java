@@ -19,6 +19,8 @@ import com.SWP391.horserace.onboarding.entity.ApplicationStatus;
 import com.SWP391.horserace.onboarding.entity.MembershipApplication;
 import com.SWP391.horserace.onboarding.entity.RequestedRole;
 import com.SWP391.horserace.onboarding.repository.MembershipApplicationRepository;
+import com.SWP391.horserace.prizes.entity.BeneficiaryType;
+import com.SWP391.horserace.prizes.repository.PrizeRepository;
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.races.entity.RaceEntry;
 import com.SWP391.horserace.races.entity.RaceResult;
@@ -64,6 +66,7 @@ public class JockeyServiceImpl implements JockeyService {
     private final RaceResultRepository raceResultRepository;
     private final MembershipApplicationRepository membershipApplicationRepository;
     private final UserRepository userRepository;
+    private final PrizeRepository prizeRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -326,7 +329,13 @@ public class JockeyServiceImpl implements JockeyService {
         int places = 0;
         int top3 = 0;
         long positionSum = 0;
-        BigDecimal earnings = BigDecimal.ZERO;
+        // The rider's OWN take, summed from the prize rows actually credited to them. Summing
+        // entry.prizeEarned here reported the horse's whole purse as the jockey's income —
+        // ten times reality for a rider on the default 10% share.
+        BigDecimal earnings = prizeRepository.sumByBeneficiary(callerUserId, BeneficiaryType.JOCKEY);
+        // What the horses this jockey rode won in total — kept alongside so the UI can show both
+        // and the share stops looking like a discrepancy.
+        BigDecimal horseEarnings = BigDecimal.ZERO;
 
         for (JockeyAssignment ja : rides) {
             RaceResult result = resultByEntry.get(ja.getEntry().getEntryId());
@@ -345,7 +354,7 @@ public class JockeyServiceImpl implements JockeyService {
 
             BigDecimal prize = ja.getEntry().getPrizeEarned();
             if (prize != null) {
-                earnings = earnings.add(prize);
+                horseEarnings = horseEarnings.add(prize);
             }
         }
 
@@ -360,9 +369,12 @@ public class JockeyServiceImpl implements JockeyService {
                 .places(places)
                 .top3Rate(top3Rate)
                 .avgPlacement(avgPlacement)
-                .careerWins(profile.getWinCount() != null ? profile.getWinCount() : 0)
+                // Computed from actual results, not jockey_profile.win_count — nothing ever writes
+                // that column, so it reported a career total that contradicted `wins` right above it.
+                .careerWins(wins)
                 .seasonEarnings(earnings) // TODO season filter — no season dimension yet, equals careerEarnings
                 .careerEarnings(earnings)
+                .horseEarnings(horseEarnings)
                 .build();
     }
 

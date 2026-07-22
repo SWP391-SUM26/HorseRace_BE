@@ -2,6 +2,7 @@ package com.SWP391.horserace.prizes.entity;
 
 import com.SWP391.horserace.races.entity.Race;
 import com.SWP391.horserace.tournaments.entity.Tournament;
+import com.SWP391.horserace.users.entity.User;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -45,6 +46,19 @@ public class Prize {
     @Enumerated(EnumType.STRING)
     @Column(name = "beneficiary_type", length = 50)
     private BeneficiaryType beneficiaryType;
+
+    /**
+     * The user actually paid. Without it a prize row records only the beneficiary *type*, so the
+     * amount a jockey took home cannot be traced back and every jockey-facing screen was forced to
+     * show the horse's whole purse instead of the rider's cut.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "beneficiary_user_id")
+    private User beneficiaryUser;
+
+    /** Set when the tournament closes its books and the prize moves AWARDED -> PAID. */
+    @Column(name = "paid_at")
+    private OffsetDateTime paidAt;
 
     @Column(name = "rank_position")
     private Integer rankPosition;

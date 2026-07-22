@@ -21,6 +21,14 @@ public class JockeyRideResponse {
     private String horseName;
     /** Finish position from race_result, null if no result recorded yet. */
     private Integer finishPosition;
-    /** Prize earned for this ride's entry. */
+    /**
+     * What the JOCKEY took home for this ride — the prize row credited to them, zero until the
+     * race is certified. Previously this carried the horse's whole prize, so a rider on a 10%
+     * share saw ten times what actually reached their wallet.
+     */
     private BigDecimal earnings;
+    /** What the HORSE won in this race, shown beside {@link #earnings} to make the split legible. */
+    private BigDecimal horsePrize;
+    /** The share agreed on this invitation, so the rider can check the arithmetic themselves. */
+    private BigDecimal agreedPrizePercent;
 }

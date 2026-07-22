@@ -90,7 +90,6 @@ public enum ErrorCode {
     REFEREE_ASSIGNMENT_NOT_OWNED(4016, "This assignment does not belong to you", HttpStatus.FORBIDDEN),
     REFEREE_ASSIGNMENT_NOT_PENDING(4017, "Only an ASSIGNED assignment can be accepted or declined", HttpStatus.CONFLICT),
     REFEREE_EMAIL_UNVERIFIED(4018, "Referee must verify their email before being assigned to a race", HttpStatus.BAD_REQUEST),
-    REFEREE_REPORT_DEPRECATED(4019, "The referee report workflow is deprecated; use race violations instead", HttpStatus.BAD_REQUEST),
     // ---- referee emailed OTP submission code (CN3 / referee-flow Phase 3) ----
     REFEREE_CODE_THROTTLED(4020, "Please wait before requesting another code", HttpStatus.TOO_MANY_REQUESTS),
     REFEREE_CODE_LOCKED(4021, "Too many invalid attempts; request a new code", HttpStatus.TOO_MANY_REQUESTS),
@@ -118,6 +117,10 @@ public enum ErrorCode {
     REGISTRATION_INVALID_STATUS(7003, "Invalid status transition for this registration", HttpStatus.BAD_REQUEST),
     NOT_REGISTRATION_OWNER(7004, "You are not the owner of this registration", HttpStatus.FORBIDDEN),
     TOURNAMENT_NOT_ACCEPTING_REGISTRATION(7005, "Tournament is not open for registration", HttpStatus.BAD_REQUEST),
+    REGISTRATION_WINDOW_NOT_OPEN(7006, "The tournament's registration window has not opened yet", HttpStatus.BAD_REQUEST),
+    REGISTRATION_WINDOW_CLOSED(7007, "The tournament's registration window has closed", HttpStatus.BAD_REQUEST),
+    ENTRY_INVALID_STATUS(7008, "This entry can no longer be confirmed", HttpStatus.BAD_REQUEST),
+    PERMISSION_NOT_EXISTED(1029, "One or more permission codes do not exist", HttpStatus.BAD_REQUEST),
 
     // ---- race management ----
     RACE_CODE_EXISTED(8001, "Race code already exists", HttpStatus.CONFLICT),
@@ -173,7 +176,6 @@ public enum ErrorCode {
     RESULT_ALREADY_OFFICIAL(9504, "Official results can no longer be deleted", HttpStatus.BAD_REQUEST),
     RACE_NOT_FINISHED(9505, "Results and violations can only be filed after the race has finished", HttpStatus.BAD_REQUEST),
     RESULT_ALREADY_SUBMITTED(9506, "This race report has already been submitted by the referee", HttpStatus.CONFLICT),
-    RESULT_UNDER_REVIEW_BLOCKS_CERTIFY(9507, "Cannot certify while a result is under review", HttpStatus.BAD_REQUEST),
     REPORT_RESULTS_REQUIRED(9508, "A race report must include at least one result", HttpStatus.BAD_REQUEST),
     DUPLICATE_FINISH_POSITION(9509, "Two entries cannot share the same finish position", HttpStatus.BAD_REQUEST),
 
@@ -208,7 +210,37 @@ public enum ErrorCode {
     WITHDRAWAL_AMOUNT_INVALID(9813, "Withdrawal amount must be at least 10,000 VND", HttpStatus.BAD_REQUEST),
     PAYMENT_GATEWAY_NOT_CONFIGURED(9814, "Payment gateway is not configured", HttpStatus.SERVICE_UNAVAILABLE),
     HOUSE_WALLET_UNAVAILABLE(9815, "House wallet is not configured", HttpStatus.SERVICE_UNAVAILABLE),
-    HOUSE_WITHDRAWAL_FORBIDDEN(9816, "The house/escrow wallet cannot be withdrawn from", HttpStatus.FORBIDDEN);
+    HOUSE_WITHDRAWAL_FORBIDDEN(9816, "The house/escrow wallet cannot be withdrawn from", HttpStatus.FORBIDDEN),
+
+    // ── prize / purse budget rules (9900–9998 was entirely unused) ──
+    // Before these existed, tournament.total_purse and race.total_purse were inert display fields:
+    // each was read in exactly one mapToResponse line and by no business rule at all. The only
+    // number that paid anyone was race_prize_distribution.amount, unconstrained in every direction —
+    // so an admin could hand out more than the tournament's whole purse without anything objecting.
+    RACE_PURSE_EXCEEDS_TOURNAMENT(9901,
+            "Tổng giải thưởng các cuộc đua vượt quá tổng giải thưởng của giải đấu", HttpStatus.BAD_REQUEST),
+    PRIZE_DISTRIBUTION_MISMATCH(9902,
+            "Tổng tiền phân bổ theo thứ hạng phải bằng đúng giải thưởng của cuộc đua", HttpStatus.BAD_REQUEST),
+    PRIZE_DISTRIBUTION_DUPLICATE_PLACE(9903,
+            "Mỗi thứ hạng chỉ được cấu hình một lần", HttpStatus.BAD_REQUEST),
+    PRIZE_DISTRIBUTION_INVALID_PLACE(9904,
+            "Thứ hạng không hợp lệ (phải là số nguyên dương)", HttpStatus.BAD_REQUEST),
+    PRIZE_DISTRIBUTION_REQUIRED(9906,
+            "Cuộc đua có giải thưởng thì phải phân bổ theo thứ hạng trước khi mở đăng ký",
+            HttpStatus.BAD_REQUEST),
+    TOURNAMENT_PURSE_BELOW_ALLOCATED(9908,
+            "Tổng giải thưởng mới thấp hơn số đã phân bổ cho các cuộc đua", HttpStatus.BAD_REQUEST),
+    JOCKEY_SHARE_INVALID(9909,
+            "Tỉ lệ chia thưởng cho nài phải nằm trong khoảng 0–100%", HttpStatus.BAD_REQUEST),
+    TOURNAMENT_HAS_NON_TERMINAL_RACES(9915,
+            "Không thể kết thúc giải khi còn cuộc đua chưa công nhận kết quả hoặc chưa huỷ",
+            HttpStatus.CONFLICT),
+    RACE_HAS_PAID_PRIZES(9914,
+            "Không thể xoá cuộc đua đã chi giải thưởng", HttpStatus.CONFLICT),
+
+    // ── date rule (8009 is taken by RACE_ALREADY_FINALIZED; 9409 is free in the date block) ──
+    RACE_OUTSIDE_TOURNAMENT_WINDOW(9409,
+            "Cuộc đua phải diễn ra trong khoảng thời gian của giải đấu", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.Period;
 import java.util.UUID;
 
@@ -27,9 +28,12 @@ import java.util.UUID;
  * Every path that creates or scratches a {@link com.SWP391.horserace.races.entity.RaceEntry} funnels
  * through this gate so the rules hold no matter who triggers entry (owner, admin, or referee approval).
  *
- * <p>Fee model: the owner's wallet is DEBITed into the house wallet on entry (like a bet stake) and
- * reversed on a pre-finalization scratch. Both moves run in the caller's transaction, so a failed
- * entry insert also rolls back the debit.
+ * <p>Fee model: the owner's wallet is DEBITed into the house wallet when they commit to a race, and
+ * reversed on rejection, withdrawal, scratch or race cancellation. Both moves run in the caller's
+ * transaction, so a failed entry insert also rolls back the debit.
+ *
+ * <p>Both money methods are exactly-once: they take an atomic claim on the registration first, so a
+ * retry, a concurrent request, or a second code path cannot charge or refund twice.
  */
 @Service
 @RequiredArgsConstructor
@@ -38,15 +42,12 @@ public class RaceEntryGate {
     private final WalletLedgerService walletLedgerService;
     private final WalletService walletService;
     private final HouseWalletService houseWalletService;
+    private final com.SWP391.horserace.registrations.repository.RegistrationRepository registrationRepository;
+
+    /** Ledger tag for both halves of the entry fee — the registration, not the race. */
+    private static final String REGISTRATION_REF = "TOURNAMENT_REGISTRATION";
 
     private static final int DEFAULT_MIN_AGE_YEARS = 3;
-
-    /** Eligibility gate + entry-fee charge. Call immediately before saving a new RaceEntry. */
-    public void admit(TournamentRegistration registration, Race race) {
-        checkEligibility(registration != null ? registration.getHorse() : null,
-                race != null ? race.getTournament() : null);
-        chargeEntryFee(registration, race);
-    }
 
     /** Eligibility only (health + minimum age) against a tournament's criteria — used at approval time. */
     public void checkEligibility(Horse horse, Tournament tournament) {
@@ -65,31 +66,51 @@ public class RaceEntryGate {
         }
     }
 
-    /** Debit the owner's entry fee into the house wallet (no-op when the race has no fee). */
-    public void chargeEntryFee(TournamentRegistration registration, Race race) {
-        BigDecimal fee = race != null ? race.getEntryFee() : null;
-        User owner = registration != null ? registration.getOwner() : null;
-        if (fee == null || fee.signum() <= 0 || owner == null) {
-            return;
-        }
-        UUID houseUserId = houseWalletService.houseUserId();
-        walletService.getOrCreateWallet(owner.getUserId());
-        // House-first ordering (matches betting) keeps concurrent money moves deadlock-safe.
-        walletLedgerService.applyEntry(houseUserId, EntryType.CREDIT, TxnCategory.ENTRY_FEE, fee, "RACE", race.getRaceId());
-        walletLedgerService.applyEntry(owner.getUserId(), EntryType.DEBIT, TxnCategory.ENTRY_FEE, fee, "RACE", race.getRaceId());
+    /**
+     * Entering a race is free. Retained as a no-op so the three services that enter horses still
+     * funnel through one place if charging ever comes back.
+     *
+     * <p>Entry fees were how the platform pretended to fund prize money, and they never came close:
+     * ~105M collected against ~950M already awarded. The purse is sponsor money now — the organiser
+     * funds it into the house wallet when a tournament is published (see
+     * {@code TxnCategory#SPONSOR}). With that settled there is no reason to charge the owner to
+     * enter, so the only money an owner spends is the jockey's hire fee, escrowed by
+     * {@link com.SWP391.horserace.assignments.service.JockeyFeeGate}.
+     *
+     * <p>{@link #refundEntryFeeOnce} is deliberately NOT a no-op: registrations charged before this
+     * change still hold owners' money, and their four refund paths must keep returning it.
+     */
+    public void chargeEntryFeeOnce(TournamentRegistration registration, Race race) {
+        // Intentionally empty — see the note above.
     }
 
-    /** Reverse the entry fee to the owner on scratch (no-op when the race has no fee). */
-    public void refundEntryFee(TournamentRegistration registration, Race race) {
-        BigDecimal fee = race != null ? race.getEntryFee() : null;
+    /**
+     * Return the entry fee to the owner, at most once per registration.
+     *
+     * <p>Refunds {@code registration.entryFeeAmount} — the amount actually charged — never the
+     * race's current fee. An admin editing the fee between charge and refund would otherwise
+     * unbalance the ENTRY_FEE/REFUND ledger permanently.
+     *
+     * <p>No-op when the registration never paid, which is why no caller needs a special case for it.
+     */
+    public void refundEntryFeeOnce(TournamentRegistration registration) {
         User owner = registration != null ? registration.getOwner() : null;
-        if (fee == null || fee.signum() <= 0 || owner == null) {
+        BigDecimal fee = registration != null ? registration.getEntryFeeAmount() : null;
+        if (owner == null || fee == null || fee.signum() <= 0) {
             return;
         }
+        OffsetDateTime now = OffsetDateTime.now();
+        if (registrationRepository.claimEntryFeeRefund(registration.getRegistrationId(), now) == 0) {
+            return; // never paid, or already refunded
+        }
+        registration.setEntryFeeRefundedAt(now);
+
         UUID houseUserId = houseWalletService.houseUserId();
         walletService.getOrCreateWallet(owner.getUserId());
-        walletLedgerService.applyEntry(houseUserId, EntryType.DEBIT, TxnCategory.REFUND, fee, "RACE", race.getRaceId());
-        walletLedgerService.applyEntry(owner.getUserId(), EntryType.CREDIT, TxnCategory.REFUND, fee, "RACE", race.getRaceId());
+        walletLedgerService.applyEntry(houseUserId, EntryType.DEBIT, TxnCategory.REFUND, fee,
+                REGISTRATION_REF, registration.getRegistrationId());
+        walletLedgerService.applyEntry(owner.getUserId(), EntryType.CREDIT, TxnCategory.REFUND, fee,
+                REGISTRATION_REF, registration.getRegistrationId());
     }
 
     private int resolveMinAge(Tournament tournament) {

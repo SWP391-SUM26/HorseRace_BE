@@ -13,6 +13,7 @@ import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -76,6 +77,29 @@ public class TournamentRegistration {
     /** FE-v2 Registration Management (mục 8): category filter, e.g. "GROUP_1". */
     @Column(name = "category", length = 50)
     private String category;
+
+    /**
+     * The entry fee actually charged, frozen at charge time.
+     *
+     * <p>Deliberately NOT re-read from {@code race.entryFee} when refunding: an admin editing a
+     * race's fee between charge and refund would otherwise unbalance the ENTRY_FEE/REFUND ledger
+     * permanently. Refund what was taken, never what the fee happens to be now.
+     */
+    @Column(name = "entry_fee_amount", precision = 18, scale = 2)
+    private BigDecimal entryFeeAmount;
+
+    /**
+     * Set when the fee is taken, cleared to NULL only on a resubmit. Together with
+     * {@link #entryFeeRefundedAt} this is the exactly-once claim: charge and refund are conditional
+     * UPDATEs on these being NULL / non-NULL, so concurrent callers cannot double-charge or
+     * double-refund. The ledger cannot answer this on its own — its rows are tagged by race, not
+     * by registration.
+     */
+    @Column(name = "entry_fee_paid_at")
+    private OffsetDateTime entryFeePaidAt;
+
+    @Column(name = "entry_fee_refunded_at")
+    private OffsetDateTime entryFeeRefundedAt;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)

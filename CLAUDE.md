@@ -86,12 +86,38 @@ race, prediction, wallet, …) should follow this same layout.
 `app_user`/`role`/`horse`/`race`/`prediction`/`wallet`/…, CHECK + UNIQUE constraints,
 `TIMESTAMPTZ`, `gen_random_uuid()` defaults). Schema-only: **no functions/procedures/triggers**
 — maintain `updated_at` in app code via Hibernate `@UpdateTimestamp`. It begins with a
-`DROP TABLE ... CASCADE` clean-slate block. `db/seed.sql` is a **minimal seed**: roles,
-permissions, the role→permission matrix, and a single admin (`admin@horserace.local` / `admin123`).
+`DROP TABLE ... CASCADE` clean-slate block. **43 tables** (`tournament_round`, `standing` and
+`audit_log` were removed — they had an entity but no repository and zero references; `race.round_id`
+went with `tournament_round`).
 
-**The DB self-initializes via Docker.** `docker-compose.yml` mounts the two SQL files into the
-Postgres `docker-entrypoint-initdb.d/` (`01-schema.sql`, `02-seed.sql`); Postgres runs them **only
-when the `postgres_data` volume is empty** (first boot). So:
+**5 roles**: `ADMIN`, `HORSE_OWNER`, `JOCKEY`, `RACE_REFEREE`, `SPECTATOR`. `TRAINER`/`VET` were
+removed (0 users, 0 permissions); `membership_application.requested_role` is now `('OWNER','JOCKEY')`
+only, matching the `RequestedRole` enum.
+
+Two seed files:
+- `db/seed.sql` — **bootstrap**: 5 roles, 25 permissions, the role→permission matrix, one admin
+  (`admin@horserace.local` / `admin123`), and the house wallet.
+- `db/seed_demo.sql` — **test data for all 43 tables**. 25 users (5 per role), **every one
+  `email_verified = TRUE` + `ACTIVE` + KYC `VERIFIED`**, password `Test@1234`:
+  `admin1..5@`, `horseowner1..5@`, `jockey1..5@`, `referee1..5@`, `spectator1..5@horserace.local`.
+  Plus 10 horses, 10 venues, 10 tournaments, 15 races, 16 entries, 11 results, 16 predictions,
+  10 payouts, ~10 rows in every other table. Explicit UUID literals throughout, so it is
+  deterministic and FK-wiring is readable.
+  (`jockey_profile`/`owner_profile` have 5 rows each — their PK *is* the user FK, so they are
+  capped by the 5-users-per-role choice.)
+
+**Images are real Cloudinary assets** on cloud `qtpgbwsh`, uploaded by
+`scripts/seed/upload-cloudinary.sh` (signed upload via curl+openssl, remote-fetch from
+picsum.photos, fixed `public_id` + `overwrite=true` so it is idempotent). Seeded URLs are
+version-less (`.../image/upload/horses/seed-horse-01.jpg`) so re-running the script never
+breaks a link. Re-run it before seeding a fresh machine. **Exception:** `attachment.object_key`
+stays on local disk (`uploads/`) by design — `AttachmentServiceImpl` pins
+`@Qualifier(localFileStorage)` so RESTRICTED files never reach a public CDN.
+
+**The DB self-initializes via Docker.** `docker-compose.yml` mounts the three SQL files into the
+Postgres `docker-entrypoint-initdb.d/` (`01-schema.sql`, `02-seed.sql`, `03-seed-demo.sql`);
+Postgres runs them **only when the `postgres_data` volume is empty** (first boot). Comment out the
+`seed_demo.sql` mount for a DB with bootstrap data only. So:
 ```
 docker compose up -d                        # DB only (dev) — self-inits on first run
 docker compose --profile full up -d --build # BE + DB (teammate/demo, one command)
@@ -139,7 +165,10 @@ The **users** module is the reference vertical slice, fully aligned to `app_user
   `app.google.client-id` (set `APP_GOOGLE_CLIENT_ID`). `@EnableMethodSecurity` is on, so
   `@PreAuthorize("hasRole('ADMIN')")` works on controllers/services.
 
-The other ~19 domain tables in `schema_v2.sql` (horse, tournament, race, registration, entry,
-assignments, result, prediction, wallet, payout, prize, …) have entities only — **no
-repositories/services/controllers yet** — backlog to build one feature module at a time,
-following the `users/` pattern.
+The domain modules (horse, tournament, race, registration, entry, assignments, inspections, results,
+reports, penalties, violations, prediction, betting pool, wallet, payout, prize, reward, notification,
+attachment, onboarding, staffing, venue) are **built out** — 39 entities backed by 38 repositories
+plus services/controllers. Four tables intentionally have no entity of their own and are reached
+through their owner: `role_permission` (`@JoinTable` on `Role.permissions`) and the three
+`@ElementCollection`s `horse_characteristic`, `race_prize_distribution`, `race_fraction`.
+`tournament_venue` has no repository by design — it is cascaded from `Tournament.venues`.

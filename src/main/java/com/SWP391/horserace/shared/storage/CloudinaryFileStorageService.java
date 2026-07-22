@@ -109,6 +109,13 @@ public class CloudinaryFileStorageService implements FileStorageService {
         if (q >= 0) {
             tail = tail.substring(0, q);
         }
+        // Strip an optional transformation segment (f_auto,q_auto/ , w_400,c_fill/ ...). Seeded
+        // delivery URLs carry one, and without this the resolved key would be
+        // "f_auto,q_auto/horses/seed-horse-01" — a public_id that does not exist, so replacing an
+        // image would silently fail to delete the old asset.
+        if (tail.matches("^[a-z]{1,3}_[^/]*/.*")) {
+            tail = tail.substring(tail.indexOf('/') + 1);
+        }
         // Strip an optional version segment (v1/, v1699999999/) that Cloudinary may embed.
         if (tail.matches("^v\\d+/.*")) {
             tail = tail.substring(tail.indexOf('/') + 1);

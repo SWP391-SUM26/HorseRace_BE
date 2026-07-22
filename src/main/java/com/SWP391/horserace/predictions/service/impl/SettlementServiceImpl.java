@@ -18,6 +18,11 @@ import com.SWP391.horserace.races.entity.RaceResult;
 import com.SWP391.horserace.races.entity.RaceStatus;
 import com.SWP391.horserace.races.repository.RaceRepository;
 import com.SWP391.horserace.races.repository.RaceResultRepository;
+import com.SWP391.horserace.notifications.service.NotificationService;
+import com.SWP391.horserace.rewards.entity.Reward;
+import com.SWP391.horserace.rewards.entity.RewardStatus;
+import com.SWP391.horserace.rewards.entity.RewardType;
+import com.SWP391.horserace.rewards.repository.RewardRepository;
 import com.SWP391.horserace.users.entity.User;
 import com.SWP391.horserace.wallets.entity.EntryType;
 import com.SWP391.horserace.wallets.entity.TxnCategory;
@@ -63,6 +68,8 @@ public class SettlementServiceImpl implements SettlementService {
     private final RaceResultRepository raceResultRepository;
     private final WalletLedgerService walletLedgerService;
     private final HouseWalletService houseWalletService;
+    private final RewardRepository rewardRepository;
+    private final NotificationService notificationService;
     /** Self-reference so {@link #settlePool} is invoked through the proxy (own tx per pool). */
     private final ObjectProvider<SettlementService> selfProvider;
 
@@ -289,6 +296,49 @@ public class SettlementServiceImpl implements SettlementService {
                 .settledAt(now)
                 .build();
         payoutRepository.save(payoutRow);
+
+        grantWinReward(p, payout, now);
+    }
+
+    /**
+     * Req 24 — "nhận thông báo thưởng dự đoán". Until now nothing in the codebase ever created a
+     * Reward, so {@code GET /rewards/notifications} was permanently empty.
+     *
+     * <p>Deliberately best-effort. settlePool runs REQUIRES_NEW, so an exception thrown here would
+     * roll back the whole pool — the money already moved correctly and the bettor would be left with
+     * an unsettled pool over a cosmetic notification. The payout is the source of truth; the reward
+     * is a notification artefact. Idempotency comes from payWinner's Payout guard: this line is only
+     * reached once per prediction.
+     */
+    private void grantWinReward(Prediction p, BigDecimal payout, OffsetDateTime now) {
+        try {
+            User winner = p.getSpectator();
+            if (winner == null) {
+                return;
+            }
+            String race = p.getRace() != null && p.getRace().getName() != null
+                    ? p.getRace().getName() : "cuộc đua";
+            rewardRepository.save(Reward.builder()
+                    .user(winner)
+                    .rewardType(RewardType.BET_WIN)
+                    .amount(payout)
+                    // amount mirrors the payout for display only — the money was already credited by
+                    // the BET_PAYOUT ledger entry above. This Reward is NOT claimable for cash, so it
+                    // is created already CLAIMED to keep it out of the claimable queue.
+                    .status(RewardStatus.CLAIMED)
+                    .claimedAt(now)
+                    .title("Thắng cược " + race)
+                    .description("Vé " + p.getPredictionType() + " của bạn đã thắng. "
+                            + "Tiền thưởng đã được cộng vào ví.")
+                    .build());
+            notificationService.notifyUser(winner.getUserId(),
+                    "Bạn đã thắng cược",
+                    race + ": vé " + p.getPredictionType() + " thắng, đã cộng "
+                            + payout.toPlainString() + "đ vào ví.");
+        } catch (RuntimeException ex) {
+            log.warn("Could not create BET_WIN reward for prediction {} (payout already credited): {}",
+                    p.getPredictionId(), ex.toString());
+        }
     }
 
     private void refund(Prediction p, OffsetDateTime now, UUID house) {

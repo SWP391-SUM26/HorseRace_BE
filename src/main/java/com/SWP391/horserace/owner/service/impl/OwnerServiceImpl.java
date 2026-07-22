@@ -37,6 +37,7 @@ public class OwnerServiceImpl implements OwnerService {
     private final RaceEntryRepository raceEntryRepository;
     private final RaceResultRepository raceResultRepository;
     private final RegistrationRepository registrationRepository;
+    private final com.SWP391.horserace.wallets.repository.WalletTransactionRepository walletTransactionRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -239,4 +240,153 @@ public class OwnerServiceImpl implements OwnerService {
                 .updatedAt(h.getUpdatedAt())
                 .build();
     }
+
+    // ---------- Financial overview ----------
+
+    /**
+     * Ledger categories that are genuinely owner EARNINGS.
+     *
+     * DEPOSIT is deliberately absent: topping your own wallet up moves your money from a bank into
+     * this app, it does not earn you anything. Counting it inflated "Total Earnings" by the exact
+     * amount of every top-up, so a 10,000,000₫ deposit read as 10,000,000₫ of winnings.
+     */
+    private static final java.util.Set<com.SWP391.horserace.wallets.entity.TxnCategory> INCOME_CATEGORIES =
+            java.util.EnumSet.of(com.SWP391.horserace.wallets.entity.TxnCategory.PRIZE,
+                    com.SWP391.horserace.wallets.entity.TxnCategory.BET_PAYOUT,
+                    com.SWP391.horserace.wallets.entity.TxnCategory.REFUND,
+                    com.SWP391.horserace.wallets.entity.TxnCategory.REWARD);
+
+    /**
+     * Ledger categories that are genuinely owner COSTS.
+     *
+     * WITHDRAWAL is absent for the mirror-image reason DEPOSIT is: cashing out is not a business
+     * expense, it is the same money leaving the app. JOCKEY_FEE is the owner's one real outgoing
+     * now that entering a race is free; ENTRY_FEE stays so historical rows still read correctly.
+     */
+    private static final java.util.Set<com.SWP391.horserace.wallets.entity.TxnCategory> EXPENSE_CATEGORIES =
+            java.util.EnumSet.of(com.SWP391.horserace.wallets.entity.TxnCategory.JOCKEY_FEE,
+                    com.SWP391.horserace.wallets.entity.TxnCategory.ENTRY_FEE,
+                    com.SWP391.horserace.wallets.entity.TxnCategory.BET_STAKE);
+
+    @Override
+    @Transactional(readOnly = true)
+    public com.SWP391.horserace.owner.dto.OwnerFinanceResponse getFinances(UUID ownerUserId, int txnLimit) {
+        if (ownerUserId == null) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        int limit = txnLimit <= 0 ? 20 : Math.min(txnLimit, 200);
+
+        var pageAll = walletTransactionRepository
+                .findByWallet_User_UserIdOrderByCreatedAtDesc(ownerUserId,
+                        org.springframework.data.domain.PageRequest.of(0, 500));
+        var ledger = pageAll.getContent();
+
+        // Direction alone is not enough: a top-up is a CREDIT and a cash-out is a DEBIT, but neither
+        // is trading performance. This loop used to sum every CREDIT as income and every DEBIT as
+        // expense, ignoring the category sets below it, so moving money in and out of your own
+        // wallet moved the headline KPIs. Both filters now apply.
+        BigDecimal income = BigDecimal.ZERO;
+        BigDecimal expense = BigDecimal.ZERO;
+        for (var t : ledger) {
+            var category = t.getTxnCategory();
+            if (category == null) {
+                continue;
+            }
+            if (t.getEntryType() == com.SWP391.horserace.wallets.entity.EntryType.CREDIT) {
+                if (INCOME_CATEGORIES.contains(category)) {
+                    income = income.add(nz(t.getAmount()));
+                }
+            } else if (EXPENSE_CATEGORIES.contains(category)) {
+                expense = expense.add(nz(t.getAmount()));
+            }
+        }
+        BigDecimal net = income.subtract(expense);
+        BigDecimal margin = income.signum() == 0 ? BigDecimal.ZERO
+                : net.multiply(ONE_HUNDRED).divide(income, 1, java.math.RoundingMode.HALF_UP);
+
+        // Prize money per horse — race_entry.prize_earned is the column certify() actually writes.
+        List<RaceEntry> entries = raceEntryRepository.findByOwnerUserId(ownerUserId);
+        Map<String, BigDecimal> byHorse = new java.util.LinkedHashMap<>();
+        Map<String, String> horseIdByName = new java.util.HashMap<>();
+        for (RaceEntry e : entries) {
+            TournamentRegistration reg = e.getRegistration();
+            Horse h = reg != null ? reg.getHorse() : null;
+            if (h == null) {
+                continue;
+            }
+            byHorse.merge(h.getName(), nz(e.getPrizeEarned()), BigDecimal::add);
+            horseIdByName.putIfAbsent(h.getName(), h.getHorseId().toString());
+        }
+        BigDecimal top = byHorse.values().stream().max(BigDecimal::compareTo).orElse(BigDecimal.ZERO);
+        List<com.SWP391.horserace.owner.dto.OwnerFinanceResponse.HorseProfitability> horses = byHorse.entrySet().stream()
+                .sorted(Map.Entry.<String, BigDecimal>comparingByValue().reversed())
+                .limit(6)
+                .map(en -> com.SWP391.horserace.owner.dto.OwnerFinanceResponse.HorseProfitability.builder()
+                        .id(horseIdByName.get(en.getKey()))
+                        .name(en.getKey())
+                        .earnings(en.getValue())
+                        // percent is a presentation value the FE renders as a bar width, so it has
+                        // to be computed here rather than left to the page.
+                        .percent(top.signum() == 0 ? BigDecimal.ZERO
+                                : en.getValue().multiply(ONE_HUNDRED).divide(top, 0, java.math.RoundingMode.HALF_UP))
+                        .build())
+                .toList();
+
+        List<com.SWP391.horserace.owner.dto.OwnerFinanceResponse.FinanceTransaction> txns = ledger.stream()
+                .limit(limit)
+                .map(t -> com.SWP391.horserace.owner.dto.OwnerFinanceResponse.FinanceTransaction.builder()
+                        .id(t.getWalletTxnId().toString())
+                        .date(t.getCreatedAt() != null ? t.getCreatedAt().toString() : null)
+                        .description(describe(t))
+                        .horse("—")
+                        .category(INCOME_CATEGORIES.contains(t.getTxnCategory())
+                                && t.getEntryType() == com.SWP391.horserace.wallets.entity.EntryType.CREDIT
+                                ? "INCOME" : "EXPENSE")
+                        .amount(nz(t.getAmount()))
+                        .build())
+                .toList();
+
+        int year = java.time.Year.now().getValue();
+        return com.SWP391.horserace.owner.dto.OwnerFinanceResponse.builder()
+                .kpis(com.SWP391.horserace.owner.dto.OwnerFinanceResponse.Kpis.builder()
+                        .totalEarnings(income)
+                        .season(year + "-" + (year + 1))
+                        // No historical snapshots exist to diff against, so trends are reported as 0
+                        // rather than invented. Wire these up when period aggregates land.
+                        .earningsTrend(BigDecimal.ZERO)
+                        .pendingPayouts(BigDecimal.ZERO)
+                        .pendingCount(0)
+                        .pendingEtaDays(0)
+                        .totalExpenses(expense)
+                        .expensesTrend(BigDecimal.ZERO)
+                        .netProfit(net)
+                        .margin(margin)
+                        .build())
+                .horses(horses)
+                .transactions(txns)
+                .totalTransactions(pageAll.getTotalElements())
+                .build();
+    }
+
+    private static String describe(com.SWP391.horserace.wallets.entity.WalletTransaction t) {
+        return switch (t.getTxnCategory()) {
+            case PRIZE -> "Tiền thưởng giải";
+            case ENTRY_FEE -> "Phí tham dự cuộc đua";
+            case BET_STAKE -> "Đặt cược";
+            case BET_PAYOUT -> "Thắng cược";
+            case REFUND -> "Hoàn tiền";
+            case DEPOSIT -> "Nạp ví";
+            case WITHDRAWAL -> "Rút ví";
+            case REWARD -> "Phần thưởng";
+            case ADJUSTMENT -> "Điều chỉnh";
+            case SPONSOR -> "Tài trợ giải thưởng";
+            case JOCKEY_FEE -> "Tiền thuê nài";
+        };
+    }
+
+    private static BigDecimal nz(BigDecimal v) {
+        return v != null ? v : BigDecimal.ZERO;
+    }
+
+    private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
 }

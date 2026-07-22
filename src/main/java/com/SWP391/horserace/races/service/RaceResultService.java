@@ -31,8 +31,6 @@ public interface RaceResultService {
      */
     SubmitReportResponse adminOverridePublish(UUID adminUserId, UUID raceId, SubmitReportRequest request);
 
-    /** FR-19: flag one result as UNDER_REVIEW (blocks certify). Rejected once the result is OFFICIAL. */
-    void flagUnderReview(UUID currentUserId, UUID raceId, UUID resultId);
 
     /** Read the full result sheet for a race, ordered by finish position. */
     RaceResultsResponse getResults(UUID raceId);

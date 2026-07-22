@@ -13,7 +13,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public interface PredictionRepository extends JpaRepository<Prediction, UUID> {
+public interface PredictionRepository extends JpaRepository<Prediction, UUID>,
+        org.springframework.data.jpa.repository.JpaSpecificationExecutor<Prediction> {
 
     @Query("SELECT p FROM Prediction p LEFT JOIN FETCH p.race r LEFT JOIN FETCH p.predictedEntry pe WHERE p.spectator.userId = :userId ORDER BY p.createdAt DESC")
     List<Prediction> findBySpectatorUserIdOrderByCreatedAtDesc(@Param("userId") UUID userId);

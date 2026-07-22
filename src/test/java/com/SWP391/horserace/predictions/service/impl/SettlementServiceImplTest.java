@@ -60,6 +60,8 @@ class SettlementServiceImplTest {
     @Mock RaceResultRepository raceResultRepository;
     @Mock WalletLedgerService walletLedgerService;
     @Mock HouseWalletService houseWalletService;
+    @Mock com.SWP391.horserace.rewards.repository.RewardRepository rewardRepository;
+    @Mock com.SWP391.horserace.notifications.service.NotificationService notificationService;
     @Mock ObjectProvider<SettlementService> selfProvider;
 
     private SettlementServiceImpl service;
@@ -78,7 +80,8 @@ class SettlementServiceImplTest {
     void setUp() {
         service = new SettlementServiceImpl(
                 raceRepository, bettingPoolRepository, predictionRepository,
-                payoutRepository, raceResultRepository, walletLedgerService, houseWalletService, selfProvider);
+                payoutRepository, raceResultRepository, walletLedgerService, houseWalletService,
+                rewardRepository, notificationService, selfProvider);
         // self-invocation of settlePool routes through the (unproxied) same instance in unit tests
         lenient().when(selfProvider.getObject()).thenReturn(service);
         // Central house resolution — lenient so no-op / claim-lost paths (no money moves) don't fail strict-stub.
@@ -144,6 +147,65 @@ class SettlementServiceImplTest {
     private static org.mockito.ArgumentMatcher<BigDecimal> money(String expected) {
         BigDecimal e = new BigDecimal(expected);
         return actual -> actual != null && actual.compareTo(e) == 0;
+    }
+
+    // ---------- Req 24: BET_WIN reward ----------
+
+    @Test
+    void winningBet_createsBetWinRewardAndNotifiesTheBettor() {
+        BettingPool p = pool(PredictionType.WIN, "0.15");
+        when(raceRepository.findById(raceId)).thenReturn(java.util.Optional.of(race(RaceStatus.OFFICIAL)));
+        when(bettingPoolRepository.findByRace_RaceId(raceId)).thenReturn(List.of(p));
+        stubResultsFinishOrder();
+        stubClaimed();
+
+        Prediction winner = bet(PredictionType.WIN, e1, "100000");
+        Prediction loser = bet(PredictionType.WIN, e2, "300000");
+        when(predictionRepository.findByRace_RaceIdAndPredictionTypeAndStatus(
+                raceId, PredictionType.WIN, PredictionStatus.PENDING))
+                .thenReturn(List.of(winner, loser));
+        when(payoutRepository.existsByPrediction_PredictionId(any())).thenReturn(false);
+        when(walletLedgerService.applyEntry(any(), any(), any(), any(), any(), any())).thenReturn(txnStub());
+
+        service.settleRace(raceId);
+
+        ArgumentCaptor<com.SWP391.horserace.rewards.entity.Reward> cap =
+                ArgumentCaptor.forClass(com.SWP391.horserace.rewards.entity.Reward.class);
+        verify(rewardRepository).save(cap.capture());
+        assertThat(cap.getValue().getRewardType())
+                .isEqualTo(com.SWP391.horserace.rewards.entity.RewardType.BET_WIN);
+        assertThat(cap.getValue().getUser().getUserId()).isEqualTo(winner.getSpectator().getUserId());
+        // Created already CLAIMED: the cash moved via the BET_PAYOUT ledger entry, so this row must
+        // not sit in the claimable queue and be redeemable a second time.
+        assertThat(cap.getValue().getStatus())
+                .isEqualTo(com.SWP391.horserace.rewards.entity.RewardStatus.CLAIMED);
+        verify(notificationService).notifyUser(eq(winner.getSpectator().getUserId()), any(), any());
+    }
+
+    @Test
+    void rewardCreationFailure_doesNotUndoTheAlreadyCreditedPayout() {
+        // settlePool runs REQUIRES_NEW, so an escaping exception here would roll the pool back and
+        // leave it permanently unsettled — over a notification. The payout must survive.
+        BettingPool p = pool(PredictionType.WIN, "0.15");
+        when(raceRepository.findById(raceId)).thenReturn(java.util.Optional.of(race(RaceStatus.OFFICIAL)));
+        when(bettingPoolRepository.findByRace_RaceId(raceId)).thenReturn(List.of(p));
+        stubResultsFinishOrder();
+        stubClaimed();
+
+        Prediction winner = bet(PredictionType.WIN, e1, "100000");
+        when(predictionRepository.findByRace_RaceIdAndPredictionTypeAndStatus(
+                raceId, PredictionType.WIN, PredictionStatus.PENDING))
+                .thenReturn(List.of(winner));
+        when(payoutRepository.existsByPrediction_PredictionId(any())).thenReturn(false);
+        when(walletLedgerService.applyEntry(any(), any(), any(), any(), any(), any())).thenReturn(txnStub());
+        when(rewardRepository.save(any())).thenThrow(new IllegalStateException("reward table down"));
+
+        service.settleRace(raceId);   // must NOT propagate
+
+        verify(payoutRepository).save(any(Payout.class));
+        verify(walletLedgerService).applyEntry(eq(winner.getSpectator().getUserId()),
+                eq(EntryType.CREDIT), eq(TxnCategory.BET_PAYOUT), any(), any(), any());
+        assertThat(winner.getStatus()).isEqualTo(PredictionStatus.WON);
     }
 
     // ---------- WIN worked example ----------

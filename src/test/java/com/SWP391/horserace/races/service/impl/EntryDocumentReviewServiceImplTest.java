@@ -81,8 +81,8 @@ class EntryDocumentReviewServiceImplTest {
     /** Caller is a CONFIRMED referee for the race (passes the RT-CRITICAL-4 assignment gate). */
     private void stubConfirmedReferee() {
         when(userRepository.findByUserIdAndDeletedFalse(callerId)).thenReturn(Optional.of(refereeCaller()));
-        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
-                raceId, callerId, RefereeAssignmentStatus.CONFIRMED)).thenReturn(true);
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                raceId, callerId, RefereeAssignmentStatus.OFFICIATING)).thenReturn(true);
     }
 
     // ── getEntryReviews ──
@@ -122,8 +122,8 @@ class EntryDocumentReviewServiceImplTest {
     void getEntryReviews_refereeNotAssignedToRace_throws() {
         // RT-CRITICAL-4: a referee not CONFIRMED for THIS race may not read its entries.
         when(userRepository.findByUserIdAndDeletedFalse(callerId)).thenReturn(Optional.of(refereeCaller()));
-        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
-                raceId, callerId, RefereeAssignmentStatus.CONFIRMED)).thenReturn(false);
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                raceId, callerId, RefereeAssignmentStatus.OFFICIATING)).thenReturn(false);
 
         assertThatThrownBy(() -> service.getEntryReviews(callerId, raceId))
                 .isInstanceOf(AppException.class)
@@ -168,8 +168,8 @@ class EntryDocumentReviewServiceImplTest {
     void acceptEntry_refereeNotAssignedToRace_throws() {
         // RT-CRITICAL-4 (write path).
         when(userRepository.findByUserIdAndDeletedFalse(callerId)).thenReturn(Optional.of(refereeCaller()));
-        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatus(
-                raceId, callerId, RefereeAssignmentStatus.CONFIRMED)).thenReturn(false);
+        when(refereeAssignmentRepository.existsByRace_RaceIdAndReferee_UserIdAndStatusIn(
+                raceId, callerId, RefereeAssignmentStatus.OFFICIATING)).thenReturn(false);
 
         assertThatThrownBy(() -> service.acceptEntry(callerId, raceId, entryId))
                 .isInstanceOf(AppException.class)
